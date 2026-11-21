@@ -3,13 +3,16 @@
  * PUT /api/employees/[id]/link-account.
  *
  * Tylko właściciel salonu (getUserSalonId). Body { email: string | null }:
- * email => podpięcie konta (404 brak konta, 409 konto już podpięte pod innego
- * pracownika, 409 konto właściciela salonu), null => odłączenie.
+ * email => podpięcie konta (404 brak konta, 409 e-mail niepotwierdzony,
+ * 409 konto już podpięte pod innego pracownika, 409 konto właściciela salonu),
+ * null => odłączenie.
  *
- * Mocki wzorowane na __tests__/api/salon-modules.test.ts (warstwa repo
- * forSalon otwiera db.transaction i woła tx.select/update/execute).
+ * #193: trasa nie sięga do surowego `db` — pracownik przez forSalon(salonId),
+ * konto przez wyjście systemowe findAccountForEmployeeLink. Atrapa `@/lib/db`
+ * rzuca przy każdym użyciu.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { employees } from "@/lib/schema";
 import {
   createMockRequest,
   createRouteParams,
@@ -19,92 +22,68 @@ import {
 } from "./helpers";
 
 // -------------------------------------------------------
-// Mocks
+// Mocks (fabryki leniwe: tylko vi.hoisted i wnętrza strzałek)
 // -------------------------------------------------------
 
-const mockDbSelect = vi.fn();
-const mockDbUpdate = vi.fn();
-
-// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
-// db.transaction() i woła tx.select/update (ADR-001 R1).
-const mockTx = {
-  select: (...args: unknown[]) => mockDbSelect(...args),
-  update: (...args: unknown[]) => mockDbUpdate(...args),
-  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL role / app.current_salon_id
-};
-
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: (...args: unknown[]) => mockDbSelect(...args),
-    update: (...args: unknown[]) => mockDbUpdate(...args),
-    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
-  },
+const m = vi.hoisted(() => ({
+  findOne: vi.fn(),
+  updateOwned: vi.fn(),
+  forSalon: vi.fn(),
+  findAccount: vi.fn(),
+  requireAuth: vi.fn(),
+  validateBody: vi.fn(),
+  revokeGrants: vi.fn(),
+  getUserSalonId: vi.fn(),
 }));
 
-vi.mock("@/lib/schema", () => {
-  const createTable = (name: string) =>
-    new Proxy({}, {
-      get: (_target, prop) => {
-        if (prop === "_table") return name;
-        return `${name}.${String(prop)}`;
+vi.mock("@/lib/db", () => ({
+  db: new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error("surowy db niedozwolony w link-account (#193)");
       },
-    });
-  return {
-    employees: createTable("employees"),
-    salons: createTable("salons"),
-    user: createTable("user"),
-  };
-});
-
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
-  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  ne: vi.fn((...args: unknown[]) => ({ type: "ne", args })),
-  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
-  // sql.raw(...) do SET LOCAL ROLE — mock musi mieć oba.
-  sql: Object.assign(
-    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
-    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+    }
   ),
 }));
 
-const mockRequireAuth = vi.fn();
-vi.mock("@/lib/auth-middleware", () => ({
-  requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
-  isAuthError: vi.fn().mockReturnValue(false),
+vi.mock("@/lib/server/repository", () => ({
+  forSalon: (...args: unknown[]) => m.forSalon(...args),
 }));
 
-const mockValidateBody = vi.fn();
+vi.mock("@/lib/server/system", () => ({
+  findAccountForEmployeeLink: (...args: unknown[]) => m.findAccount(...args),
+}));
+
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: (...args: unknown[]) => m.requireAuth(...args),
+  isAuthError: () => false,
+}));
+
 vi.mock("@/lib/api-validation", () => ({
-  validateBody: (...args: unknown[]) => mockValidateBody(...args),
+  validateBody: (...args: unknown[]) => m.validateBody(...args),
   linkEmployeeAccountSchema: {},
 }));
 
-const mockRevokeSalonGrants = vi.fn();
 vi.mock("@/lib/temporary-access", () => ({
-  revokeSalonGrantsForUser: (...args: unknown[]) => mockRevokeSalonGrants(...args),
+  revokeSalonGrantsForUser: (...args: unknown[]) => m.revokeGrants(...args),
 }));
 
-const mockGetUserSalonId = vi.fn();
 vi.mock("@/lib/get-user-salon", () => ({
-  getUserSalonId: (...args: unknown[]) => mockGetUserSalonId(...args),
+  getUserSalonId: (...args: unknown[]) => m.getUserSalonId(...args),
 }));
-
-// -------------------------------------------------------
-// Chain builder
-// -------------------------------------------------------
-
-function chainMock(result: unknown[] = []) {
-  const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-  const methods = ["select", "from", "where", "limit", "update", "set", "returning"];
-  for (const m of methods) chain[m] = vi.fn().mockReturnValue(chain);
-  (chain as Record<string, unknown>).then = (resolve: (v: unknown[]) => unknown) => resolve(result);
-  return chain;
-}
 
 const OWNER_ID = "owner-A";
 const LINKED_USER_ID = "user-777";
 const URL_BASE = `http://localhost:3000/api/employees/${TEST_IDS.EMPLOYEE_UUID}/link-account`;
+
+const okAccount = (over: Record<string, unknown> = {}) => ({
+  id: LINKED_USER_ID,
+  emailVerified: true,
+  linkedElsewhere: false,
+  ownsSalon: false,
+  ...over,
+});
 
 import { PUT as putLinkAccount } from "@/app/api/employees/[id]/link-account/route";
 
@@ -122,185 +101,203 @@ function callPut(body: unknown) {
 describe("PUT /api/employees/[id]/link-account", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockValidateBody.mockReturnValue(null);
-    mockRequireAuth.mockResolvedValue({ user: { id: OWNER_ID } });
-    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
-    mockDbSelect.mockReturnValue(chainMock([]));
-    mockRevokeSalonGrants.mockResolvedValue(0);
+    m.validateBody.mockReturnValue(null);
+    m.requireAuth.mockResolvedValue({ user: { id: OWNER_ID } });
+    m.getUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+    m.forSalon.mockReturnValue({ findOne: m.findOne, updateOwned: m.updateOwned });
+    m.findOne.mockResolvedValue(makeEmployee());
+    m.updateOwned.mockImplementation(async (_t: unknown, _id: unknown, patch: Record<string, unknown>) =>
+      makeEmployee(patch)
+    );
+    m.findAccount.mockResolvedValue(null);
+    m.revokeGrants.mockResolvedValue(0);
   });
 
   it("happy path: podpina istniejace konto do pracownika salonu", async () => {
-    // Kolejnosc selectow: findOne(employees) -> user po emailu ->
-    // konto podpiete pod INNEGO pracownika -> salon wlascicielski konta.
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
-      .mockReturnValueOnce(chainMock([])) // nie podpiety pod innego pracownika
-      .mockReturnValueOnce(chainMock([])); // nie jest wlascicielem zadnego salonu
-    const updateChain = chainMock([makeEmployee({ userId: LINKED_USER_ID })]);
-    mockDbUpdate.mockReturnValue(updateChain);
+    m.findAccount.mockResolvedValue(okAccount());
 
-    const response = await callPut({ email: "anna@konto.pl" });
+    const response = await callPut({ email: "anna@example.invalid" });
     const { status, body } = await parseResponse(response);
 
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect((body.data as Record<string, unknown>).userId).toBe(LINKED_USER_ID);
-    expect(updateChain.set).toHaveBeenCalledWith({ userId: LINKED_USER_ID });
+    // Salon tylko z sesji; pracownik szukany i zapisywany w salonie wolajacego.
+    expect(m.forSalon).toHaveBeenCalledWith(TEST_IDS.SALON_UUID);
+    expect(m.forSalon.mock.calls.every((c) => c[0] === TEST_IDS.SALON_UUID)).toBe(true);
+    expect(m.findOne).toHaveBeenCalledWith(employees, TEST_IDS.EMPLOYEE_UUID);
+    // exceptEmployeeId = pracownik z URL, juz sprawdzony w salonie wolajacego.
+    expect(m.findAccount).toHaveBeenCalledWith("anna@example.invalid", TEST_IDS.EMPLOYEE_UUID);
+    expect(m.updateOwned).toHaveBeenCalledWith(employees, TEST_IDS.EMPLOYEE_UUID, { userId: LINKED_USER_ID });
   });
 
   it("zwraca 404, gdy brak salonu wlascicielskiego (pracownik/obcy user)", async () => {
-    mockGetUserSalonId.mockResolvedValue(null);
+    m.getUserSalonId.mockResolvedValue(null);
 
-    const response = await callPut({ email: "anna@konto.pl" });
+    const response = await callPut({ email: "anna@example.invalid" });
     const { status, body } = await parseResponse(response);
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockDbSelect).not.toHaveBeenCalled();
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(m.forSalon).not.toHaveBeenCalled();
+    expect(m.findAccount).not.toHaveBeenCalled();
   });
 
   it("zwraca 404 dla pracownika spoza salonu wolajacego (cudzy/nieistniejacy)", async () => {
-    mockDbSelect.mockReturnValueOnce(chainMock([])); // findOne => brak w MOIM salonie
+    m.findOne.mockResolvedValue(null);
 
-    const response = await callPut({ email: "anna@konto.pl" });
+    const response = await callPut({ email: "anna@example.invalid" });
     const { status, body } = await parseResponse(response);
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("Nie znaleziono pracownika");
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(body.error).toBe("Nie znaleziono pracownika");
+    expect(m.findAccount).not.toHaveBeenCalled();
+    expect(m.updateOwned).not.toHaveBeenCalled();
   });
 
   it("zwraca 404, gdy konto o podanym emailu nie istnieje", async () => {
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([])); // brak usera o tym emailu
+    m.findAccount.mockResolvedValue(null);
 
-    const response = await callPut({ email: "nieistnieje@konto.pl" });
+    const response = await callPut({ email: "nieistnieje@example.invalid" });
     const { status, body } = await parseResponse(response);
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
     expect(body.error).toBe("Nie znaleziono konta o tym adresie e-mail");
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(m.updateOwned).not.toHaveBeenCalled();
   });
 
   // Konto znalezione po e-mailu podpinamy tylko przy potwierdzonym adresie:
   // inaczej ktos, kto zalozy konto na e-mail przyszlego pracownika, dostanie
   // po podpieciu dostep pracownika do salonu (straznik jak src/lib/client-match.ts).
   it("zwraca 409 z czytelnym bledem, gdy konto ma niepotwierdzony e-mail (bez podpiecia)", async () => {
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: false }]));
-    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
+    m.findAccount.mockResolvedValue(okAccount({ emailVerified: false }));
 
-    const response = await callPut({ email: "anna@konto.pl" });
+    const response = await callPut({ email: "anna@example.invalid" });
     const { status, body } = await parseResponse(response);
 
     expect(status).toBe(409);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("nie ma potwierdzonego adresu e-mail");
-    expect(mockDbUpdate).not.toHaveBeenCalled();
-  });
-
-  it("zwraca 409, gdy konto jest juz podpiete pod innego pracownika", async () => {
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
-      .mockReturnValueOnce(chainMock([{ id: "emp-w-innym-salonie" }])); // juz podpiety
-
-    const response = await callPut({ email: "anna@konto.pl" });
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(409);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("przypisane do innego pracownika");
-    expect(mockDbUpdate).not.toHaveBeenCalled();
-  });
-
-  it("zwraca 409, gdy konto nalezy do wlasciciela salonu", async () => {
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
-      .mockReturnValueOnce(chainMock([])) // nie podpiety pod innego pracownika
-      .mockReturnValueOnce(chainMock([{ id: "salon-innego-wlasciciela" }])); // wlasciciel
-
-    const response = await callPut({ email: "wlasciciel@konto.pl" });
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(409);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("Wlasciciel salonu");
-    expect(mockDbUpdate).not.toHaveBeenCalled();
-  });
-
-  it("email=null odlacza konto od pracownika bez lookupu usera", async () => {
-    mockDbSelect.mockReturnValueOnce(
-      chainMock([makeEmployee({ userId: LINKED_USER_ID })])
+    expect(body.error).toBe(
+      "To konto nie ma potwierdzonego adresu e-mail. Popros pracownika o potwierdzenie adresu (link z wiadomosci po rejestracji) i sprobuj ponownie."
     );
-    const updateChain = chainMock([makeEmployee({ userId: null })]);
-    mockDbUpdate.mockReturnValue(updateChain);
+    expect(m.updateOwned).not.toHaveBeenCalled();
+  });
+
+  it("niepotwierdzony e-mail ma pierwszenstwo przed pozostalymi odmowami (kolejnosc bez zmian)", async () => {
+    m.findAccount.mockResolvedValue(okAccount({ emailVerified: false, linkedElsewhere: true, ownsSalon: true }));
+
+    const { status, body } = await parseResponse(await callPut({ email: "anna@example.invalid" }));
+
+    expect(status).toBe(409);
+    expect(body.error).toContain("nie ma potwierdzonego adresu e-mail");
+  });
+
+  it("zwraca 409, gdy konto jest juz podpiete pod pracownika innego salonu", async () => {
+    m.findAccount.mockResolvedValue(okAccount({ linkedElsewhere: true }));
+
+    const response = await callPut({ email: "anna@example.invalid" });
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error).toBe("To konto jest juz przypisane do innego pracownika");
+    expect(m.updateOwned).not.toHaveBeenCalled();
+    expect(m.revokeGrants).not.toHaveBeenCalled();
+  });
+
+  it("podpiete gdzie indziej ma pierwszenstwo przed wlascicielem salonu (kolejnosc bez zmian)", async () => {
+    m.findAccount.mockResolvedValue(okAccount({ linkedElsewhere: true, ownsSalon: true }));
+
+    const { status, body } = await parseResponse(await callPut({ email: "anna@example.invalid" }));
+
+    expect(status).toBe(409);
+    expect(body.error).toBe("To konto jest juz przypisane do innego pracownika");
+  });
+
+  it("zwraca 409, gdy konto nalezy do wlasciciela innego salonu", async () => {
+    m.findAccount.mockResolvedValue(okAccount({ ownsSalon: true }));
+
+    const response = await callPut({ email: "wlasciciel@example.invalid" });
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error).toBe("Wlasciciel salonu nie moze byc pracownikiem innego salonu");
+    expect(m.updateOwned).not.toHaveBeenCalled();
+    expect(m.revokeGrants).not.toHaveBeenCalled();
+  });
+
+  it("odpowiedz sukcesu nie zawiera flag konta (tylko zapisany pracownik)", async () => {
+    m.findAccount.mockResolvedValue(okAccount());
+
+    const { body } = await parseResponse(await callPut({ email: "anna@example.invalid" }));
+
+    expect(body).not.toHaveProperty("linkedElsewhere");
+    expect(body).not.toHaveProperty("ownsSalon");
+    expect(body.data as Record<string, unknown>).not.toHaveProperty("ownsSalon");
+  });
+
+  it("email=null odlacza konto od pracownika bez lookupu konta", async () => {
+    m.findOne.mockResolvedValue(makeEmployee({ userId: LINKED_USER_ID }));
 
     const response = await callPut({ email: null });
     const { status, body } = await parseResponse(response);
 
     expect(status).toBe(200);
     expect(body.success).toBe(true);
-    expect(updateChain.set).toHaveBeenCalledWith({ userId: null });
-    // Tylko findOne — zadnych zapytan o user/salons przy odlaczaniu.
-    expect(mockDbSelect).toHaveBeenCalledTimes(1);
+    expect(m.updateOwned).toHaveBeenCalledWith(employees, TEST_IDS.EMPLOYEE_UUID, { userId: null });
+    expect(m.findAccount).not.toHaveBeenCalled();
   });
 
   it("email=null kasuje granty czasowe nadane temu kontu przez wlasciciela salonu", async () => {
-    mockDbSelect.mockReturnValueOnce(
-      chainMock([makeEmployee({ userId: LINKED_USER_ID })])
-    );
-    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: null })]));
+    m.findOne.mockResolvedValue(makeEmployee({ userId: LINKED_USER_ID }));
 
     const response = await callPut({ email: null });
 
     expect(response.status).toBe(200);
     // Tylko granty TEGO salonu (granted_by = wlasciciel z sesji) dla odpinanego konta.
-    expect(mockRevokeSalonGrants).toHaveBeenCalledWith(LINKED_USER_ID, OWNER_ID);
+    expect(m.revokeGrants).toHaveBeenCalledWith(LINKED_USER_ID, OWNER_ID);
   });
 
   it("email=null na pracowniku bez konta nie kasuje niczego", async () => {
-    mockDbSelect.mockReturnValueOnce(chainMock([makeEmployee({ userId: null })]));
-    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: null })]));
+    m.findOne.mockResolvedValue(makeEmployee({ userId: null }));
 
     const response = await callPut({ email: null });
 
     expect(response.status).toBe(200);
-    expect(mockRevokeSalonGrants).not.toHaveBeenCalled();
+    expect(m.revokeGrants).not.toHaveBeenCalled();
   });
 
   it("przepiecie na inne konto kasuje granty poprzedniego konta", async () => {
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee({ userId: "user-old" })]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
-      .mockReturnValueOnce(chainMock([]))
-      .mockReturnValueOnce(chainMock([]));
-    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
+    m.findOne.mockResolvedValue(makeEmployee({ userId: "user-old" }));
+    m.findAccount.mockResolvedValue(okAccount());
 
-    const response = await callPut({ email: "anna@konto.pl" });
+    const response = await callPut({ email: "anna@example.invalid" });
 
     expect(response.status).toBe(200);
-    expect(mockRevokeSalonGrants).toHaveBeenCalledWith("user-old", OWNER_ID);
+    expect(m.revokeGrants).toHaveBeenCalledWith("user-old", OWNER_ID);
   });
 
   it("ponowne podpiecie tego samego konta nie kasuje jego grantow", async () => {
-    mockDbSelect
-      .mockReturnValueOnce(chainMock([makeEmployee({ userId: LINKED_USER_ID })]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
-      .mockReturnValueOnce(chainMock([]))
-      .mockReturnValueOnce(chainMock([]));
-    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
+    m.findOne.mockResolvedValue(makeEmployee({ userId: LINKED_USER_ID }));
+    m.findAccount.mockResolvedValue(okAccount());
 
-    const response = await callPut({ email: "anna@konto.pl" });
+    const response = await callPut({ email: "anna@example.invalid" });
 
     expect(response.status).toBe(200);
-    expect(mockRevokeSalonGrants).not.toHaveBeenCalled();
+    expect(m.revokeGrants).not.toHaveBeenCalled();
+  });
+
+  it("blad wyjscia systemowego => 500 bez zapisu", async () => {
+    m.findAccount.mockRejectedValue(new Error("db down"));
+
+    const response = await callPut({ email: "anna@example.invalid" });
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(m.updateOwned).not.toHaveBeenCalled();
   });
 });

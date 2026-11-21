@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
-import { and, eq, ne } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { linkEmployeeAccountSchema } from "@/lib/api-validation";
-// ADR-001 sekcja 4 (weryfikacja tożsamości cross-tenant): lookup konta po e-mailu
-// (tabela user better-auth, bez salon_id) oraz sprawdzenie, czy konto nie jest już
-// podpięte pod pracownika INNEGO salonu / nie należy do właściciela salonu, z
-// definicji wykraczają poza forSalon(salonId) — świadomie surowe db.
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { employees, salons, user } from "@/lib/schema";
+import { employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+// #193: konto po e-mailu (tabela Better Auth `user`) i reguły obejmujące wszystkie
+// salony — wyjście systemowe zwracające wyłącznie flagi.
+import { findAccountForEmployeeLink } from "@/lib/server/system";
 import { revokeSalonGrantsForUser } from "@/lib/temporary-access";
 import type { z } from "zod";
 
@@ -69,11 +66,7 @@ export const PUT = withApiHandler(
     }
 
     // Konto o podanym e-mailu musi istnieć
-    const [account] = await db
-      .select({ id: user.id, emailVerified: user.emailVerified })
-      .from(user)
-      .where(eq(user.email, body.email))
-      .limit(1);
+    const account = await findAccountForEmployeeLink(body.email, id);
     if (!account) {
       return NextResponse.json(
         { success: false, error: "Nie znaleziono konta o tym adresie e-mail" },
@@ -98,12 +91,7 @@ export const PUT = withApiHandler(
 
     // Konto może być podpięte pod najwyżej JEDNEGO pracownika
     // (w jakimkolwiek salonie); ponowne podpięcie tego samego pracownika jest OK.
-    const [alreadyLinked] = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(and(eq(employees.userId, account.id), ne(employees.id, id)))
-      .limit(1);
-    if (alreadyLinked) {
+    if (account.linkedElsewhere) {
       return NextResponse.json(
         {
           success: false,
@@ -114,12 +102,7 @@ export const PUT = withApiHandler(
     }
 
     // Właściciel salonu nie może być pracownikiem innego salonu
-    const [ownedSalon] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, account.id))
-      .limit(1);
-    if (ownedSalon) {
+    if (account.ownsSalon) {
       return NextResponse.json(
         {
           success: false,
