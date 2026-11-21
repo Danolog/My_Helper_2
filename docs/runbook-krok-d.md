@@ -266,8 +266,11 @@ automatycznych. Kopie na żądanie (`pre-migrate` z `run-migrate.sh`, kopie prze
 importem i przed próbą generalną) nie rotują same. Zasada: **kopia na żądanie
 żyje najwyżej 30 dni.** Usuwa ją sesja główna (`sql backups delete`, wyjście bez
 danych), wpis w #121. Konto deploy nie ma uprawnienia do usuwania kopii i nie
-dostaje go. Wyjątek: kopia sprzed importu danych jest celem wycofania i zostaje
-do końca okresu wycofania przełączenia.
+dostaje go. Wyjątek: kopia sprzed importu danych (`pre-import`) jest celem
+wycofania. Nie usuwamy jej przed końcem okresu wycofania przełączenia (D+14).
+Usuwamy ją w dniu jego zakończenia, a najpóźniej 30 dni po utworzeniu, jak każdą
+inną kopię na żądanie. Jeśli wycofanie ma trwać dłużej niż 30 dni, decyzję
+podejmuje właściciel, a umowa powierzenia dostaje odpowiedni wpis.
 
 **Cotygodniowy przegląd** (przy cotygodniowym odczycie kosztów):
 
