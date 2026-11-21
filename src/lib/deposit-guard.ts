@@ -1,13 +1,16 @@
 /**
- * #63: wizyta usługi z zadatkiem nie może powstać bez płatności zadatku.
+ * #63: wizyta usługi z zadatkiem nie może powstać poza trasą zadatku.
  *
- * Jedyną ścieżką rezerwacji z zadatkiem jest POST /api/deposits/create-session
- * (kwota liczona serwerowo, płatność Stripe). Każda inna trasa, która tworzy
+ * Jedyną ścieżką rezerwacji z zadatkiem jest POST /api/deposits/blik-booking
+ * (kwota liczona serwerowo, zadatek BLIK-iem na telefon salonu).
+ * POST /api/deposits/create-session (płatność Stripe) jest zamrożony modułem
+ * `onlineDeposits` (`src/lib/features.ts`). Każda inna trasa, która tworzy
  * wizytę dla kogoś spoza personelu salonu (/api/appointments,
  * book-package, akceptacja terminu z listy oczekujących), pyta ten moduł, czy
  * może zapisać wizytę bez zadatku.
  *
- * Reguła = `depositDecision` (jedna funkcja dla tej trasy i create-session):
+ * Reguła = `depositDecision` (jedna funkcja dla tej trasy i tras zadatku;
+ * create-session jest zamrożony):
  * - "deposit": usługa ma deposit_required LUB klient ma require_deposit,
  *   a kwota jest skończoną liczbą > 0 → tu 400 DEPOSIT_REQUIRED;
  * - "none": brak wymogu ALBO wymóg z kwotą ≤ 0 — kwota ≤ 0 przy `required`
@@ -29,7 +32,11 @@ import { logger } from "@/lib/logger";
 
 export const DEPOSIT_REQUIRED_CODE = "DEPOSIT_REQUIRED";
 
-/** create-session: serwer nie pobierze zadatku ("none") — portal rezerwuje zwykłą ścieżką. */
+/**
+ * Trasa zadatku (blik-booking; create-session, zamrożony modułem
+ * `onlineDeposits`): serwer nie pobierze zadatku ("none") — portal rezerwuje
+ * zwykłą ścieżką.
+ */
 export const DEPOSIT_NOT_APPLICABLE_CODE = "DEPOSIT_NOT_APPLICABLE";
 
 /**
@@ -50,7 +57,9 @@ export type DepositDecision =
 
 /**
  * JEDNA reguła zadatku (#67, kształt Ethana): używa jej strażnik tras bez
- * płatności i /api/deposits/create-session. Najpierw `Number.isFinite` —
+ * płatności i trasy zadatku: /api/deposits/blik-booking oraz
+ * /api/deposits/create-session (zamrożony modułem `onlineDeposits`).
+ * Najpierw `Number.isFinite` —
  * NaN nie jest ani "> 0", ani "≤ 0", więc bez tego wpadałby po cichu do "none".
  */
 export function depositDecision(

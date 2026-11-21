@@ -78,6 +78,9 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   complexPromotions: /^\/api\/promotions\/check|\/book-package(\/|$)/,
   // Generowanie obrazów — każda trasa pod /api/ai/image poza enhance (galeria).
   imageGen: /^\/api\/ai\/image\/(?!enhance(\/|$))/,
+  // Płatność zadatku online: create-session i confirm. blik-booking (zadatek
+  // BLIK) i cron cleanup-pending-deposits zostają.
+  onlineDeposits: /^\/api\/deposits\/(create-session|confirm)(\/|$)/,
 };
 
 const FROZEN_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
@@ -93,6 +96,7 @@ describe("rejestr modułów zamrożonych", () => {
       "invoices",
       "loyalty",
       "newsletters",
+      "onlineDeposits",
       "pushNotifications",
       "socialPosts",
       "videoGen",
@@ -168,8 +172,15 @@ describe("frozenModuleForApiPath", () => {
     ["/api/ai/image/generate", "imageGen"],
     ["/api/ai/image/banner", "imageGen"],
     ["/api/ai/image/service-illustration", "imageGen"],
+    ["/api/deposits/create-session", "onlineDeposits"],
+    ["/api/deposits/create-session/", "onlineDeposits"],
+    ["/api/deposits/confirm", "onlineDeposits"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
+  });
+
+  it("trasa sąsiednia create-session przechodzi: /api/deposits/create-sessionx", () => {
+    expect(frozenModuleForApiPath("/api/deposits/create-sessionx")).toBeNull();
   });
 
   it.each([
@@ -195,6 +206,7 @@ describe("frozenModuleForApiPath", () => {
     "/api/notifications/low-stock",
     "/api/cron/sms-reminders",
     "/api/cron/cleanup-pending-deposits",
+    "/api/deposits/blik-booking",
     "/api/cron/cleanup-temporary-access",
     "/api/cron/push-reminders-48h",
     "/api/pushx",

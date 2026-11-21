@@ -431,8 +431,9 @@ describe("useBookingData — zadatek BLIK na telefon salonu", () => {
     expect(result.current.bookingSuccess).toBe(false);
   });
 
-  it("prawdziwy przełącznik isBlikDepositFlow() zwraca dziś false", async () => {
+  it("prawdziwy przełącznik isBlikDepositFlow() zwraca true, tak jak isModuleFrozen(\"onlineDeposits\")", async () => {
     const actual = await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
-    expect(actual.isBlikDepositFlow()).toBe(false);
+    expect(actual.isBlikDepositFlow()).toBe(true);
+    expect(actual.isBlikDepositFlow()).toBe(actual.isModuleFrozen("onlineDeposits"));
   });
 });

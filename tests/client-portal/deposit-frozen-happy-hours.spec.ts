@@ -20,22 +20,23 @@ import type { Browser, Page } from '@playwright/test';
 // i dziala niezaleznie od przelacznika sciezki zadatku w portalu; 201 zwraca
 // dane przelewu (numer BLIK z seeda, kwota). Bez wymagan co do STRIPE_SECRET_KEY.
 //
-// Test 2 (prawdziwe body formularza): portal wysyla create-session. Serwer E2E
-// w CI dziala BEZ STRIPE_SECRET_KEY, wiec create-session idzie sciezka
-// "simulated" (bez Stripe); test to sprawdza (simulated === true) i pomija sie,
-// gdy klucz jest ustawiony. Lokalnie: uruchamiaj serwer z pustym STRIPE_SECRET_KEY.
+// Test 2 (prawdziwe body formularza): portal wysyla POST /api/deposits/blik-booking
+// (platnosc zadatku online zamrozona modulem onlineDeposits, przelacznik
+// isBlikDepositFlow() zwraca true). Serwer odpowiada 201 z danymi przelewu,
+// a ekran potwierdzenia pokazuje instrukcje BLIK z kwota z odpowiedzi.
+// Do create-session nie idzie zadne zadanie. Bez wymagan co do STRIPE_SECRET_KEY.
 //
-// Zapis do bazy: udana rezerwacja (oba testy) tworzy wizyte "scheduled" bez wplaty.
-// Sprzatanie: afterEach anuluje ja przez DELETE /api/appointments/[id] (sesja
-// wlasciciela): wizyta -> "cancelled", termin wraca do puli, nic "scheduled"
-// nie zostaje. Wiersze (wizyta i, w tescie 2, jej deposit_payments, kaskada FK)
+// Zapis do bazy: udana rezerwacja (oba testy) tworzy wizyte "scheduled" bez wplaty
+// (bez wiersza deposit_payments). Sprzatanie: afterEach anuluje ja przez
+// DELETE /api/appointments/[id] (sesja wlasciciela): wizyta -> "cancelled",
+// termin wraca do puli, nic "scheduled" nie zostaje. Wiersze wizyt
 // usuwa dopiero globalTeardown po znaczniku [E2E] w imieniu goscia (#175;
 // formularz portalu nie ma pola uwag). Unikalne dane per przebieg nic by nie daly:
 // kazdy przebieg i tak zostawialby wizyte "scheduled", tylko na innym terminie.
 //
 // Telefon goscia: TEST_PHONE (src/lib/test-phone.ts) — sendSms blokuje go
 // przed dostawca, wiec zaden przebieg (takze SMS z danymi przelewu BLIK
-// w tescie 1) nie wysle SMS do realnej osoby.
+// w obu testach) nie wysle SMS do realnej osoby.
 
 const SALON_ID = '00000000-0000-4000-8000-000000000001';
 const SERVICE_ID = '00000000-0000-4000-8000-5e0000000004';
@@ -46,8 +47,6 @@ const HAPPY_HOURS_DEPOSIT = 30; // 30% z 100 PLN (200 PLN - 50%) — kwota, ktor
 const SEED_BLIK_PHONE = '+48000600704';
 // Znacznik #175 w imieniu goscia: po nim globalTeardown rozpoznaje wizyty E2E.
 const GUEST_NAME = e2eGuestName('Gosc');
-
-type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string; appointmentId?: string; amount?: number }; error?: string; details?: unknown };
 
 function tomorrowInWarsaw(): string {
   const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -181,25 +180,25 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
   // Zakres (Ethan, #61): ten test dowodzi, ze formularz wysyla poprawny
   // ksztalt body i serwer go przyjmuje. NIE dowodzi, ze serwer sam liczy
   // kwote — formularz wysyla 60 i serwer odpowiada 60. Odrzucenie kwoty
-  // z rabatem happy hours (30 PLN) dowodzi test wyzej, ale na trasie
-  // blik-booking; dla create-session odrzucenie zmienionej kwoty pokrywaja
-  // testy jednostkowe (__tests__/api/deposits-create-session*.test.ts). Wariant "podmien w body
+  // z rabatem happy hours (30 PLN) dowodzi test wyzej. Wariant "podmien w body
   // 59,99 i oczekuj 60 w odpowiedzi" (w tolerancji serwera |roznica| <= 0,01)
   // odrzucony: ten test przestalby wysylac prawdziwe body formularza, a to
   // jest jego jedyny przedmiot. Kolejnosc testow nie ma znaczenia — kazdy
   // otwiera wlasny termin i sprzata swoja wizyte.
-  test('guest submits the booking form with a deposit and create-session accepts it', { tag: '@full' }, async ({ page }) => {
-    test.skip(!!process.env.STRIPE_SECRET_KEY, 'Serwer E2E ma dzialac bez STRIPE_SECRET_KEY (jak CI) — inaczej create-session wola Stripe');
-    // Potwierdzenie platnosci (dev-only, w buildzie produkcyjnym 404) nie jest przedmiotem testu.
-    await page.route('**/api/deposits/confirm', (route) => route.abort());
+  test('guest submits the booking form with a deposit and blik-booking accepts it', { tag: '@full' }, async ({ page }) => {
+    // Platnosc online zamrozona — formularz nie moze pytac create-session.
+    const createSessionCalls: string[] = [];
+    page.on('request', (r) => {
+      if (/\/api\/deposits\/create-session(\/|$)/.test(new URL(r.url()).pathname)) createSessionCalls.push(r.url());
+    });
 
     let sentBody: Record<string, unknown> | null = null;
-    let created: { status: number; json: CreateSessionJson } | null = null;
-    await page.route('**/api/deposits/create-session', async (route) => {
+    let booked: { status: number; json: BlikBookingJson } | null = null;
+    await page.route('**/api/deposits/blik-booking', async (route) => {
       sentBody = route.request().postDataJSON();
       const response = await route.fetch();
-      created = { status: response.status(), json: await response.json() };
-      if (created.json.data?.appointmentId) createdAppointmentIds.push(created.json.data.appointmentId);
+      booked = { status: response.status(), json: await response.json() };
+      if (booked.json.data?.appointmentId) createdAppointmentIds.push(booked.json.data.appointmentId);
       await route.fulfill({ response });
     });
 
@@ -209,7 +208,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
     await page.getByPlaceholder('+48 123 456 789').fill(TEST_PHONE);
     await page.getByTestId('book-appointment-btn').click();
 
-    await expect.poll(() => created, { timeout: 15000 }).not.toBeNull();
+    await expect.poll(() => booked, { timeout: 15000 }).not.toBeNull();
     // Test ma sens tylko na prawdziwym ksztalcie body (null + telefon ze spacjami).
     expect(sentBody, 'formularz wyslal body w ksztalcie, ktory psul walidacje').toMatchObject({
       depositAmount: FULL_PRICE_DEPOSIT,
@@ -220,9 +219,16 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
       guestName: GUEST_NAME,
       guestPhone: TEST_PHONE,
     });
-    expect(created!.status, `create-session: ${JSON.stringify(created!.json)}`).toBe(201);
-    expect(created!.json.success).toBe(true);
-    expect(created!.json.data?.simulated, 'serwer poszedl sciezka Stripe — uruchom go bez STRIPE_SECRET_KEY').toBe(true);
-    expect(created!.json.data?.amount).toBe(FULL_PRICE_DEPOSIT);
+    // Trasa BLIK nie przyjmuje metody platnosci — hook ja usuwa.
+    expect(sentBody).not.toHaveProperty('paymentMethod');
+    expect(booked!.status, `blik-booking: ${JSON.stringify(booked!.json)}`).toBe(201);
+    expect(booked!.json.success).toBe(true);
+    expect(booked!.json.data?.depositAmount).toBe(FULL_PRICE_DEPOSIT);
+
+    // Ekran potwierdzenia: dane przelewu z odpowiedzi 201, kwota z serwera.
+    await expect(page.getByTestId('blik-instructions')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('blik-amount')).toHaveText(`${booked!.json.data!.depositAmount!.toFixed(2)} PLN`);
+
+    expect(createSessionCalls, 'portal nie wola create-session (modul onlineDeposits zamrozony)').toEqual([]);
   });
 });

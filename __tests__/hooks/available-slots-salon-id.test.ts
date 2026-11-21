@@ -30,8 +30,10 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 // Pakiety sa zamrozone (FROZEN_PROMOTION_TYPES); tu odmrazamy je, zeby dojsc do zapytania
-// o terminy w hooku pakietow.
-vi.mock("@/lib/features", () => ({
+// o terminy w hooku pakietow. Atrapa czesciowa: reszta rejestru (w tym
+// isBlikDepositFlow) jest prawdziwa.
+vi.mock("@/lib/features", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/features")>()),
   isPromotionTypeFrozen: () => false,
 }));
 
