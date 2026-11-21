@@ -769,7 +769,12 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
     let serviceCId = "";
     let depositServiceAId = "";
 
+    // Każdy przypadek ma własny numer gościa, bo trasa ogranicza niewpłacone rezerwacje jednego numeru w salonie.
+    let blikGuestSeq = 0;
+
     async function blikBooking(target: { salonId: string; employeeId: string; serviceId: string }, start: string, end: string) {
+      const nn = String(++blikGuestSeq).padStart(2, "0");
+      const guestPhone = `+48 000 6${nn} 7${nn}`;
       const res = await createBlikBooking(
         new Request("http://localhost/api/deposits/blik-booking", {
           method: "POST",
@@ -780,7 +785,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
             endTime: end,
             depositAmount: 50,
             guestName: "IT Gość",
-            guestPhone: "+48 000 600 700",
+            guestPhone,
           }),
         })
       );
