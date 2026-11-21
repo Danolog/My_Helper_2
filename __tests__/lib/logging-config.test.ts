@@ -5,18 +5,24 @@
  * pliku polityki IAM), więc testy sprawdzają ZACHOWANIE:
  *  - domyślnie dry-run: zero wywołań gcloud, także odczytów;
  *  - każde wywołanie idzie z --project i --quiet; jedyne wywołanie w kodzie to tablica GC;
- *  - (1) filtr wykluczający w ujściu _Default: DOKŁADNE wyrażenie (adres żądania
- *    i Referer), zgodne ze ścieżkami tokenów w zainstalowanym Better Auth;
+ *  - odczyt ujścia _Default przed jakąkolwiek zmianą;
+ *  - (0) zasobnik myhelper-logs wyłącznie w europe-central2, retencja 30 dni;
+ *  - (1) ujście _Default: dokładny cel myhelper-logs i DOKŁADNE wyrażenie filtru
+ *    (tylko adres żądania, z kotwicą, bez Referer, disabled=false), zgodne ze
+ *    ścieżkami tokenów w zainstalowanym Better Auth; adresy, które tylko
+ *    wspominają ścieżkę resetu w parametrach albo we fragmencie, zostają w logach;
  *  - (2) retencja _Default = 30 dni jawnie;
  *  - (3) Data Access DATA_READ dla secretmanager.googleapis.com: zmienia się
  *    wyłącznie auditConfigs, wiązania i etag bez zmian, polityka (z adresami
- *    kont) nie trafia do wyjścia ani do lokalnego logu gcloud;
+ *    kont) nie trafia do wyjścia ani do lokalnego logu gcloud; błędy odczytu,
+ *    zapisu i kształtu polityki zatrzymują przebieg przed (4), a katalog
+ *    tymczasowy jest usuwany;
  *  - (4) zasobnik audytu w europe-central2 z retencją 365 dni + ujście
  *    audytu Secret Manager i Admin Activity;
  *  - brak add-iam-policy-binding, brak usuwania, brak blokady retencji.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -31,9 +37,10 @@ const PROJECT = "my-helper-2-488419";
 const REGION = "europe-central2";
 const EMAIL = "wlasciciel-testowy@example.invalid";
 
-/** Wyrażenie RE2 ścieżek z tokenem w adresie (dosłownie jak w skrypcie). */
-const TOKEN_RE = "/(api/auth/)?(verify-email|reset-password)";
-const EXCLUSION_FILTER = `httpRequest.requestUrl=~"${TOKEN_RE}" OR httpRequest.referer=~"${TOKEN_RE}"`;
+/** Wyrażenie RE2 adresu z tokenem (dosłownie jak w skrypcie). */
+const TOKEN_RE = "^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/|reset-password/?[?])";
+const EXCLUSION_FILTER = `httpRequest.requestUrl=~"${TOKEN_RE}"`;
+const LOGS_DEST = `logging.googleapis.com/projects/${PROJECT}/locations/${REGION}/buckets/myhelper-logs`;
 const AUDIT_DEST = `logging.googleapis.com/projects/${PROJECT}/locations/${REGION}/buckets/myhelper-audit`;
 const AUDIT_FILTER =
   `logName="projects/${PROJECT}/logs/cloudaudit.googleapis.com%2Factivity" OR ` +
@@ -62,6 +69,10 @@ const POLICY_PRESENT = {
 };
 writeFileSync(join(DIR, "policy.json"), JSON.stringify(POLICY));
 writeFileSync(join(DIR, "policy-present.json"), JSON.stringify(POLICY_PRESENT));
+const { etag: _etag, ...POLICY_NO_ETAG } = POLICY;
+writeFileSync(join(DIR, "policy-no-etag.json"), JSON.stringify(POLICY_NO_ETAG));
+// Nieprawidłowy JSON z adresem konta: błąd JSON.parse w node cytuje fragment wejścia.
+writeFileSync(join(DIR, "policy-broken.json"), `{"etag":"x","bindings":[{"members":[user:${EMAIL}]}]`);
 
 writeFileSync(
   join(FAKE, "gcloud"),
@@ -71,11 +82,13 @@ case " $* " in
   *" get-iam-policy "*)
     printf 'nolog-get=%s\\n---\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING:-}" >> "$FAKE_FILES"
     [ -n "$FAKE_READ_ERROR" ] && { echo "ERROR: PERMISSION_DENIED $FAKE_EMAIL" >&2; exit 1; }
+    [ -n "$FAKE_IAM_READ_ERROR" ] && { echo "ERROR: PERMISSION_DENIED user:$FAKE_EMAIL" >&2; exit 1; }
     cat "$FAKE_POLICY"; exit 0 ;;
   *" set-iam-policy "*)
     printf 'nolog-set=%s\\n---\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING:-}" >> "$FAKE_FILES"
     for a in "$@"; do last="$a"; done
     cat "$last" >> "$FAKE_FILES"; printf '\\n---\\n' >> "$FAKE_FILES"
+    [ -n "$FAKE_SET_ERROR" ] && { echo "bindings: - members: [user:$FAKE_EMAIL]"; echo "ERROR: ABORTED: 409 etag mismatch, user:$FAKE_EMAIL" >&2; exit 1; }
     echo "bindings: - members: [user:$FAKE_EMAIL]"; echo "Updated IAM policy for $FAKE_EMAIL" >&2
     exit 0 ;;
   *" sinks describe _Default "*)
@@ -96,28 +109,44 @@ interface Run {
   stderr: string;
   calls: string[];
   files: string;
+  /** Zawartość TMPDIR przebiegu po jego zakończeniu (ma być pusta). */
+  tmpLeft: string[];
 }
 
 let n = 0;
 function lg(
   args: string[],
-  opts: { exists?: boolean; auditPresent?: boolean; readError?: boolean } = {},
+  opts: {
+    exists?: boolean;
+    auditPresent?: boolean;
+    readError?: boolean;
+    iamReadError?: boolean;
+    setError?: boolean;
+    policy?: "no-etag" | "broken";
+    script?: string;
+  } = {},
 ): Run {
   const id = n++;
   const log = join(DIR, `log-${id}`);
   const files = join(DIR, `files-${id}`);
+  const tmp = join(DIR, `tmp-${id}`);
+  mkdirSync(tmp, { recursive: true });
   for (const f of [log, files]) writeFileSync(f, "");
-  const r = spawnSync("bash", [SCRIPT, ...args], {
+  const policy = opts.policy ? `policy-${opts.policy}.json` : opts.auditPresent ? "policy-present.json" : "policy.json";
+  const r = spawnSync("bash", [opts.script ?? SCRIPT, ...args], {
     encoding: "utf8",
     env: {
       NODE_ENV: "test",
       PATH: `${FAKE}:${process.env.PATH}`,
+      TMPDIR: tmp,
       FAKE_LOG: log,
       FAKE_FILES: files,
       FAKE_EMAIL: EMAIL,
-      FAKE_POLICY: join(DIR, opts.auditPresent ? "policy-present.json" : "policy.json"),
+      FAKE_POLICY: join(DIR, policy),
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
       ...(opts.readError ? { FAKE_READ_ERROR: "1" } : {}),
+      ...(opts.iamReadError ? { FAKE_IAM_READ_ERROR: "1" } : {}),
+      ...(opts.setError ? { FAKE_SET_ERROR: "1" } : {}),
     },
   });
   return {
@@ -126,6 +155,7 @@ function lg(
     stderr: r.stderr,
     calls: readFileSync(log, "utf8").split("\n").filter(Boolean),
     files: readFileSync(files, "utf8"),
+    tmpLeft: readdirSync(tmp),
   };
 }
 
@@ -164,18 +194,25 @@ describe("P8: dry-run i parametry", () => {
     }
   });
 
-  it("dry-run wypisuje kroki (1)–(4) w kolejności z §2 P8", () => {
+  it("dry-run wypisuje kroki (0)–(4) w kolejności z §2 P8", () => {
     const plus = lg(P)
       .stdout.split("\n")
       .filter((l) => l.startsWith("+ gcloud "))
       .map((l) => l.replace(`+ gcloud --project=${PROJECT} --quiet `, ""));
-    expect(plus.map((c) => c.split(" ").slice(0, 3).join(" "))).toEqual([
-      "logging sinks update",
-      "logging buckets update",
-      `projects set-iam-policy ${PROJECT}`,
-      "logging buckets create",
-      "logging sinks create",
+    expect(plus.map((c) => c.split(" ").slice(0, 4).join(" "))).toEqual([
+      "logging buckets create myhelper-logs",
+      "logging sinks update _Default",
+      "logging buckets update _Default",
+      `projects set-iam-policy ${PROJECT} <policy-file>`,
+      "logging buckets create myhelper-audit",
+      "logging sinks create myhelper-audit-sink",
     ]);
+  });
+
+  it("dry-run: pierwsze polecenie to odczyt ujścia _Default, przed (0)", () => {
+    const lines = lg(P).stdout.split("\n");
+    const first = lines.findIndex((l) => l.startsWith("? gcloud ") || l.startsWith("+ gcloud "));
+    expect(lines[first]).toBe(`? gcloud --project=${PROJECT} --quiet logging sinks describe _Default --format=value(exclusions[].name)`);
   });
 
   it.each([
@@ -214,15 +251,20 @@ describe("P8: każde wywołanie przez GC (--project, --quiet)", () => {
     expect(CODE).not.toMatch(/add-iam-policy-binding|remove-iam-policy-binding|--locked|\bdelete\b|--remove-exclusions/);
   });
 
-  it("region: lokalizacja wyłącznie europe-central2, poza zasobnikiem _Default (global z natury)", () => {
+  it("region: lokalizacja wyłącznie europe-central2, jedyny wyjątek to buckets update _Default (global z natury)", () => {
     expect(SOURCE.match(/\b(europe|us|asia|me|africa|northamerica|southamerica|australia)-[a-z]+\d\b/g)?.every((x) => x === REGION)).toBe(true);
-    for (const c of lg(APPLY).calls.map(strip)) {
-      if (/^logging buckets (update|describe) _Default /.test(c)) {
-        expect(c).toContain("--location=global");
-        continue;
+    for (const o of [{}, { exists: true, auditPresent: true }]) {
+      for (const c of lg(APPLY, o).calls.map(strip)) {
+        if (/^logging buckets update _Default /.test(c)) {
+          expect(c).toBe("logging buckets update _Default --location=global --retention-days=30");
+          continue;
+        }
+        expect(c, c).not.toContain("global");
+        expect(c, c).not.toMatch(/ --(region|location)=(?!europe-central2( |$))/);
       }
-      expect(c, c).not.toMatch(/ --(region|location)=(?!europe-central2( |$))/);
     }
+    const globalLines = CODE.split("\n").filter((l) => /global/.test(l));
+    expect(globalLines).toEqual(['  run logging buckets update _Default --location=global "--retention-days=${DEFAULT_RETENTION_DAYS}"']);
   });
 
   it("w kodzie brak adresów e-mail", () => {
@@ -230,24 +272,55 @@ describe("P8: każde wywołanie przez GC (--project, --quiet)", () => {
   });
 });
 
-describe("P8 (1): filtr wykluczający tokeny w ujściu _Default", () => {
-  it("dokładne wyrażenie filtru w kodzie", () => {
+describe("P8 (0): zasobnik myhelper-logs (cel ujścia _Default)", () => {
+  it("brak zasobnika → create wyłącznie w europe-central2 z retencją 30 dni", () => {
+    const c = lg(APPLY).calls.map(strip).filter((x) => / myhelper-logs /.test(` ${x} `) && !/ describe /.test(` ${x} `));
+    expect(c).toEqual([`logging buckets create myhelper-logs --location=${REGION} --retention-days=30`]);
+  });
+
+  it("zasobnik istnieje → update z tymi samymi wartościami, bez create", () => {
+    const c = lg(APPLY, { exists: true, auditPresent: true }).calls.map(strip).filter((x) => / myhelper-logs /.test(` ${x} `) && !/ describe /.test(` ${x} `));
+    expect(c).toEqual([`logging buckets update myhelper-logs --location=${REGION} --retention-days=30`]);
+  });
+
+  it("myhelper-logs w kodzie tylko z --location=${REGION} i retencją DEFAULT_RETENTION_DAYS=30", () => {
+    expect(SOURCE).toContain('LOGS_BUCKET="myhelper-logs"');
+    expect(SOURCE).toContain("DEFAULT_RETENTION_DAYS=30\n");
+    expect(SOURCE).toContain('LOGS_DEST="logging.googleapis.com/projects/${PROJECT_ID}/locations/${REGION}/buckets/${LOGS_BUCKET}"');
+    for (const l of CODE.split("\n").filter((x) => /\$LOGS_BUCKET/.test(x))) {
+      expect(l).toContain('"--location=${REGION}"');
+    }
+  });
+});
+
+describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający tokeny", () => {
+  it("dokładne wyrażenie filtru w kodzie: tylko adres żądania, bez Referer", () => {
     expect(SOURCE).toContain(`TOKEN_RE='${TOKEN_RE}'`);
-    expect(SOURCE).toContain('EXCLUSION_FILTER="httpRequest.requestUrl=~\\"${TOKEN_RE}\\" OR httpRequest.referer=~\\"${TOKEN_RE}\\""');
+    expect(SOURCE).toContain('EXCLUSION_FILTER="httpRequest.requestUrl=~\\"${TOKEN_RE}\\""\n');
   });
 
-  it("brak wykluczenia → --add-exclusion z dokładnym filtrem", () => {
+  it("filtr nie sprawdza nagłówka Referer (wartość ustala klient)", () => {
+    expect(EXCLUSION_FILTER).not.toMatch(/referer/i);
+    expect(CODE).not.toMatch(/referer/i);
+  });
+
+  it("brak wykluczenia → cel myhelper-logs i --add-exclusion z dokładnym filtrem, disabled=false", () => {
     const c = lg(APPLY).calls.map(strip).filter((x) => /^logging sinks update _Default /.test(x));
-    expect(c).toEqual([`logging sinks update _Default --add-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER}`]);
+    expect(c).toEqual([
+      `logging sinks update _Default ${LOGS_DEST} --add-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER},disabled=false`,
+    ]);
   });
 
-  it("wykluczenie istnieje → --update-exclusion z tym samym filtrem (bez dryfu)", () => {
+  it("wykluczenie istnieje → ten sam cel i --update-exclusion z tym samym filtrem, disabled=false (bez dryfu)", () => {
     const c = lg(APPLY, { exists: true, auditPresent: true }).calls.map(strip).filter((x) => /^logging sinks update _Default /.test(x));
-    expect(c).toEqual([`logging sinks update _Default --update-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER}`]);
+    expect(c).toEqual([
+      `logging sinks update _Default ${LOGS_DEST} --update-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER},disabled=false`,
+    ]);
   });
 
-  it("filtr nie ma przecinka (rozdziela pola --add-exclusion)", () => {
+  it("filtr nie ma przecinka (rozdziela pola --add-exclusion) ani `\\`", () => {
     expect(EXCLUSION_FILTER).not.toContain(",");
+    expect(TOKEN_RE).not.toContain("\\");
   });
 
   it("błąd odczytu ujścia _Default przerywa przebieg przed zmianą", () => {
@@ -262,10 +335,17 @@ describe("P8 (1): filtr wykluczający tokeny w ujściu _Default", () => {
     "https://app.nordsignal.cc/api/auth/reset-password/AbCdEf123456?callbackURL=%2Freset-password",
     "https://app.nordsignal.cc/reset-password?token=AbCdEf123456",
     "https://myhelper-xyz-lm.a.run.app/api/auth/reset-password/AbCdEf123456?callbackURL=%2Freset-password",
+    "https://h/reset-password?error=invalid_token",
+    "https://app.nordsignal.cc/reset-password/?token=AbCdEf123456",
+    "https://app.nordsignal.cc/reset-password?token=AbCdEf123456&_rsc=1x2y3",
+    "http://app.nordsignal.cc/reset-password?token=AbCdEf123456",
+    "https://app.nordsignal.cc:443/api/auth/verify-email?token=eyJhbGciOi.x.y",
   ])("obejmuje adres z tokenem: %s", (url) => {
     expect(re.test(url)).toBe(true);
   });
 
+  // Wpis ma ZOSTAĆ w logach: ścieżka resetu tylko w parametrach albo we
+  // fragmencie (od klienta), POST resetu z tokenem w treści, inna ścieżka.
   it.each([
     "https://app.nordsignal.cc/api/auth/sign-in/email",
     "https://app.nordsignal.cc/api/auth/request-password-reset",
@@ -274,7 +354,16 @@ describe("P8 (1): filtr wykluczający tokeny w ujściu _Default", () => {
     "https://app.nordsignal.cc/forgot-password",
     "https://app.nordsignal.cc/api/health",
     "https://app.nordsignal.cc/login?callbackURL=%2Freset-password",
-  ])("nie obejmuje: %s", (url) => {
+    "https://h/api/auth/sign-in/email?x=/reset-password",
+    "https://h/api/auth/sign-in/email?x=/api/auth/verify-email?token=1",
+    "https://h/login?callbackURL=/reset-password",
+    "https://h/api/auth/reset-password",
+    "https://h/x/reset-password?token=1",
+    "https://h/api/health#/reset-password?",
+    "https://h/api/health?x=/reset-password",
+    "https://h/api/auth/verify-email",
+    "/reset-password?token=1",
+  ])("nie obejmuje (wpis zostaje): %s", (url) => {
     expect(re.test(url)).toBe(false);
   });
 
@@ -289,15 +378,12 @@ describe("P8 (1): filtr wykluczający tokeny w ujściu _Default", () => {
     expect(ev).toContain("const url = `${ctx.context.baseURL}/verify-email?token=${token}&callbackURL=${callbackURL}`;");
     const form = readFileSync(join(ROOT, "src/components/auth/forgot-password-form.tsx"), "utf8");
     expect(form).toContain('redirectTo: "/reset-password"');
-    for (const p of ["/api/auth/reset-password/T", "/api/auth/verify-email?token=T", "/reset-password?token=T"]) {
-      expect(re.test(p), p).toBe(true);
+    // baseURL Better Auth = <origin>/api/auth; strona resetu = <origin>/reset-password.
+    for (const p of ["/api/auth/reset-password/T?callbackURL=%2F", "/api/auth/verify-email?token=T&callbackURL=%2F", "/reset-password?token=T"]) {
+      for (const origin of ["https://app.nordsignal.cc", "https://myhelper-xyz-lm.a.run.app", "http://app.nordsignal.cc"]) {
+        expect(re.test(origin + p), origin + p).toBe(true);
+      }
     }
-  });
-
-  it("Referer niesie adres strony z tokenem (Referrer-Policy wysyła pełny adres w obrębie originu)", () => {
-    const cfg = readFileSync(join(ROOT, "next.config.ts"), "utf8");
-    expect(cfg).toMatch(/key: "Referrer-Policy",\s*value: "strict-origin-when-cross-origin"/);
-    expect(EXCLUSION_FILTER).toContain(`httpRequest.referer=~"${TOKEN_RE}"`);
   });
 });
 
@@ -345,7 +431,7 @@ describe("P8 (3): Data Access DATA_READ dla Secret Manager", () => {
 describe("P8 (4): zasobnik audytu 365 dni i ujście", () => {
   it("brak zasobnika i ujścia → create w europe-central2, retencja 365, dokładny filtr", () => {
     const calls = lg(APPLY).calls.map(strip);
-    expect(calls.filter((c) => /^logging buckets create /.test(c))).toEqual([
+    expect(calls.filter((c) => /^logging buckets create myhelper-audit /.test(c))).toEqual([
       `logging buckets create myhelper-audit --location=${REGION} --retention-days=365`,
     ]);
     expect(calls.filter((c) => /^logging sinks create /.test(c))).toEqual([
@@ -360,16 +446,74 @@ describe("P8 (4): zasobnik audytu 365 dni i ujście", () => {
     expect(calls).toContain(`logging sinks update myhelper-audit-sink ${AUDIT_DEST} --log-filter=${AUDIT_FILTER}`);
   });
 
-  it("kolejność zmian z --apply: (1) wykluczenie, (2) retencja, (3) audyt, (4) zasobnik, ujście", () => {
-    const m = lg(APPLY)
-      .calls.map(strip)
-      .filter((c) => MUTATING.test(` ${c} `));
-    expect(m.map((c) => c.split(" ").slice(0, 4).join(" "))).toEqual([
-      "logging sinks update _Default",
-      "logging buckets update _Default",
-      `projects set-iam-policy ${PROJECT} ${m[2]?.split(" ")[3]}`,
-      "logging buckets create myhelper-audit",
-      "logging sinks create myhelper-audit-sink",
-    ]);
+  it("kolejność zmian z --apply: (0) myhelper-logs, (1) ujście _Default, (2) retencja, (3) audyt, (4) zasobnik, ujście", () => {
+    for (const [o, verb] of [
+      [{}, "create"],
+      [{ exists: true }, "update"],
+    ] as const) {
+      const calls = lg(APPLY, o).calls.map(strip);
+      expect(calls[0]).toBe("logging sinks describe _Default --format=value(exclusions[].name)");
+      const m = calls.filter((c) => MUTATING.test(` ${c} `));
+      expect(m.map((c) => c.split(" ").slice(0, 4).join(" "))).toEqual([
+        `logging buckets ${verb} myhelper-logs`,
+        "logging sinks update _Default",
+        "logging buckets update _Default",
+        `projects set-iam-policy ${PROJECT} ${m[3]?.split(" ")[3]}`,
+        `logging buckets ${verb} myhelper-audit`,
+        `logging sinks ${verb} myhelper-audit-sink`,
+      ]);
+    }
+  });
+});
+
+describe("P8 (3): ścieżki błędów IAM i sprzątanie katalogu tymczasowego", () => {
+  const STEP4 = /myhelper-audit/;
+
+  it("udany przebieg: katalog tymczasowy z polityką usunięty", () => {
+    const r = lg(APPLY);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.tmpLeft).toEqual([]);
+  });
+
+  it.each([
+    ["błąd odczytu polityki IAM", { iamReadError: true }, "cannot read IAM policy"],
+    ["odmowa zapisu (konflikt etag 409)", { setError: true }, "cannot set audit config"],
+    ["polityka bez etag", { policy: "no-etag" as const }, "unexpected IAM policy shape"],
+    ["nieprawidłowy JSON polityki (node cytuje wejście)", { policy: "broken" as const }, "cannot prepare audit config"],
+  ])("%s → kod 2, brak kroku (4), brak adresów kont w wyjściu, katalog usunięty", (_l, o, msg) => {
+    const r = lg(APPLY, o);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(msg);
+    expect(r.calls.map(strip).filter((c) => STEP4.test(c))).toEqual([]);
+    expect(r.stdout + r.stderr).not.toContain(EMAIL);
+    expect(r.tmpLeft).toEqual([]);
+  });
+
+  it("błąd odczytu i polityka bez etag → brak set-iam-policy", () => {
+    for (const o of [{ iamReadError: true }, { policy: "no-etag" as const }, { policy: "broken" as const }]) {
+      expect(lg(APPLY, o).calls.map(strip).filter((c) => /set-iam-policy/.test(c))).toEqual([]);
+    }
+  });
+
+  it("pułapka EXIT na zmiennej globalnej (nie `local`), bez ręcznego rm katalogu", () => {
+    expect(SOURCE).toContain('P8_TMP=""\n');
+    expect(SOURCE).toContain(`trap 'rm -rf "\${P8_TMP:-}"' EXIT`);
+    expect(CODE).not.toMatch(/local [^\n]*\btmp\b/);
+    expect(CODE).toContain('result="$(node - "$before" "$after" "$AUDIT_SERVICE" 2>/dev/null <<\'JS\'');
+  });
+
+  // Zmiana kodu node, która ruszyłaby politykę poza auditConfigs, ma zatrzymać
+  // przebieg w samym skrypcie (nie tylko w tym teście).
+  it("zmiana polityki poza auditConfigs → stop przed set-iam-policy (mutacja skryptu)", () => {
+    const anchor = "p.auditConfigs = cfgs;";
+    expect(SOURCE.split(anchor)).toHaveLength(2);
+    const mutated = join(DIR, "logging-mutated.sh");
+    writeFileSync(mutated, SOURCE.replace(anchor, `${anchor} p.bindings = [];`));
+    const r = lg(APPLY, { script: mutated });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("IAM policy would change outside auditConfigs");
+    expect(r.calls.map(strip).filter((c) => /set-iam-policy|myhelper-audit/.test(c))).toEqual([]);
+    expect(r.stdout + r.stderr).not.toContain(EMAIL);
+    expect(r.tmpLeft).toEqual([]);
   });
 });

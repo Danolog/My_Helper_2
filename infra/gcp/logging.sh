@@ -10,23 +10,33 @@
 # Wypisuje tylko polecenia: `? …` dla odczytu stanu, `+ …` dla zmiany.
 # Dopiero `--apply` wykonuje odczyty stanu i zmiany.
 #
-# Zakres (§2 P8, w tej kolejności):
-#   (1) wykluczenie w ujściu `_Default`: wpisy, których adres żądania ALBO
-#       Referer zawiera ścieżkę z tokenem jednorazowym Better Auth (Cloud Run
-#       i LB — filtr nie zawęża typu zasobu). Ścieżki (better-auth 1.7.25):
+# Zakres (§2 P8, w tej kolejności). Najpierw odczyt ujścia `_Default`
+# (błąd odczytu = stop przed jakąkolwiek zmianą), potem:
+#   (0) zasobnik logów `myhelper-logs` w europe-central2, retencja 30 dni
+#       (musi istnieć przed zmianą celu ujścia: cel bez zasobnika = błędy zapisu);
+#   (1) ujście `_Default`: cel = `myhelper-logs` (logi żądań z IP i user-agent
+#       zostają w europe-central2, nie w lokalizacji global) i wykluczenie
+#       wpisów, których ADRES ŻĄDANIA (od początku ścieżki, z kotwicą) jest
+#       adresem z tokenem jednorazowym Better Auth (Cloud Run i LB — filtr nie
+#       zawęża typu zasobu). Ścieżki (better-auth 1.7.25):
 #         /api/auth/verify-email?token=…        (link weryfikacji e-mail)
 #         /api/auth/reset-password/<token>?…    (link resetu hasła)
 #         /reset-password?token=…               (strona aplikacji po
 #                                                przekierowaniu z linku resetu)
-#       Referer: strona /reset-password?token=… ładuje zasoby i wysyła POST
-#       z pełnym adresem w Referer (Referrer-Policy strict-origin-when-cross-origin
-#       w obrębie originu), więc sam adres żądania nie wystarcza.
-#   (2) retencja zasobnika `_Default` = 30 dni, jawnie;
+#       Bez nagłówka Referer i bez dopasowania w parametrach zapytania: obie
+#       wartości ustala klient, więc pozwalałyby ukryć dowolne żądanie.
+#       Token w Referer usuwa aplikacja (Referrer-Policy: no-referrer na
+#       /reset-password i token usuwany z adresu strony) — osobna zmiana,
+#       warunek przed krokiem 2 okna (docs/runbook-krok-d.md, §10b).
+#       Wykluczenie zawsze z disabled=false: ponowne --apply przywraca
+#       wykluczenie wyłączone w konsoli.
+#   (2) retencja zasobnika `_Default` = 30 dni, jawnie (wpisy sprzed zmiany celu);
 #   (3) Data Access DATA_READ dla secretmanager.googleapis.com (auditConfigs
 #       w polityce IAM projektu; wiązania i etag bez zmian);
 #   (4) zasobnik logów `myhelper-audit` w europe-central2 z retencją 365 dni
 #       i ujście `myhelper-audit-sink`: Admin Activity + Data Access Secret
-#       Manager. Zasobnik w tym samym projekcie: ujście nie potrzebuje roli.
+#       Manager.
+# Oba ujścia piszą do zasobników w tym samym projekcie: writerIdentity bez roli.
 # Brak `add-iam-policy-binding`, brak usuwania, brak blokady retencji.
 #
 # Użycie:
@@ -39,21 +49,27 @@ umask 077
 
 APPLY=0
 PROJECT_ID="" REGION=""
+# Katalog tymczasowy z polityką IAM (adresy kont). Globalny, bo pułapka EXIT
+# działa poza funkcją i nie widzi zmiennych `local`.
+P8_TMP=""
 
-# Jedyny dopuszczony region (lokalizacja zasobnika audytu).
+# Jedyny dopuszczony region (lokalizacja zasobników logów i audytu).
 ALLOWED_REGION="europe-central2"
 
 # Stałe nazwy i wartości.
 EXCLUSION="myhelper-auth-token-urls"
+LOGS_BUCKET="myhelper-logs"
 AUDIT_BUCKET="myhelper-audit"
 AUDIT_SINK="myhelper-audit-sink"
 DEFAULT_RETENTION_DAYS=30
 AUDIT_RETENTION_DAYS=365
 AUDIT_SERVICE="secretmanager.googleapis.com"
 
-# Wyrażenie RE2 ścieżek z tokenem. Bez przecinka (rozdziela pola --add-exclusion).
-TOKEN_RE='/(api/auth/)?(verify-email|reset-password)'
-EXCLUSION_FILTER="httpRequest.requestUrl=~\"${TOKEN_RE}\" OR httpRequest.referer=~\"${TOKEN_RE}\""
+# Wyrażenie RE2 adresu z tokenem: kotwica na schemacie i hoście, ścieżka zaraz
+# po hoście. `[?]` zamiast `\?` (bez ucieczek w języku zapytań Logging).
+# Bez przecinka (rozdziela pola --add-exclusion) i bez `\`.
+TOKEN_RE='^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/|reset-password/?[?])'
+EXCLUSION_FILTER="httpRequest.requestUrl=~\"${TOKEN_RE}\""
 
 die() { echo "error: $*" >&2; exit 2; }
 
@@ -76,6 +92,7 @@ done
 REGION="${REGION:-$ALLOWED_REGION}"
 [[ "$REGION" == "$ALLOWED_REGION" ]] || die "--region must be $ALLOWED_REGION"
 
+LOGS_DEST="logging.googleapis.com/projects/${PROJECT_ID}/locations/${REGION}/buckets/${LOGS_BUCKET}"
 AUDIT_DEST="logging.googleapis.com/projects/${PROJECT_ID}/locations/${REGION}/buckets/${AUDIT_BUCKET}"
 AUDIT_FILTER="logName=\"projects/${PROJECT_ID}/logs/cloudaudit.googleapis.com%2Factivity\" OR (logName=\"projects/${PROJECT_ID}/logs/cloudaudit.googleapis.com%2Fdata_access\" AND protoPayload.serviceName=\"${AUDIT_SERVICE}\")"
 
@@ -116,13 +133,30 @@ lookup() {
   if [[ -n "$LOOKUP" ]]; then echo "  state: exists"; else echo "  state: missing"; fi
 }
 
-# (1) Wykluczenie w ujściu _Default: istniejące dostaje ten sam filtr (bez dryfu).
-exclusion() {
+# Odczyt ujścia _Default przed jakąkolwiek zmianą (błąd odczytu = stop).
+DEFAULT_EXCLUSIONS=""
+read_default_sink() {
   lookup logging sinks describe _Default "--format=value(exclusions[].name)"
-  if [[ ";${LOOKUP};" == *";${EXCLUSION};"* ]]; then
-    run logging sinks update _Default "--update-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER}"
+  DEFAULT_EXCLUSIONS="$LOOKUP"
+}
+
+# (0) Zasobnik myhelper-logs (cel _Default). Istniejący dostaje te same wartości.
+logs_bucket() {
+  if exists logging buckets describe "$LOGS_BUCKET" "--location=${REGION}"; then
+    run logging buckets update "$LOGS_BUCKET" "--location=${REGION}" "--retention-days=${DEFAULT_RETENTION_DAYS}"
   else
-    run logging sinks update _Default "--add-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER}"
+    run logging buckets create "$LOGS_BUCKET" "--location=${REGION}" "--retention-days=${DEFAULT_RETENTION_DAYS}"
+  fi
+}
+
+# (1) Ujście _Default: cel myhelper-logs i wykluczenie w jednym wywołaniu.
+# Cel przekazywany zawsze; istniejące wykluczenie dostaje ten sam filtr i
+# disabled=false (bez dryfu, także po wyłączeniu w konsoli).
+exclusion() {
+  if [[ ";${DEFAULT_EXCLUSIONS};" == *";${EXCLUSION};"* ]]; then
+    run logging sinks update _Default "$LOGS_DEST" "--update-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER},disabled=false"
+  else
+    run logging sinks update _Default "$LOGS_DEST" "--add-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER},disabled=false"
   fi
 }
 
@@ -134,7 +168,11 @@ default_retention() {
 # (3) DATA_READ dla Secret Manager. Polityka IAM zawiera adresy kont: tylko do
 # pliku w katalogu tymczasowym (umask 077), nigdy na wyjście, bez lokalnego logu
 # gcloud. Zmienia się wyłącznie auditConfigs; etag z odczytu chroni przed
-# nadpisaniem równoległej zmiany (konflikt = błąd, nie nadpisanie).
+# nadpisaniem równoległej zmiany (konflikt = błąd, nie nadpisanie). Katalog
+# tymczasowy usuwa pułapka EXIT (także po błędzie i po Ctrl-C). stderr node
+# idzie do /dev/null: błąd JSON.parse cytuje fragment wejścia (adresy kont).
+# Przed zapisem node sprawdza, że polityka bez auditConfigs jest identyczna
+# z odczytaną (inna różnica = stop bez set-iam-policy).
 data_access() {
   echo "? gcloud --project=$PROJECT_ID --quiet projects get-iam-policy $PROJECT_ID --format=json"
   if [[ "$APPLY" != 1 ]]; then
@@ -144,17 +182,22 @@ data_access() {
     return 0
   fi
   command -v node >/dev/null 2>&1 || die "node not found — audit config not changed"
-  local tmp before after result
-  tmp="$(mktemp -d)"
-  before="$tmp/before.json"
-  after="$tmp/after.json"
+  P8_TMP="$(mktemp -d)"
+  trap 'rm -rf "${P8_TMP:-}"' EXIT
+  trap 'exit 2' INT TERM HUP
+  local before after result
+  before="$P8_TMP/before.json"
+  after="$P8_TMP/after.json"
   CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" projects get-iam-policy "$PROJECT_ID" --format=json >"$before" 2>/dev/null ||
-    { rm -rf "$tmp"; die "cannot read IAM policy — stopped"; }
-  result="$(node - "$before" "$after" "$AUDIT_SERVICE" <<'JS'
+    die "cannot read IAM policy — stopped"
+  result="$(node - "$before" "$after" "$AUDIT_SERVICE" 2>/dev/null <<'JS'
 const fs = require("fs");
 const [, , src, dst, service] = process.argv;
-const p = JSON.parse(fs.readFileSync(src, "utf8"));
-if (!p || typeof p !== "object" || !p.etag) { process.stdout.write("invalid"); process.exit(0); }
+const raw = fs.readFileSync(src, "utf8");
+const p = JSON.parse(raw);
+if (!p || typeof p !== "object" || Array.isArray(p) || !p.etag) { process.stdout.write("invalid"); process.exit(0); }
+const rest = ({ auditConfigs: _ignored, ...o }) => JSON.stringify(o);
+const orig = rest(JSON.parse(raw));
 const cfgs = Array.isArray(p.auditConfigs) ? p.auditConfigs : [];
 let c = cfgs.find((x) => x && x.service === service);
 const has = (x) => Array.isArray(x.auditLogConfigs) && x.auditLogConfigs.some((l) => l && l.logType === "DATA_READ");
@@ -163,10 +206,12 @@ if (!c) { c = { service, auditLogConfigs: [] }; cfgs.push(c); }
 if (!Array.isArray(c.auditLogConfigs)) c.auditLogConfigs = [];
 c.auditLogConfigs.push({ logType: "DATA_READ" });
 p.auditConfigs = cfgs;
-fs.writeFileSync(dst, JSON.stringify(p, null, 2), { mode: 0o600 });
+const out = JSON.stringify(p, null, 2);
+if (rest(JSON.parse(out)) !== orig) { process.stdout.write("drift"); process.exit(0); }
+fs.writeFileSync(dst, out, { mode: 0o600 });
 process.stdout.write("changed");
 JS
-)" || { rm -rf "$tmp"; die "cannot prepare audit config — stopped"; }
+)" || die "cannot prepare audit config — stopped"
   case "$result" in
     present)
       echo "  state: exists"
@@ -177,14 +222,17 @@ JS
       echo "+ gcloud --project=$PROJECT_ID --quiet projects set-iam-policy $PROJECT_ID <policy-file>"
       echo "  audit: ${AUDIT_SERVICE} DATA_READ (bindings and etag unchanged)"
       CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" projects set-iam-policy "$PROJECT_ID" "$after" >/dev/null 2>&1 ||
-        { rm -rf "$tmp"; die "cannot set audit config (etag conflict or permission) — stopped"; }
+        die "cannot set audit config (etag conflict or permission) — stopped"
+      ;;
+    drift)
+      die "IAM policy would change outside auditConfigs — stopped"
       ;;
     *)
-      rm -rf "$tmp"
       die "unexpected IAM policy shape — stopped"
       ;;
   esac
-  rm -rf "$tmp"
+  rm -rf "$P8_TMP"
+  P8_TMP=""
 }
 
 # (4) Zasobnik audytu 365 dni + ujście. Istniejące dostają te same wartości.
@@ -206,6 +254,8 @@ if [[ "$APPLY" == 1 ]]; then
 else
   echo "mode: DRY-RUN — nothing is executed (project=$PROJECT_ID region=$REGION)"
 fi
+read_default_sink
+logs_bucket
 exclusion
 default_retention
 data_access
