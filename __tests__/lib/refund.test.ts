@@ -136,6 +136,10 @@ vi.mock("@/lib/schema", () => ({
   depositPayments: {
     appointmentId: "depositPayments.appointmentId",
     id: "depositPayments.id",
+    salonId: "depositPayments.salonId",
+    amount: "depositPayments.amount",
+    currency: "depositPayments.currency",
+    paymentMethod: "depositPayments.paymentMethod",
     status: "depositPayments.status",
     paidAt: "depositPayments.paidAt",
   },
@@ -147,7 +151,14 @@ vi.mock("@/lib/schema", () => ({
 }));
 
 import { logger } from "@/lib/logger";
-import { processAutomaticRefund, refundAppointmentDeposits } from "@/lib/refund";
+import {
+  processAutomaticRefund,
+  refundAppointmentDeposits,
+  selectSucceededDeposits,
+  selectSucceededDepositsInTx,
+  succeededDepositsWhere,
+} from "@/lib/refund";
+import type { DbTx } from "@/lib/server/repository";
 import { loggedText } from "../helpers/logged-text";
 
 const eqArgs = (col: string, val: unknown) => ({ type: "eq", args: [col, val] });
@@ -550,5 +561,86 @@ describe("refundAppointmentDeposits — wszystkie 'succeeded' wizyty", () => {
       await expect(refundAppointmentDeposits("appt-1", "powod")).rejects.toBe(dbError);
       expect(mockRecordEvent).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("odczyt płatności 'succeeded' — wspólny predykat (#193)", () => {
+  beforeEach(resetAll);
+
+  const SUCCEEDED_WHERE = {
+    type: "and",
+    args: [eqArgs("depositPayments.appointmentId", "appt-1"), eqArgs("depositPayments.status", "succeeded")],
+  };
+  const ORDER = [{ type: "asc", col: "depositPayments.paidAt" }, { type: "asc", col: "depositPayments.id" }];
+
+  /** tx.select(cols).from(table).where(w).orderBy(...o) — zapis wywołań, wynik z argumentu. */
+  function fakeTx(rows: unknown[]) {
+    const calls = { select: [] as unknown[], from: [] as unknown[], where: [] as unknown[], orderBy: [] as unknown[][] };
+    const tx = {
+      select: (cols: unknown) => {
+        calls.select.push(cols);
+        return {
+          from: (table: unknown) => {
+            calls.from.push(table);
+            return {
+              where: (w: unknown) => {
+                calls.where.push(w);
+                return {
+                  orderBy: (...o: unknown[]) => {
+                    calls.orderBy.push(o);
+                    return Promise.resolve(rows);
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    };
+    return { tx: tx as unknown as DbTx, calls };
+  }
+
+  it("succeededDepositsWhere: wizyta + status 'succeeded'", () => {
+    expect(succeededDepositsWhere("appt-1")).toEqual(SUCCEEDED_WHERE);
+  });
+
+  it("selectSucceededDeposits: wynik i zapytanie bez zmian (predykat, porządek paid_at, id)", async () => {
+    const rows = [payment(), payment({ id: "pay-2" })];
+    selectQueue.push(rows);
+    const result = await selectSucceededDeposits("appt-1");
+    expect(result).toBe(rows);
+    expect(mockDbSelect).toHaveBeenCalledWith();
+    expect(mockDbSelectWhere.mock.calls[0]![0]).toEqual(SUCCEEDED_WHERE);
+    expect(mockOrderBy).toHaveBeenCalledWith(...ORDER);
+  });
+
+  it("selectSucceededDepositsInTx: przez tx, wspólny predykat + eq(salonId), ten sam porządek, bez surowego db", async () => {
+    const rows = [{ id: "pay-1" }];
+    const { tx, calls } = fakeTx(rows);
+    const result = await selectSucceededDepositsInTx(tx, "salon-a", "appt-1");
+    expect(result).toBe(rows);
+    expect(calls.where).toEqual([{ type: "and", args: [SUCCEEDED_WHERE, eqArgs("depositPayments.salonId", "salon-a")] }]);
+    expect(calls.orderBy).toEqual([ORDER]);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("selectSucceededDepositsInTx: przekazuje salonId i appointmentId wołającego", async () => {
+    const { tx, calls } = fakeTx([]);
+    await selectSucceededDepositsInTx(tx, "salon-b", "appt-9");
+    expect(calls.where[0]).toEqual({
+      type: "and",
+      args: [
+        { type: "and", args: [eqArgs("depositPayments.appointmentId", "appt-9"), eqArgs("depositPayments.status", "succeeded")] },
+        eqArgs("depositPayments.salonId", "salon-b"),
+      ],
+    });
+  });
+
+  it("selectSucceededDepositsInTx: jawna lista kolumn bez identyfikatorów Stripe, numeru BLIK i powodu zwrotu", async () => {
+    const { tx, calls } = fakeTx([]);
+    await selectSucceededDepositsInTx(tx, "salon-a", "appt-1");
+    expect(Object.keys(calls.select[0] as object).sort()).toEqual(
+      ["amount", "appointmentId", "currency", "id", "paidAt", "paymentMethod", "salonId", "status"]
+    );
   });
 });

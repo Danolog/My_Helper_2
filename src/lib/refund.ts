@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { recordDepositStatusEvent } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { depositPayments, appointments } from "@/lib/schema";
+import type { DbTx } from "@/lib/server/repository";
 import { getStripe } from "@/lib/stripe";
 
 export interface RefundResult {
@@ -204,14 +205,50 @@ export interface AppointmentDepositsRefund extends RefundResult {
 }
 
 /**
+ * Predykat „płatność `succeeded` tej wizyty” — jedno źródło dla odczytów,
+ * które decydują o zwrocie (#193).
+ */
+export function succeededDepositsWhere(appointmentId: string) {
+  return and(eq(depositPayments.appointmentId, appointmentId), eq(depositPayments.status, "succeeded"));
+}
+
+/** Porządek płatności wizyty: od najstarszej (paid_at, potem id). */
+function succeededDepositsOrder() {
+  return [asc(depositPayments.paidAt), asc(depositPayments.id)] as const;
+}
+
+/**
  * Wszystkie płatności `succeeded` wizyty, od najstarszej (Ethan, #98).
  */
 export async function selectSucceededDeposits(appointmentId: string) {
   return db
     .select()
     .from(depositPayments)
-    .where(and(eq(depositPayments.appointmentId, appointmentId), eq(depositPayments.status, "succeeded")))
-    .orderBy(asc(depositPayments.paidAt), asc(depositPayments.id));
+    .where(succeededDepositsWhere(appointmentId))
+    .orderBy(...succeededDepositsOrder());
+}
+
+/**
+ * Płatności `succeeded` wizyty w transakcji z kontekstem RLS salonu
+ * (`forSalon(salonId).raw`), #193. Ten sam predykat i porządek co
+ * `selectSucceededDeposits`, do tego jawne `eq(salonId)`. Jawna lista
+ * kolumn — bez identyfikatorów Stripe, numeru BLIK i powodu zwrotu.
+ */
+export async function selectSucceededDepositsInTx(tx: DbTx, salonId: string, appointmentId: string) {
+  return tx
+    .select({
+      id: depositPayments.id,
+      appointmentId: depositPayments.appointmentId,
+      salonId: depositPayments.salonId,
+      amount: depositPayments.amount,
+      currency: depositPayments.currency,
+      paymentMethod: depositPayments.paymentMethod,
+      status: depositPayments.status,
+      paidAt: depositPayments.paidAt,
+    })
+    .from(depositPayments)
+    .where(and(succeededDepositsWhere(appointmentId), eq(depositPayments.salonId, salonId)))
+    .orderBy(...succeededDepositsOrder());
 }
 
 /**
