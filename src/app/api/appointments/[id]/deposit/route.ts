@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { recordDepositStatusEvent, type DepositStatusEventActor } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext, type SalonRole } from "@/lib/salon-context";
@@ -30,14 +31,20 @@ import { isValidUuid } from "@/lib/validations";
  * Kolejność: sesja (401) → kontekst salonu (404) → rola (403) → format id (400)
  * → jedna transakcja `forSalon(ctx.salonId).raw`: wizyta z jawnym `eq(salonId)`
  * i blokadą wiersza (404), płatności online (409), kwota zadatku i status (400),
- * stan docelowy już ustawiony (200 bez zapisu), zapis z `eq(id)` i `eq(salonId)`.
+ * stan docelowy już ustawiony (200 bez zapisu), zapis z `eq(id)` i `eq(salonId)`
+ * i wpis dziennika `deposit_status_events` w tej samej transakcji (tylko przy zmianie).
  *
  * Ślad audytu: log `info` z salonId, appointmentId, userId, rolą i nowym
- * stanem — bez danych klienta i bez numeru BLIK.
+ * stanem — bez danych klienta i bez numeru BLIK. Trwały ślad: wpis dziennika
+ * zmian zadatku (konto, rola w salonie, poprzednia i nowa wartość); log zostaje.
  */
 
 /** Role, które mogą oznaczać zadatek. Właściciel i recepcja; pracownik nie. */
-const DEPOSIT_MARK_ROLES: readonly SalonRole[] = ["owner", "receptionist"];
+const DEPOSIT_MARK_ROLES: readonly DepositStatusEventActor["role"][] = ["owner", "receptionist"];
+
+function isDepositMarkRole(role: SalonRole): role is DepositStatusEventActor["role"] {
+  return (DEPOSIT_MARK_ROLES as readonly string[]).includes(role);
+}
 
 /** Statusy wizyty, przy których oznaczenie zadatku ma sens (wizyta przed realizacją). */
 const MARKABLE_STATUSES: readonly string[] = ["scheduled", "confirmed"];
@@ -76,9 +83,10 @@ async function markDeposit(
     }
     salonId = ctx.salonId;
 
-    if (!DEPOSIT_MARK_ROLES.includes(ctx.role)) {
+    if (!isDepositMarkRole(ctx.role)) {
       return NextResponse.json({ success: false, error: "Brak uprawnien" }, { status: 403 });
     }
+    const actor: DepositStatusEventActor = { userId: ctx.userId, role: ctx.role };
 
     const { id } = await params;
     if (!isValidUuid(id)) {
@@ -128,6 +136,15 @@ async function markDeposit(
         .update(appointments)
         .set({ depositPaid: targetPaid, updatedAt: new Date() })
         .where(and(eq(appointments.id, id), eq(appointments.salonId, scopedSalonId)));
+      // Dziennik zmian (kto i kiedy) w TEJ SAMEJ transakcji: błąd wpisu cofa zmianę flagi (500).
+      await recordDepositStatusEvent(tx, {
+        salonId: scopedSalonId,
+        appointmentId: id,
+        previousDepositPaid: appointment.depositPaid,
+        depositPaid: targetPaid,
+        source: targetPaid ? "manual_mark" : "manual_unmark",
+        actor,
+      });
       return { kind: "ok", changed: true };
     });
 
