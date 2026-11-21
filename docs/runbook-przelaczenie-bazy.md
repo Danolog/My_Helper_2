@@ -50,11 +50,12 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   `: "${CSQL_INSTANCE:?}" &&`: przy pustej zmiennej zsh przerywa cały wiersz,
   ale wykonałby następny wklejony wiersz — dlatego strażnik i polecenie są
   w jednym wierszu.
-- **Polecenia gcloud i neonctl** (2.4, 3.3 krok 4, 1.1 „Instancja próbna”,
-  przywrócenia) mają składnię do potwierdzenia w próbie generalnej: każde
-  polecenie i jego oczekiwany wynik są zapisane w `docs/drills/` przed oknem.
-  Polecenie, które w próbie dało inny wynik, poprawia się w tym runbooku przed
-  oknem.
+- **Polecenia gcloud, neonctl i `cloud-sql-proxy`** (1.0 pkt 2, 1.1 „Instancja
+  próbna” i „Gałąź próbna Neona”, 1.5, 2.4, 3.3 krok 4, przywrócenia) mają
+  składnię do potwierdzenia w próbie generalnej: każde polecenie i jego
+  oczekiwany wynik są zapisane w `docs/drills/` przed oknem. Polecenie, które
+  w próbie dało inny wynik, poprawia się w tym runbooku przed oknem. Takie
+  bloki mają dopisek „(do potwierdzenia w próbie, sekcja 0)”.
 
 ## 1. Warunki przed oknem
 
@@ -91,15 +92,73 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
      GRANT CREATE ON SCHEMA public TO myhelper_owner;
      ```
 
-   - kontrola po zmianie: 1.3 pkt 4 = `f | f | f`; `pg_tables.tableowner`
-     wszystkich tabel `public` = `myhelper_owner`; `rls-check.sh` przechodzi
-     (`SET ROLE myhelper_app`, `rls-check.sh:18-31`); przebieg workflow
-     z migracjami (`run_migrations=true`) zielony — job migracji łączy się
-     tylko z instancją produkcyjną (`docs/runbook-krok-d.md:187-189`), która
-     przed oknem nie ma danych;
    - jeśli `REVOKE` jest na Cloud SQL niedozwolony: stop, decyzja architektury
      i bezpieczeństwa przed próbą. Wariantu zapasowego (nowy login + `REASSIGN
      OWNED` + ponowne uprawnienia) nie wykonuje się w trybie awaryjnym;
+   - **przebieg migracji idzie na instancji produkcyjnej**, nie na klonie: job
+     `myhelper-migrate` działa jako `myhelper-runtime`
+     (`docs/runbook-krok-d.md:187-189`), a jego `roles/cloudsql.client` ma
+     warunek IAM ograniczony do instancji produkcyjnej
+     (`docs/runbook-krok-d.md:175-176`). Instancja produkcyjna przed oknem nie
+     ma danych, a kopia jest `--data-only` (`copy-neon-to-cloudsql.sh:12-13`),
+     więc cel i tak potrzebuje schematu z migracji;
+   - terminal jak w oknie: 1.7 → 1.5 (blok „Tylko w oknie” + tunel, port
+     produkcyjny) → 1.6. Kolejność, każdy wynik w zapisie próby:
+     1. zmiana ról (blok SQL wyżej);
+     2. kontrole: 1.3 pkt 4 = `f | f | f` i właściciel tabel
+        (`psql_csql_admin`):
+
+        ```bash
+        set +x
+        psql_csql_admin <<'SQL'
+        SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner <> 'myhelper_owner';
+        SQL
+        ```
+
+        Oczekiwane: `0`. Inny wynik = stop, decyzja architektury
+        i bezpieczeństwa;
+     3. pustość: blok 2.3 (`compare.sh --expect-empty`) = `expect_empty=yes`,
+        `exit=0`. Kod 5 = stop: jobu nie uruchamiamy, decyzja architektury
+        i bezpieczeństwa;
+     4. kopia na żądanie `pre-migrate-<RRRRMMDD>` (wzorzec 2.4;
+        do potwierdzenia w próbie, sekcja 0):
+
+        ```bash
+        set +x
+        : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql backups create --instance="$CSQL_INSTANCE" --description='pre-migrate-<RRRRMMDD>'
+        : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql backups list --instance="$CSQL_INSTANCE" --filter="description='pre-migrate-<RRRRMMDD>'" --format='value(id,status,description)'
+        ```
+
+        Oczekiwane: jeden wiersz `<ID> SUCCESSFUL pre-migrate-<RRRRMMDD>`; ID
+        do zapisu próby. Kopia, którą workflow robi sam przed migracją (rola
+        `myhelperSqlBackup`, `docs/runbook-krok-d.md:177-180`), jej nie
+        zastępuje. Inny wynik = stop, jobu nie uruchamiamy;
+     5. przebieg workflow z migracjami (`run_migrations=true`) z `main` o tym
+        samym sha co 1.7 i zapis próby; sha przebiegu do zapisu. Przebieg może
+        wdrożyć rewizję usługi — dopuszczalne (ruch jest na Vercelu, usługa
+        nie ma użytkowników); nazwa rewizji do zapisu. Ingress Cloud Run
+        i stan zadań Scheduler zostają bez zmian (wynik przed i po w zapisie);
+     6. kontrola po jobie: job zielony; kontrole z kroku 2 jeszcze raz (także
+        nowe tabele z tego przebiegu); `rls-check.sh` (blok 2.8) przechodzi
+        (`SET ROLE myhelper_app`, `rls-check.sh:18-31`); drugie
+        `--expect-empty` (blok 2.3) = `exit=0`. Wiersze `auth_rate_limit`
+        z działającej rewizji czyści sam `--expect-empty` (`compare.sh:40-44`);
+        kod 5 (inna niepusta tabela = inny zapis aplikacji) = stop i decyzja
+        architektury i bezpieczeństwa przed próbą;
+     7. dopiero teraz klon instancji próbnej (1.1) — dziedziczy stan docelowy
+        ról i schematu.
+   - **job czerwony** = stop przed próbą, bez ponawiania; decyzja architektury
+     i bezpieczeństwa. Przywrócenie z kopii `pre-migrate` (blok „Przywrócenie”
+     z 2.4 z jej ID) tylko za osobną zgodą właściciela;
+   - kopię `pre-migrate` usuwa się po zielonej próbie generalnej, w terminalu
+     z blokiem „Tylko w oknie” (1.5), nie w terminalu próby (wynik w zapisie
+     próby; do potwierdzenia w próbie, sekcja 0):
+
+     ```bash
+     set +x
+     : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql backups delete '<ID kopii pre-migrate>' --instance="$CSQL_INSTANCE"
+     ```
+
    - zamrożenie i odmrożenie Cloud SQL (2.6, 2.10, 3.3) wykonuje `postgres`
      (członek właściciela bazy, więc ma `ALTER DATABASE`; usługa go nie
      używa). `myhelper_owner` nie dostaje `pg_read_all_stats` ani
@@ -107,8 +166,8 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
 ### 1.1 Próba generalna
 
-Na **gałęzi Neona** (ten sam projekt Neona, ta sama rola właściciela co
-produkcja) i na **instancji próbnej Cloud SQL** (niżej), tymi samymi skryptami
+Na **gałęzi próbnej Neona** (ten sam projekt Neona, ta sama rola właściciela co
+produkcja; niżej) i na **instancji próbnej Cloud SQL** (niżej), tymi samymi skryptami
 z `main` i w tej samej kolejności co sekcje 2 i 3. Wynik w
 `docs/drills/restore-<data>.md`: czas każdego kroku (`copy_seconds`,
 `compare_seconds` z ekranu, czas zamrożenia i odmrożenia, czas kopii i
@@ -124,7 +183,9 @@ wersja, role i hasła; danych produkcyjnych jeszcze nie ma). Przed próbą:
 koszt instancji próbnej (godziny tieru i dysk na czas próby) policzony
 i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:766-767`).
 W terminalu próby zmienna `CSQL_INSTANCE` ma wyłącznie nazwę instancji próbnej;
-nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu:
+nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu (blok
+„Tylko w oknie” z 1.5 w próbie się nie wkleja). Do potwierdzenia w próbie,
+sekcja 0:
 
 ```bash
 set +x
@@ -139,8 +200,53 @@ Oczekiwane: `drill_instance_ok=yes`, klon kończy się bez błędu, opis
 (`docs/runbook-krok-d.md:160`). `drill_instance_ok=no` = stop. Tunel w próbie
 (1.5) prowadzi do instancji próbnej, na `<port tunelu>` **innym** niż port
 z `docs/runbook-krok-d.md` sekcja 9, żeby żaden blok próby nie trafił w tunel
-produkcyjny. We wszystkich blokach sekcji 2 i 3 w próbie: `<port tunelu>` =
-port tunelu próby, `CSQL_INSTANCE` = instancja próbna.
+produkcyjny.
+
+**Gałąź próbna Neona.** Osobna gałąź w projekcie Neona z własnym endpointem;
+nigdy gałąź produkcyjna. Zmienna `NEON_BRANCH` ma w terminalu próby wyłącznie
+nazwę gałęzi próbnej (blok „Tylko w oknie” z 1.5 w próbie się nie wkleja).
+Dowód, że `<neon-admin>` z 1.6 jest endpointem gałęzi próbnej, a nie
+produkcyjnej — przed 2.2 (do potwierdzenia w próbie, sekcja 0: flagi
+`endpoints list --branch --output json` i obecność hosta w wyniku):
+
+```bash
+set +x
+NEON_BRANCH='<gałąź próbna Neona>'
+[[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' ]] && echo drill_branch_ok=yes || echo drill_branch_ok=no
+: "${NEON_BRANCH:?}" && [[ "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' ]] && neonctl endpoints list --project-id '<projekt Neona>' --branch "$NEON_BRANCH" --output json | grep -qF -- '<neon-admin>' && ! neonctl endpoints list --project-id '<projekt Neona>' --branch '<gałąź produkcyjna Neona>' --output json | grep -qF -- '<neon-admin>' && DRILL_NEON_OK=yes || DRILL_NEON_OK=no
+echo "drill_neon_ok=$DRILL_NEON_OK"
+drill_neon_guard() { [[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' && "$DRILL_NEON_OK" == yes ]]; }
+```
+
+Oczekiwane: `drill_branch_ok=yes`, `drill_neon_ok=yes`. `no` = stop próby.
+Wynik `endpoints list` nie trafia na ekran (`grep -q`). `<neon-pooler>` musi
+wskazywać ten sam endpoint co `<neon-admin>`, inaczej skrypty dają kod 2
+(`freeze-neon.sh:22-25`, `:131-144`).
+
+**Strażnik Neona w próbie.** W próbie każdy wiersz, który zmienia Neona —
+zamrożenie (2.2, 3.3 krok 6), odmrożenie (droga A pkt 1, 3.3 krok 9), kopia
+wsteczna (3.4), `neonctl branches create` (3.3 krok 4) i `neonctl branches
+restore` („Stop w kroku 7 albo 8”) — zaczyna się w tym samym wierszu od
+`drill_neon_guard &&`. Funkcja istnieje tylko w terminalu próby; w oknie
+prefiksu się nie wkleja.
+
+**Podmiany w próbie**, we wszystkich blokach sekcji 1–3:
+
+| Symbol | W próbie |
+|---|---|
+| `<port tunelu>` | port tunelu próby |
+| `CSQL_INSTANCE` | instancja próbna (blok wyżej) |
+| `<neon-admin>`, `<neon-pooler>` | endpoint gałęzi próbnej (bez i z `-pooler.`) |
+| `NEON_BRANCH` | gałąź próbna (blok wyżej) |
+| `<gałąź produkcyjna Neona>` | **bez podmiany** — prawdziwa nazwa produkcji, tylko w strażnikach |
+
+Na końcu próby, przed zamknięciem terminala (po usunięciu instancji próbnej):
+
+```bash
+set +x
+unset NEON_BRANCH DRILL_NEON_OK
+unset -f drill_neon_guard
+```
 
 Usunięcie po próbie (wynik w zapisie próby), najpierw kopie na żądanie
 instancji próbnej, potem instancja:
@@ -190,8 +296,10 @@ W próbie generalnej muszą wyjść:
    próbnej: kopia `SUCCESSFUL`, przywrócenie bez błędu, po nim kontrole z 2.4.
    Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
    `ALTER DATABASE … SET` siedzi w `pg_db_role_setting`, czyli w kopii
-   instancji (`freeze-neon.sh:37-38`). Próba przywraca kopię po 2.6, czyli na
-   zamrożonej instancji. Po przywróceniu (`psql_csql_app`, 1.6 — każde
+   instancji (`freeze-neon.sh:37-38`). Próba przywraca kopię **na końcu
+   próby, po 3.3 kroku 11** (wcześniej przywrócenie opróżniłoby instancję
+   przed pkt 1 i 2); instancja jest wtedy nadal zamrożona (3.3 krok 11). Po
+   przywróceniu (`psql_csql_app`, 1.6 — każde
    wywołanie to nowe połączenie jako `myhelper_owner`):
 
    ```bash
@@ -235,10 +343,18 @@ W próbie generalnej muszą wyjść:
    `UTF8`. Różnica samego collation jest dopuszczalna: `rows_hash_*` liczy się
    w `COLLATE "C"` (`compare.sh:195`), a indeksy powstają od nowa przy imporcie.
 8. Gałąź Neona „przed powrotem” i przywrócenie z niej (bloki 3.3 krok 4 i
-   „Stop w kroku 7 albo 8”) na gałęzi próbnej: po przywróceniu host endpointu
-   bez zmian (`<neon-admin>` z 1.6 łączy się bez zmiany zmiennych), hasła ról
-   bez zmian, baza nadal zamrożona. Kopia Cloud SQL „przed powrotem” —
-   jak pkt 4. **Bez tego zapisu okno powrotu nie startuje** (3.1).
+   „Stop w kroku 7 albo 8”, z prefiksem `drill_neon_guard &&`) na gałęzi
+   próbnej. Miejsce w próbie: po 3.4 z kodem 0 — przywrócenie gałęzi
+   z kontrolami po nim, potem 3.4 jeszcze raz (Neon nadal zamrożony) i dalej
+   3.3 krok 8. Po przywróceniu: host endpointu bez zmian (`<neon-admin>` z 1.6
+   łączy się bez zmiany zmiennych), hasła ról bez zmian, baza nadal
+   zamrożona. Do sprawdzenia w próbie: czy Neon pozwala przywrócić gałąź
+   z gałęzi, która jest jej własnym dzieckiem (`pre-return` jest dzieckiem
+   `NEON_BRANCH`); odmowa = sekcja 3 nie ma cofnięcia, okno powrotu nie
+   startuje, decyzja architektury. Kopia Cloud SQL „przed powrotem” — jak
+   pkt 4, przywrócenie na końcu próby, po 3.3 kroku 11 i **przed**
+   przywróceniem z pkt 4; wynik `default_transaction_read_only` po nim
+   w zapisie próby. **Bez tego zapisu okno powrotu nie startuje** (3.1).
 
 ### 1.2 Zgody właściciela potrzebne do okna
 
@@ -246,6 +362,8 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 
 | Zgoda | Krok |
 |---|---|
+| przed próbą generalną, na instancji produkcyjnej Cloud SQL: zmiana ról (`REVOKE`/`GRANT`), kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi). Jeśli właściciel daje zgodę na zmianę ról i na przebieg osobno — dwa wiersze; jedna zgoda nie obejmuje drugiej | 1.0 pkt 2 |
+| przywrócenie z kopii `pre-migrate` po czerwonym jobie | 1.0 pkt 2 |
 | start okna: zatrzymanie zapisów aplikacji i cronów, ingress Cloud Run `internal`, zamrożenie produkcyjnego Neona | 2.1–2.2 |
 | kopia na żądanie Cloud SQL „przed importem” i — w razie potrzeby — przywrócenie z niej | 2.4; wycofanie (sekcja 2) |
 | przełączenie ruchu aplikacji na GCP, ingress Cloud Run z powrotem `all`; przy wycofaniu (droga B) cofnięcie przełączenia | 2.9; wycofanie (sekcja 2) |
@@ -371,15 +489,25 @@ przyjmują Cloud SQL wyłącznie pod `127.0.0.1` — nie `localhost`, nie gniazd
 `copy-neon-to-cloudsql.sh:124-125` (cel), `rls-check.sh:79`,
 `compare.sh:110-112` (`--expect-empty`), `copy-cloudsql-to-neon.sh:143-144`
 (źródło). W oknie `<port tunelu>` = port z sekcji 9 i `CSQL_INSTANCE` =
-instancja produkcyjna; w próbie — 1.1 „Instancja próbna”.
+instancja produkcyjna; w próbie — 1.1 „Instancja próbna” i „Gałąź próbna
+Neona”.
 
-Blok z sekcji 9 kończy proxy zaraz po `psql`, więc na czas okna proxy startuje
-osobno, w tle, z wyjściem do pliku (jego wiersze zawierają nazwę połączenia
-instancji, czyli identyfikator projektu — nie mogą mieszać się z ekranem):
+**Tylko w oknie** (i w 1.0 pkt 2) — w terminalu próby tego bloku się nie
+wkleja:
 
 ```bash
 set +x
 CSQL_INSTANCE='<instancja produkcyjna>'
+NEON_BRANCH='<gałąź produkcyjna Neona>'
+```
+
+Blok z sekcji 9 kończy proxy zaraz po `psql`, więc na czas okna proxy startuje
+osobno, w tle, z wyjściem do pliku (jego wiersze zawierają nazwę połączenia
+instancji, czyli identyfikator projektu — nie mogą mieszać się z ekranem).
+Do potwierdzenia w próbie, sekcja 0 (flagi `--address`, `--port`):
+
+```bash
+set +x
 mkdir -p -m 700 "$HOME/secure"
 : "${CSQL_INSTANCE:?}" && cloud-sql-proxy --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:$CSQL_INSTANCE" > "$HOME/secure/cutover-proxy.log" 2>&1 &
 CSQL_PROXY_PID=$!
@@ -387,8 +515,7 @@ sleep 5
 kill -0 "$CSQL_PROXY_PID" 2>/dev/null && echo proxy_running=yes || echo proxy_running=no
 ```
 
-W próbie pierwszy wiersz pomija się — `CSQL_INSTANCE` jest już ustawione
-w 1.1. Oczekiwane: `proxy_running=yes`; potem kontrola połączenia z 1.6
+Oczekiwane: `proxy_running=yes`; potem kontrola połączenia z 1.6
 (`psql_csql_app` z `SELECT 1` = `1`). `no` = log proxy czyta właściciel
 lokalnie, stop. Plik `cutover-proxy.log` obejmuje wzorzec usuwania z sekcji 4.
 Przywrócenie kopii instancji (2.4) restartuje instancję: proxy zostaje,
@@ -399,7 +526,7 @@ Koniec tunelu (koniec okna albo stop okna):
 ```bash
 set +x
 kill "$CSQL_PROXY_PID"
-unset CSQL_PROXY_PID CSQL_INSTANCE
+unset CSQL_PROXY_PID CSQL_INSTANCE NEON_BRANCH
 ```
 
 ### 1.6 Hasła tylko w środowisku procesu
@@ -499,7 +626,10 @@ Dalej w blokach (symbole zastępcze):
   `PG*` = `postgres` z `$CSQL_ADMIN_PW`, `VERIFY_PG*` = `myhelper_owner`
   z `$CSQL_OWNER_PW` (1.0 pkt 2).
 - `<plik CA>` — plik z 1.4.
-- `<projekt Neona>`, `<gałąź produkcyjna Neona>` — dla `neonctl` (3.3 krok 4).
+- `<projekt Neona>` — dla `neonctl` (1.1, 3.3 krok 4); gałąź w poleceniach
+  `neonctl` to zmienna `NEON_BRANCH` (w oknie blok „Tylko w oknie” z 1.5,
+  w próbie 1.1 „Gałąź próbna Neona”); `<gałąź produkcyjna Neona>` występuje
+  tylko w tym przypisaniu i w strażnikach próby.
 - `<RRRRMMDD>` — data okna (UTC) w opisie kopii i nazwie gałęzi.
 
 ### 1.7 Stanowisko wykonawcy
@@ -572,7 +702,8 @@ bo ingress Cloud Run `internal` od 2.1):
    PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/unfreeze-neon.sh --dry-run
    ```
 
-   Potem ten sam wiersz bez `--dry-run`. Oczekiwane `pooler=yes`,
+   Potem ten sam wiersz bez `--dry-run` (w próbie z prefiksem
+   `drill_neon_guard &&`, 1.1). Oczekiwane `pooler=yes`,
    `unfrozen=yes`, `exit=0` (`unfreeze-neon.sh:29-45`). Kod 2 → poprawić
    zmienne; kod 8 → jedno ponowne uruchomienie. Każdy inny wynik: stan
    rozstrzyga odczyt na adresie aplikacji —
@@ -587,18 +718,26 @@ bo ingress Cloud Run `internal` od 2.1):
    `off` → Neon przyjmuje zapisy, dalej pkt 2; `on` → Neon nadal zamrożony,
    aplikacja na Vercelu tylko do odczytu: jedno ponowne uruchomienie, potem
    stop i decyzja właściciela na miejscu (log czyta lokalnie).
-2. Wznowienie zapisów na Vercelu, ingress Cloud Run i zadania Scheduler do
-   stanu sprzed okna — według osobnej procedury z 1.0 pkt 1.
-3. Cloud SQL: jeśli 2.4 się wykonał — przywrócenie z kopii „przed importem”
-   (blok „Przywrócenie” w 2.4) z kontrolami po nim. Przywrócenie zdejmuje też
+2. Cloud SQL, **zanim** ingress wróci na `all`: jeśli 2.4 się wykonał —
+   przywrócenie z kopii „przed importem” (blok „Przywrócenie” w 2.4) i obie
+   kontrole po nim (`--expect-empty` = 0, `off`). Przywrócenie zdejmuje też
    zamrożenie Cloud SQL z 2.6 (1.1 pkt 4), więc `unfreeze-neon.sh` na Cloud
    SQL nie jest wtedy potrzebny. Jeśli stop był przed 2.4: Cloud SQL nie był
    zmieniany poza czyszczeniem `auth_rate_limit` (`compare.sh:40-44`) — bez
-   przywracania.
+   przywracania. Ingress zostaje `internal` do końca kontroli, bo żywa usługa
+   pod `run.app` zapisałaby przed `--expect-empty`.
+3. Wznowienie zapisów na Vercelu, ingress Cloud Run i zadania Scheduler do
+   stanu sprzed okna — według osobnej procedury z 1.0 pkt 1.
 4. Tunel i hasła: koniec z 1.5 i 1.6.
 
-**Droga B — po 2.9, Cloud SQL nadal zamrożony** (potwierdzone kodem albo
-odczytem stanu z 2.10): aplikacja na GCP nie zapisała, bo każde nowe
+**Droga B — po 2.9, Cloud SQL nadal zamrożony, potwierdzone odczytem stanu
+= `on`** (blok „Odczyt stanu” w 2.10). **Kod sam nie wystarcza:** kod 7
+w 2.10 znaczy, że ktoś po 2.6 dopisał ustawienie na poziomie roli
+(`unfreeze-neon.sh:30`); `off` na roli loginu aplikacji pozwala jej zapisywać
+od 2.9, a droga B by te zapisy skasowała. Odczyt to nowe połączenie loginem
+aplikacji, więc widzi ustawienie bazy razem z ustawieniem roli. `off` →
+droga C; odczyt bez wyniku → stop, ruch bez zmian, decyzja właściciela na
+miejscu. Przy `on` aplikacja na GCP nie zapisała, bo każde nowe
 połączenie jest tylko do odczytu, a sesje sprzed zamrożenia zerwał 2.6
 (`freeze-neon.sh:37-48`). Najpierw cofnięcie przełączenia ruchu z 2.9 (ruch
 na Vercel, ingress Cloud Run `internal`) według osobnej procedury z 1.0 pkt 1,
@@ -608,8 +747,9 @@ potem droga A od pkt 1.
 potwierdzony odczytem `off`**: aplikacja na GCP mogła już zapisać, więc
 przesłanka drogi A nie obowiązuje. **Okno uznaje się za zakończone**, ruch
 zostaje na GCP. Problem sesji tylko do odczytu usuwa ponowne
-`unfreeze-neon.sh` (blok 2.10). Powrót na Neon — wyłącznie sekcją 3
-(osobne okno, osobna zgoda).
+`unfreeze-neon.sh` (blok 2.10). Domknięcie jak wiersz 0 w 2.10: zadania
+Scheduler według decyzji właściciela, koniec tunelu i haseł (1.5, 1.6).
+Powrót na Neon — wyłącznie sekcją 3 (osobne okno, osobna zgoda).
 
 ### 2.1 Zatrzymanie zapisów
 
@@ -625,6 +765,9 @@ nie zamrażać.
 set +x
 PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/freeze-neon.sh --dry-run
 ```
+
+W próbie: przed tym blokiem `drill_neon_ok=yes` (1.1), a wiersz bez
+`--dry-run` z prefiksem `drill_neon_guard &&`.
 
 Potem ten sam wiersz bez `--dry-run`. Oczekiwane: `role_override=0`,
 `stats_visible=1`, `backends_before`, `terminated` ≥ `backends_before`,
@@ -658,7 +801,7 @@ PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER='<r
 |---|---|
 | 0 (`expect_empty=yes`) | 2.4 |
 | 4 | host ≠ 127.0.0.1 albo serwer Neona (`compare.sh:49`, `:110-112`, `:259-262`) — poprawić zmienne |
-| 5 (`expect_empty=no`, `nonempty_tables=<n>`) | Cloud SQL ma dane, a kopii „przed importem” jeszcze nie ma — stop okna, droga A (bez przywracania, pkt 3); skąd dane — decyzja przed nowym oknem; bez kopii danych |
+| 5 (`expect_empty=no`, `nonempty_tables=<n>`) | Cloud SQL ma dane, a kopii „przed importem” jeszcze nie ma — stop okna, droga A (bez przywracania, pkt 2); skąd dane — decyzja przed nowym oknem; bez kopii danych |
 | 2 | złe zmienne albo argumenty, bez połączenia — poprawić zmienne, powtórzyć |
 | 1, 130 | `error_class` decyduje: `connection` → tunel (1.5), powtórzyć; inne → stop, droga A |
 | 3 | stop, log lokalnie (sekcja 0); droga A |
@@ -669,7 +812,8 @@ Za zgodą właściciela: kopia na żądanie instancji Cloud SQL po potwierdzeniu
 pustości (2.3), **przed** kopią danych. To jedyna droga cofnięcia importu,
 który się zatwierdził (`copy-neon-to-cloudsql.sh:57-59`). Czas życia:
 `docs/runbook-krok-d.md` sekcja 3.6a (zostaje do końca okresu powrotu; opis
-zaczyna się od `pre-import`, jak tam).
+zaczyna się od `pre-import`, jak tam). Bloki 2.4 — do potwierdzenia w próbie,
+sekcja 0.
 
 ```bash
 set +x
@@ -689,7 +833,7 @@ PRE_IMPORT_ID='<ID z listy>'
 Inny stan niż `SUCCESSFUL`, błąd gcloud albo więcej niż jeden wiersz = stop
 okna, droga A (import się nie zaczął, przywracać nie trzeba).
 
-**Przywrócenie z kopii „przed importem”** (droga A pkt 3 i wiersze 2.5).
+**Przywrócenie z kopii „przed importem”** (droga A pkt 2 i wiersze 2.5).
 Nadpisuje całą instancję `CSQL_INSTANCE` i ją restartuje: tunel (1.5) zostaje,
 otwarte połączenia padają.
 
@@ -787,7 +931,7 @@ Oczekiwane `dry_run=yes`, `steps=5`, `exit=0` (`freeze-neon.sh:50`,
 `frozen=yes`, `exit=0`.
 
 Kody jak w tabeli 2.2, z jedną zmianą: **każde „stop” w 2.6 = droga A
-z przywróceniem Cloud SQL z kopii „przed importem”** (pkt 3), a nie samo
+z przywróceniem Cloud SQL z kopii „przed importem”** (pkt 2), a nie samo
 „wznowić zapisy”. Powtórzenia dozwolone w tabeli 2.2 obowiązują bez zmian.
 
 ### 2.7 Porównanie obu baz — `compare.sh`
@@ -870,8 +1014,9 @@ na usługę GCP (DNS `app` i LB, `BETTER_AUTH_URL` / `NEXT_PUBLIC_APP_URL`,
 przekierowania OAuth, adresy webhooków) i ingress Cloud Run z powrotem na
 `all` (koniec głównej kontroli z 2.1). Neon zostaje zamrożony, więc aplikacja
 na Vercelu nie zapisze. Do 2.10 zapisy na GCP kończą się błędem tylko do
-odczytu — ten odcinek ma być krótki. Stop od tej chwili do 2.10 = droga B
-(cofnięcie przełączenia, potem droga A).
+odczytu — ten odcinek ma być krótki. Stop od tej chwili do 2.10: najpierw
+odczyt stanu (blok w 2.10); `on` → droga B (cofnięcie przełączenia, potem
+droga A), `off` → droga C.
 
 ### 2.10 Odmrożenie Cloud SQL — `unfreeze-neon.sh` przez tunel
 
@@ -901,14 +1046,16 @@ SQL
 ```
 
 `on` = Cloud SQL nadal zamrożony → droga B. `off` = odmrożony, aplikacja mogła
-zapisać → droga C.
+zapisać → droga C. Odczyt bez wyniku = stop, ruch bez zmian, decyzja
+właściciela na miejscu. Do drogi B nie prowadzi żaden kod bez odczytu
+(Wycofanie, droga B).
 
 | Kod | Stan (`unfreeze-neon.sh:52-62`) | Co dalej |
 |---|---|---|
 | 0 | odmrożona | wznowić zadania Scheduler (decyzja właściciela); koniec okna: tunel i hasła (1.5, 1.6) |
-| 2 | bez połączenia, nadal zamrożona | poprawić zmienne, powtórzyć |
-| 7 | bez zmian, nadal zamrożona (`:30`, `:53-54`) | droga B |
-| 1 lub 3 bez `stats_visible=1` | bez zmian, nadal zamrożona (`:53-54`) | `connection` → powtórzyć; inne albo kod 3 (log lokalnie) → droga B |
+| 2 | bez połączenia, nadal zamrożona | poprawić zmienne, powtórzyć; gdy powtórzenia nie pomagają → odczyt stanu: `on` → droga B, `off` → droga C |
+| 7 | baza bez zmian; rola ma własne ustawienie (`:30`, `:53-54`) | odczyt stanu: `on` → droga B, `off` → droga C (login aplikacji zapisuje od 2.9) |
+| 1 lub 3 bez `stats_visible=1` | bez zmian (`:53-54`) | `connection` → powtórzyć; inne albo kod 3 (log lokalnie) → odczyt stanu: `on` → droga B, `off` → droga C |
 | 1 lub 3 po `stats_visible=1`, bez `backends_before` | może być już odmrożona (`:55-58`) | powtórzyć raz; drugi raz ≠ 0 → odczyt stanu: `on` → droga B, `off` → droga C |
 | 8 | odmrożona, część sesji żyje tylko do odczytu (`:59-60`) | jedno ponowne uruchomienie; drugi raz 8 → droga C: ponowne `unfreeze-neon.sh` co 5 min, najwyżej 3 razy; potem okno zamknięte z zapisem w notatce, sesje do wyjaśnienia w dzień |
 | 9 lub 1 po `backends_before` | odmrożona, test na adresie aplikacji nie potwierdził (`:61-62`) | odczyt stanu: `on` → droga B, `off` → droga C i jedno ponowne uruchomienie |
@@ -1005,17 +1152,19 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
    krok 2 od nowa. Czas życia jak kopii „przed importem”
    (`docs/runbook-krok-d.md` sekcja 3.6a).
 
-   Gałąź Neona „przed powrotem” — z gałęzi produkcyjnej, bez własnego
-   endpointu (Neon jest zamrożony od 2.2, więc gałąź też):
+   Gałąź Neona „przed powrotem” — z gałęzi `NEON_BRANCH` (w oknie gałąź
+   produkcyjna, 1.5), bez własnego endpointu (Neon jest zamrożony od 2.2,
+   więc gałąź też). Do potwierdzenia w próbie, sekcja 0; w próbie wiersz
+   `create` z prefiksem `drill_neon_guard &&` (1.1):
 
    ```bash
    set +x
-   neonctl branches create --project-id '<projekt Neona>' --parent '<gałąź produkcyjna Neona>' --name 'pre-return-<RRRRMMDD>' --no-compute
+   : "${NEON_BRANCH:?}" && neonctl branches create --project-id '<projekt Neona>' --parent "$NEON_BRANCH" --name 'pre-return-<RRRRMMDD>' --no-compute
    neonctl branches get 'pre-return-<RRRRMMDD>' --project-id '<projekt Neona>'
    ```
 
    Oczekiwane: utworzenie bez błędu; `get` pokazuje gałąź
-   `pre-return-<RRRRMMDD>` z rodzicem = gałąź produkcyjna. Błąd = stop okna
+   `pre-return-<RRRRMMDD>` z rodzicem = `NEON_BRANCH`. Błąd = stop okna
    powrotu (jak „stop” w kroku 2).
 5. `compare.sh` na Neonie z `--schema-baseline="$CSQL_SCHEMA"` (plik z kroku
    3; między krokiem 3 a tym krokiem żadnego innego uruchomienia `compare.sh`):
@@ -1038,8 +1187,11 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
    PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/freeze-neon.sh --dry-run
    ```
 
-   Potem ten sam wiersz bez `--dry-run`; oczekiwane `frozen=yes`, `exit=0`.
-7. `copy-cloudsql-to-neon.sh` (3.4).
+   Potem ten sam wiersz bez `--dry-run` (w próbie z prefiksem
+   `drill_neon_guard &&`, 1.1); oczekiwane `frozen=yes`, `exit=0`.
+7. `copy-cloudsql-to-neon.sh` (3.4). W próbie po kodzie 0 — przywrócenie
+   gałęzi z „Stop w kroku 7 albo 8” z kontrolami, potem 3.4 jeszcze raz
+   (1.1 pkt 8).
 8. `compare.sh` na obu bazach, bez `--all-tables`, do osobnych plików `-r2`
    (pliki 2.7 zostają nienadpisane do usunięcia z sekcji 4). Bazą wzorcową
    schematu jest Cloud SQL (źródło kopii); jego przebieg idzie pierwszy:
@@ -1072,7 +1224,8 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
    PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/unfreeze-neon.sh --dry-run
    ```
 
-   Potem ten sam wiersz bez `--dry-run`; oczekiwane `pooler=yes`,
+   Potem ten sam wiersz bez `--dry-run` (w próbie z prefiksem
+   `drill_neon_guard &&`, 1.1); oczekiwane `pooler=yes`,
    `unfrozen=yes`, `exit=0`. Kody jak w 2.10, z odczytem stanu przez
    `psql_neon_app`.
 10. Ruch wraca na Vercel (cofnięcie przełączenia z 2.9) według osobnej
@@ -1082,15 +1235,16 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
 
 **Stop w kroku 7 albo 8 = Neona nie odmrażamy.** Wtedy jedno z dwóch:
 ponowne uruchomienie kopii (po sukcesie jest idempotentne —
-`copy-cloudsql-to-neon.sh:80`) albo przywrócenie gałęzi produkcyjnej Neona
-z gałęzi „przed powrotem”:
+`copy-cloudsql-to-neon.sh:80`) albo przywrócenie gałęzi `NEON_BRANCH` (w oknie
+produkcyjnej) z gałęzi „przed powrotem”. Do potwierdzenia w próbie, sekcja 0;
+w próbie z prefiksem `drill_neon_guard &&` (1.1):
 
 ```bash
 set +x
-neonctl branches restore '<gałąź produkcyjna Neona>' 'pre-return-<RRRRMMDD>' --project-id '<projekt Neona>' --preserve-under-name 'pre-restore-<RRRRMMDD>'
+: "${NEON_BRANCH:?}" && neonctl branches restore "$NEON_BRANCH" 'pre-return-<RRRRMMDD>' --project-id '<projekt Neona>' --preserve-under-name 'pre-restore-<RRRRMMDD>'
 ```
 
-Przywrócenie zostawia endpoint gałęzi produkcyjnej (ten sam `<neon-admin>`
+Przywrócenie zostawia endpoint gałęzi `NEON_BRANCH` (ten sam `<neon-admin>`
 i `<neon-pooler>`), zrywa otwarte połączenia, a role i hasła wracają do stanu
 z chwili utworzenia gałęzi (te same, jeśli w międzyczasie ich nie zmieniano).
 Stan sprzed przywrócenia zostaje pod nazwą `pre-restore-<RRRRMMDD>`. Kontrola
@@ -1128,7 +1282,8 @@ set +x
 PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER='<rola właściciela Cloud SQL>' PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable TARGET_PGHOST='<neon-admin>' TARGET_PGDATABASE='<baza>' TARGET_PGUSER='<rola właściciela Neona>' TARGET_PGPASSWORD="$NEON_OWNER_PW" TARGET_PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/copy-cloudsql-to-neon.sh --dry-run
 ```
 
-Potem bez `--dry-run`. Oczekiwane (`:51-66`): `source_frozen=yes`,
+Potem bez `--dry-run` (w próbie z prefiksem `drill_neon_guard &&`, 1.1).
+Oczekiwane (`:51-66`): `source_frozen=yes`,
 `source_role_override=0`, `target_role_override=0`, `target_frozen=yes`,
 `fk_cycle_tables=0`, `source_nonempty_tables` > 0, `truncated_tables`,
 `dump_exit=0`, `restore_exit=0`, `target_frozen_after=yes`, `loaded=yes`,
