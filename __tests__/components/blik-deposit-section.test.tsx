@@ -1,7 +1,7 @@
+import { inspect } from "node:util";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { inspect } from "node:util";
 import { BlikDepositSection } from "@/app/dashboard/settings/payments/_components/blik-deposit-section";
 import PaymentSettingsPage from "@/app/dashboard/settings/payments/page";
 import { RoleProvider } from "@/components/dashboard/role-provider";
