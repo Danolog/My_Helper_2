@@ -20,6 +20,9 @@
 # Dla obu: jeden host, bez PGHOSTADDR/PGSERVICE, bez .pgpass (PGPASSFILE=/dev/null),
 # bez PGOPTIONS; host spoza 127.0.0.1/localhost wymaga verify-full. Zdalny PGHOST
 # nie może być poolerem (`<endpoint>-pooler.`), zdalny VERIFY_PGHOST musi nim być.
+# Ten sam endpoint: gdy którykolwiek host jest spoza 127.0.0.1/localhost,
+# VERIFY_PGHOST bez `-pooler.` musi być równe PGHOST
+# (`ep-x-1-pooler.<region>…` ↔ `ep-x-1.<region>…`), inaczej kod 2 bez połączenia.
 # Zmienne VERIFY_* trafiają tylko do wywołań testu zapisu (jako PG*), a do
 # wywołań administracyjnych nie trafiają wcale.
 #
@@ -27,10 +30,11 @@
 #   1. role_override = liczba ustawień default_transaction_read_only na poziomie
 #      roli (ALTER ROLE … SET, także … IN DATABASE tej bazy) — mają pierwszeństwo
 #      przed ustawieniem bazy. ≠ 0 → stop (kod 7), baza bez zmian.
-#   2. Najpierw widoczność: rola administracyjna bez pg_read_all_stats albo
-#      jakakolwiek niewidoczna sesja tej bazy (backend_type NULL) = błąd 42501
+#   2. Widoczność: rola administracyjna bez pg_read_all_stats albo jakakolwiek
+#      niewidoczna sesja tej bazy (backend_type NULL) = błąd 42501
 #      (error_class=other, kod 1), baza bez zmian — nigdy ciche backends_before=0.
-#      Potem ALTER DATABASE … SET default_transaction_read_only = on i zerwanie
+#      Widoczność pełna → stats_visible=1.
+#   3. ALTER DATABASE … SET default_transaction_read_only = on i zerwanie
 #      PO BAZIE, nie po roli: każdy client backend tej bazy poza własnym, z
 #      wyjątkiem backendów superużytkownika (rola właściciela nie może ich zerwać;
 #      u dostawcy to jego procesy). pg_terminate_backend czeka do 5 s na koniec
@@ -38,16 +42,26 @@
 #      wśród zerwanych, bez nazw), skipped_superuser. Brak uprawnienia do
 #      zerwania = błąd 42501 (error_class=other, kod 1);
 #      terminated < backends_before → stop (kod 8).
-#   3. nowe połączenie VERIFY_PG*: ta sama baza i default_transaction_read_only
+#   4. nowe połączenie VERIFY_PG*: ta sama baza i default_transaction_read_only
 #      = on, inaczej frozen=no (kod 9);
-#   4. nowe połączenie VERIFY_PG*: BEGIN; CREATE TEMP TABLE …; ROLLBACK; musi
+#   5. nowe połączenie VERIFY_PG*: BEGIN; CREATE TEMP TABLE …; ROLLBACK; musi
 #      skończyć się błędem 25006 (read_only). Zapis udany → frozen=no (kod 9).
 #   Na końcu pooler=yes/no (czy VERIFY_PGHOST to pooler) i frozen=yes.
-# --dry-run: bez połączenia; dry_run=yes i steps=4.
+# --dry-run: bez połączenia; dry_run=yes i steps=5.
 #
 # Kody wyjścia: 0 OK; 1 błąd bazy (przed nim error_class=…); 2 argumenty albo
 # środowisko; 3 wiersz niezgodny ze wzorcem emit (rejected_line=1);
 # 7 role_override ≠ 0; 8 terminated < backends_before; 9 test zapisu niezgodny.
+#
+# Stan bazy po kodzie ≠ 0:
+#   - kod 1, 2, 3 albo 7 BEZ wiersza stats_visible=1: baza bez zmian;
+#   - kod 1 albo 3 PO wierszu stats_visible=1, bez backends_before: ALTER DATABASE
+#     mógł przejść — baza może być JUŻ zamrożona, a sesje sprzed niej mogą żyć
+#     (np. 42501 przy zrywaniu); sprawdzić ustawienie bazy przed decyzją;
+#   - kod 8: baza JUŻ zamrożona (ALTER przeszedł), część sesji sprzed zamrożenia
+#     żyje (terminated < backends_before);
+#   - kod 1 albo 9 po backends_before: baza zamrożona, test na adresie aplikacji
+#     nie potwierdził zamrożenia.
 #
 # Strażnik: __tests__/lib/cutover-freeze-config.test.ts.
 # Test na prawdziwym Postgresie (CI): __tests__/pg/cutover-freeze.pg.test.ts.
@@ -122,10 +136,15 @@ if is_pooler "$VERIFY_PGHOST"; then
 elif ! is_local "$VERIFY_PGHOST"; then
   exit 2
 fi
+# Ten sam compute: adres aplikacji to adres administracyjny albo jego wariant
+# `-pooler.` (inaczej freeze mógłby zamrozić inny endpoint niż sprawdzany).
+if ! is_local "$PGHOST" || ! is_local "$VERIFY_PGHOST"; then
+  [[ "${VERIFY_PGHOST/-pooler./.}" == "$PGHOST" ]] || exit 2
+fi
 
 if [[ "$DRY_RUN" == 1 ]]; then
   emit dry_run yes
-  emit steps 4
+  emit steps 5
   exit 0
 fi
 
@@ -213,15 +232,13 @@ read_nums role_override
 emit role_override "${NUMS[0]}"
 [[ "${NUMS[0]}" == 0 ]] || exit 7
 
-# --- 2. ustawienie bazy i zerwanie po bazie --------------------------------------
-# Ponowne uruchomienie na zamrożonej bazie: nowa sesja startuje tylko do odczytu,
-# a ALTER DATABASE jest w takiej transakcji zabronione (25006) — sesja
-# administracyjna wyłącza to u siebie (nie wpływa na inne sesje).
+# --- 2. widoczność pg_stat_activity (przed jakąkolwiek zmianą) -------------------
 # Bez pg_read_all_stats pg_stat_activity pokazuje cudze sesje z backend_type
-# NULL — filtr niżej nie widziałby ich wcale i zgłosiłby backends_before=0.
-# Dlatego najpierw (przed ALTER DATABASE) sprawdzenie widoczności: brak
-# uprawnienia albo choć jedna niewidoczna sesja tej bazy = błąd 42501 (kod 1).
-run_sql admin -v db="$PGDATABASE" <<'SQL'
+# NULL — filtr zrywania nie widziałby ich wcale i zgłosiłby backends_before=0.
+# Brak uprawnienia albo choć jedna niewidoczna sesja tej bazy = błąd 42501
+# (kod 1, baza bez zmian). Osobne wywołanie: każdy błąd PO wierszu
+# stats_visible=1 oznacza, że ALTER DATABASE mógł już przejść.
+run_sql admin <<'SQL'
 DO $$
 BEGIN
   IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')
@@ -232,6 +249,21 @@ BEGIN
   END IF;
 END
 $$;
+SELECT 'stats_visible=1';
+SQL
+[[ "$SQL_RC" == 0 ]] || fail_db psql "$SQL_RC"
+read_nums stats_visible
+if [[ "${NUMS[0]}" != 1 ]]; then
+  emit rejected_line 1
+  exit 3
+fi
+emit stats_visible "${NUMS[0]}"
+
+# --- 3. ustawienie bazy i zerwanie po bazie --------------------------------------
+# Ponowne uruchomienie na zamrożonej bazie: nowa sesja startuje tylko do odczytu,
+# a ALTER DATABASE jest w takiej transakcji zabronione (25006) — sesja
+# administracyjna wyłącza to u siebie (nie wpływa na inne sesje).
+run_sql admin -v db="$PGDATABASE" <<'SQL'
 SET default_transaction_read_only = off;
 ALTER DATABASE :"db" SET default_transaction_read_only = on;
 WITH target AS (
@@ -258,7 +290,7 @@ emit skipped_superuser "${NUMS[3]}"
 ((NUMS[1] >= NUMS[0])) || exit 8
 emit pooler "$POOLER"
 
-# --- 3. nowe połączenie adresem aplikacji: ustawienie widoczne -------------------
+# --- 4. nowe połączenie adresem aplikacji: ustawienie widoczne -------------------
 run_sql verify -v db="$PGDATABASE" <<'SQL'
 SELECT (current_database() = :'db')::text || ' ' || current_setting('default_transaction_read_only');
 SQL
@@ -268,7 +300,7 @@ if [[ "$SQL_OUT" != "true on" ]]; then
   exit 9
 fi
 
-# --- 4. nowe połączenie adresem aplikacji: zapis odrzucony -----------------------
+# --- 5. nowe połączenie adresem aplikacji: zapis odrzucony -----------------------
 run_sql verify <<'SQL'
 BEGIN;
 CREATE TEMP TABLE cutover_write_probe (x int);

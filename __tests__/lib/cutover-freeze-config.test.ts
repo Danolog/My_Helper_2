@@ -10,14 +10,17 @@
  *  - zrywanie PO BAZIE: filtr `datname = current_database() AND pid <> pg_backend_pid()`
  *    + wykluczenie superużytkownika (rolsuper); żadnego filtra po nazwie roli
  *    (`usename`, `rolname`, `myhelper_app`); jedno pg_terminate_backend;
- *  - role_override ≠ 0 → kod 7 bez ALTER DATABASE; terminated < backends_before
- *    → kod 8 bez testu zapisu;
+ *  - role_override ≠ 0 → kod 7 bez ALTER DATABASE; kontrola widoczności
+ *    w osobnym wywołaniu przed ALTER (wiersz stats_visible=1), więc odmowa
+ *    widoczności i odmowa zerwania dają różne wiersze; terminated <
+ *    backends_before → kod 8 bez testu zapisu;
  *  - test zapisu: nowe połączenie adresem VERIFY_* (przekazanym do psql jako PG*),
  *    freeze oczekuje 25006, unfreeze sukcesu; inaczej kod 9, nigdy cichy sukces;
  *  - VERIFY_* nie trafia do wywołań administracyjnych, hasła tylko w środowisku;
  *  - odrzucenie URL, PGSERVICE, PGHOSTADDR, gniazda, hosta zdalnego bez
- *    verify-full, poolera jako adresu administracyjnego i zdalnego adresu
- *    aplikacji bez poolera.
+ *    verify-full, poolera jako adresu administracyjnego, zdalnego adresu
+ *    aplikacji bez poolera i adresu aplikacji z innego endpointu niż adres
+ *    administracyjny.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -126,6 +129,8 @@ function run(script: string, args: string[], opts: { env?: Env; psql?: Reply[] }
 }
 
 const OVERRIDE_0: Reply = { out: "role_override=0\n" };
+const VISIBLE: Reply = { out: "stats_visible=1\n" };
+const DENIED_42501: Reply = { err: "psql:<stdin>:2: ERROR:  42501\n", rc: 3 };
 const TERMINATE_OK: Reply = { out: "backends_before=2\nterminated=2\nlogin_roles=1\nskipped_superuser=1\n" };
 const READ_ONLY_ERR: Reply = { err: "psql:<stdin>:2: ERROR:  25006\n", rc: 3 };
 
@@ -136,19 +141,19 @@ const SCRIPTS = [
     value: "on",
     result: "frozen",
     /** Udany przebieg: zapis na nowym połączeniu odrzucony (25006). */
-    ok: [OVERRIDE_0, TERMINATE_OK, { out: "true on\n" }, READ_ONLY_ERR],
+    ok: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: "true on\n" }, READ_ONLY_ERR],
     /** Niezgodny wynik testu zapisu (zapis przeszedł). */
-    badWrite: [OVERRIDE_0, TERMINATE_OK, { out: "true on\n" }, { out: "" }],
-    badShow: [OVERRIDE_0, TERMINATE_OK, { out: "true off\n" }],
+    badWrite: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: "true on\n" }, { out: "" }],
+    badShow: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: "true off\n" }],
   },
   {
     name: "unfreeze-neon.sh",
     logPrefix: "cutover-unfreeze",
     value: "off",
     result: "unfrozen",
-    ok: [OVERRIDE_0, TERMINATE_OK, { out: "true off\n" }, { out: "" }],
-    badWrite: [OVERRIDE_0, TERMINATE_OK, { out: "true off\n" }, READ_ONLY_ERR],
-    badShow: [OVERRIDE_0, TERMINATE_OK, { out: "true on\n" }],
+    ok: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: "true off\n" }, { out: "" }],
+    badWrite: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: "true off\n" }, READ_ONLY_ERR],
+    badShow: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: "true on\n" }],
   },
 ] as const;
 
@@ -161,6 +166,7 @@ describe.each(SCRIPTS)("$name", (s) => {
   const sqlBlocks = [...SOURCE.matchAll(/<<'SQL'\n([\s\S]*?)\nSQL\n/g)].map((m) => m[1]!);
   const okLines = [
     "role_override=0",
+    "stats_visible=1",
     "backends_before=2",
     "terminated=2",
     "login_roles=1",
@@ -235,12 +241,21 @@ describe.each(SCRIPTS)("$name", (s) => {
       expect(SOURCE).toContain("'backends_before=' || (SELECT count(*) FROM target WHERE NOT superuser)");
     });
 
-    it("widoczność pg_stat_activity: bez pg_read_all_stats albo z niewidoczną sesją → 42501 przed ALTER DATABASE", () => {
+    it("widoczność pg_stat_activity: osobny blok SQL przed ALTER DATABASE, 42501 albo stats_visible=1", () => {
+      expect(sqlBlocks).toHaveLength(5);
       const step2 = sqlBlocks[1]!;
+      expect(step2).toMatch(/^DO \$\$\n[\s\S]*?\n\$\$;\nSELECT 'stats_visible=1';$/);
       expect(step2).toContain("IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')");
       expect(step2).toContain("WHERE backend_type IS NULL AND datname = current_database()) THEN");
       expect(step2).toContain("USING ERRCODE = '42501';");
-      expect(step2.indexOf("RAISE EXCEPTION")).toBeLessThan(step2.indexOf("ALTER DATABASE"));
+      expect(step2).not.toMatch(/\bALTER\b|pg_terminate_backend/);
+      // Blok zmiany nie zawiera już kontroli widoczności.
+      const step3 = sqlBlocks[2]!;
+      expect(step3).toMatch(/^SET default_transaction_read_only = off;\nALTER DATABASE /);
+      expect(step3).not.toMatch(/pg_read_all_stats|RAISE EXCEPTION|\bDO \$\$/);
+      // W kodzie: wiersz stats_visible emitowany przed wywołaniem z ALTER DATABASE.
+      expect(CODE.indexOf('emit stats_visible "${NUMS[0]}"')).toBeGreaterThan(0);
+      expect(CODE.indexOf('emit stats_visible "${NUMS[0]}"')).toBeLessThan(CODE.indexOf("ALTER DATABASE"));
     });
 
     it("role_override: ustawienia ról (setrole <> 0) globalne i dla tej bazy", () => {
@@ -257,25 +272,28 @@ describe.each(SCRIPTS)("$name", (s) => {
       expect(r.lines).toEqual(okLines);
       expect(r.stderr).toBe("");
       for (const l of r.lines) expect(EMIT.test(l), l).toBe(true);
-      expect(r.psql).toHaveLength(4);
-      // Najpierw sprawdzenie widoczności pg_stat_activity (przed jakąkolwiek zmianą),
-      // potem: sesja administracyjna na zamrożonej bazie startuje tylko do odczytu — SET przed ALTER.
-      expect(r.psql[1]!.sql).toMatch(
+      expect(r.psql).toHaveLength(5);
+      // Wywołanie 2: sama kontrola widoczności pg_stat_activity (bez zmian w bazie).
+      expect(r.psql[1]!.sql).toMatch(/^DO \$\$\n[\s\S]*?\n\$\$;\nSELECT 'stats_visible=1';\n$/);
+      expect(r.psql[1]!.sql).not.toMatch(/\bALTER\b|pg_terminate_backend/);
+      // Wywołanie 3: sesja administracyjna na zamrożonej bazie startuje tylko do odczytu — SET przed ALTER.
+      expect(r.psql[2]!.sql).toMatch(
         new RegExp(
-          `^DO \\$\\$\\n[\\s\\S]*?\\n\\$\\$;\\nSET default_transaction_read_only = off;\\nALTER DATABASE :"db" SET default_transaction_read_only = ${s.value};\\n`,
+          `^SET default_transaction_read_only = off;\\nALTER DATABASE :"db" SET default_transaction_read_only = ${s.value};\\n`,
         ),
       );
-      expect(r.psql[1]!.args).toContain("db=neondb");
+      expect(r.psql[2]!.sql).not.toMatch(/pg_read_all_stats/);
       expect(r.psql[2]!.args).toContain("db=neondb");
+      expect(r.psql[3]!.args).toContain("db=neondb");
     });
 
-    it("wywołania 1–2 adresem administracyjnym, 3–4 adresem aplikacji; VERIFY_* nigdy w psql", () => {
+    it("wywołania 1–3 adresem administracyjnym, 4–5 adresem aplikacji; VERIFY_* nigdy w psql", () => {
       const r = run(SCRIPT, [], { psql: s.ok.map((x) => ({ ...x })) });
-      for (const c of r.psql.slice(0, 2)) {
+      for (const c of r.psql.slice(0, 3)) {
         expect(c.env).toMatch(/^PGUSER=owner_role$/m);
         expect(c.env).toMatch(/^PGPASSWORD=fake-admin-secret$/m);
       }
-      for (const c of r.psql.slice(2)) {
+      for (const c of r.psql.slice(3)) {
         expect(c.env).toMatch(/^PGUSER=app_login$/m);
         expect(c.env).toMatch(/^PGPASSWORD=fake-verify-secret$/m);
         expect(c.env).toMatch(/^PGDATABASE=neondb$/m);
@@ -292,16 +310,33 @@ describe.each(SCRIPTS)("$name", (s) => {
     it("bez VERIFY_PGPASSWORD hasło administracyjne nie trafia do testu zapisu", () => {
       const r = run(SCRIPT, [], { env: { VERIFY_PGPASSWORD: undefined }, psql: s.ok.map((x) => ({ ...x })) });
       expect(r.status).toBe(0);
-      for (const c of r.psql.slice(2)) expect(c.env).not.toMatch(/^PGPASSWORD=/m);
+      for (const c of r.psql.slice(3)) expect(c.env).not.toMatch(/^PGPASSWORD=/m);
     });
 
-    it("adresy zdalne: verify-full w obu, pooler=yes", () => {
+    it("adresy zdalne: ten sam endpoint (adres aplikacji = wariant -pooler), verify-full w obu, pooler=yes", () => {
       const r = run(SCRIPT, [], { env: ENV_REMOTE, psql: s.ok.map((x) => ({ ...x })) });
       expect(r.status, r.stdout).toBe(0);
       expect(r.lines).toContain("pooler=yes");
       expect(r.psql[0]!.env).toMatch(/^PGHOST=ep-x-1\.eu-central-1\.aws\.neon\.tech$/m);
-      expect(r.psql[3]!.env).toMatch(/^PGHOST=ep-x-1-pooler\.eu-central-1\.aws\.neon\.tech$/m);
-      expect(r.psql[3]!.env).toMatch(/^PGSSLMODE=verify-full$/m);
+      expect(r.psql[4]!.env).toMatch(/^PGHOST=ep-x-1-pooler\.eu-central-1\.aws\.neon\.tech$/m);
+      expect(r.psql[4]!.env).toMatch(/^PGSSLMODE=verify-full$/m);
+    });
+
+    it.each([
+      ["127.0.0.1 = 127.0.0.1", "127.0.0.1", "127.0.0.1"],
+      ["localhost = localhost", "localhost", "localhost"],
+      ["127.0.0.1 i localhost (oba lokalne, bez zmian)", "127.0.0.1", "localhost"],
+    ])("adresy lokalne %s → przechodzi", (_l, pg, verify) => {
+      const r = run(SCRIPT, [], { env: { PGHOST: pg, VERIFY_PGHOST: verify }, psql: s.ok.map((x) => ({ ...x })) });
+      expect(r.status, r.stdout).toBe(0);
+      expect(r.psql).toHaveLength(5);
+    });
+
+    it("strażnik endpointu: kod tylko porównuje VERIFY_PGHOST bez -pooler. z PGHOST", () => {
+      expect(CODE).toContain('if ! is_local "$PGHOST" || ! is_local "$VERIFY_PGHOST"; then\n');
+      expect(CODE).toContain('  [[ "${VERIFY_PGHOST/-pooler./.}" == "$PGHOST" ]] || exit 2\n');
+      // Strażnik przed --dry-run, więc przed jakimkolwiek połączeniem.
+      expect(CODE.indexOf("${VERIFY_PGHOST/-pooler./.}")).toBeLessThan(CODE.indexOf('if [[ "$DRY_RUN" == 1 ]]'));
     });
 
     it("role_override ≠ 0 → kod 7, bez ALTER DATABASE i bez zrywania", () => {
@@ -313,37 +348,60 @@ describe.each(SCRIPTS)("$name", (s) => {
 
     it("terminated < backends_before → kod 8, bez testu zapisu", () => {
       const r = run(SCRIPT, [], {
-        psql: [OVERRIDE_0, { out: "backends_before=3\nterminated=2\nlogin_roles=1\nskipped_superuser=0\n" }],
+        psql: [OVERRIDE_0, VISIBLE, { out: "backends_before=3\nterminated=2\nlogin_roles=1\nskipped_superuser=0\n" }],
       });
       expect(r.status).toBe(8);
       expect(r.lines).toEqual([
         "role_override=0",
+        "stats_visible=1",
         "backends_before=3",
         "terminated=2",
         "login_roles=1",
         "skipped_superuser=0",
         "exit=8",
       ]);
-      expect(r.psql).toHaveLength(2);
+      expect(r.psql).toHaveLength(3);
     });
 
-    it("brak uprawnienia do zerwania (42501) → error_class=other, kod 1", () => {
-      const r = run(SCRIPT, [], { psql: [OVERRIDE_0, { err: "psql:<stdin>:2: ERROR:  42501\n", rc: 3 }] });
+    it("odmowa widoczności (42501 przed stats_visible) → kod 1, bez wywołania z ALTER DATABASE", () => {
+      const r = run(SCRIPT, [], { psql: [OVERRIDE_0, DENIED_42501, TERMINATE_OK] });
       expect(r.status).toBe(1);
       expect(r.lines).toEqual(["role_override=0", "error_class=other", "exit=1"]);
+      expect(r.psql).toHaveLength(2);
+      expect(r.psql.some((c) => /\bALTER\b/.test(c.sql))).toBe(false);
+    });
+
+    it("odmowa zerwania (42501 po stats_visible=1) → kod 1, wiersze inne niż przy odmowie widoczności", () => {
+      const r = run(SCRIPT, [], { psql: [OVERRIDE_0, VISIBLE, DENIED_42501] });
+      expect(r.status).toBe(1);
+      expect(r.lines).toEqual(["role_override=0", "stats_visible=1", "error_class=other", "exit=1"]);
+      expect(r.psql).toHaveLength(3);
+      expect(r.psql[2]!.sql).toContain(`ALTER DATABASE :"db" SET default_transaction_read_only = ${s.value};`);
+    });
+
+    it.each([
+      ["stats_visible=0", "stats_visible=0\n"],
+      ["pusty wynik", ""],
+      ["inny klucz", "visible=1\n"],
+      ["dodatkowy wiersz", "stats_visible=1\nbackends_before=0\n"],
+    ])("wynik kontroli widoczności: %s → rejected_line=1, kod 3, bez ALTER DATABASE", (_l, out) => {
+      const r = run(SCRIPT, [], { psql: [OVERRIDE_0, { out }, TERMINATE_OK] });
+      expect(r.status).toBe(3);
+      expect(r.lines).toEqual(["role_override=0", "rejected_line=1", "exit=3"]);
+      expect(r.psql).toHaveLength(2);
     });
 
     it(`nowe połączenie nie widzi default_transaction_read_only = ${s.value} → ${s.result}=no, kod 9`, () => {
       const r = run(SCRIPT, [], { psql: s.badShow.map((x) => ({ ...x })) });
       expect(r.status).toBe(9);
       expect(r.lines.slice(-2)).toEqual([`${s.result}=no`, "exit=9"]);
-      expect(r.psql).toHaveLength(3);
+      expect(r.psql).toHaveLength(4);
     });
 
     it("adres aplikacji w innej bazie → kod 9, bez testu zapisu", () => {
-      const r = run(SCRIPT, [], { psql: [OVERRIDE_0, TERMINATE_OK, { out: `false ${s.value}\n` }] });
+      const r = run(SCRIPT, [], { psql: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: `false ${s.value}\n` }] });
       expect(r.status).toBe(9);
-      expect(r.psql).toHaveLength(3);
+      expect(r.psql).toHaveLength(4);
     });
 
     it(`test zapisu niezgodny z oczekiwaniem → ${s.result}=no, kod 9`, () => {
@@ -354,7 +412,7 @@ describe.each(SCRIPTS)("$name", (s) => {
 
     it("test zapisu z innym błędem (np. 42501) → error_class=other, kod 1", () => {
       const r = run(SCRIPT, [], {
-        psql: [OVERRIDE_0, TERMINATE_OK, { out: `true ${s.value}\n` }, { err: "psql:<stdin>:2: ERROR:  42501\n", rc: 3 }],
+        psql: [OVERRIDE_0, VISIBLE, TERMINATE_OK, { out: `true ${s.value}\n` }, DENIED_42501],
       });
       expect(r.status).toBe(1);
       expect(r.lines.slice(-2)).toEqual(["error_class=other", "exit=1"]);
@@ -381,21 +439,21 @@ describe.each(SCRIPTS)("$name", (s) => {
       expect(r.stdout).not.toContain(PII);
     });
 
-    it("wynik kroku 2 w złej kolejności → rejected_line=1, kod 3, bez testu zapisu", () => {
+    it("wynik kroku 3 w złej kolejności → rejected_line=1, kod 3, bez testu zapisu", () => {
       const r = run(SCRIPT, [], {
-        psql: [OVERRIDE_0, { out: "terminated=2\nbackends_before=2\nlogin_roles=1\nskipped_superuser=1\n" }],
+        psql: [OVERRIDE_0, VISIBLE, { out: "terminated=2\nbackends_before=2\nlogin_roles=1\nskipped_superuser=1\n" }],
       });
       expect(r.status).toBe(3);
-      expect(r.lines.slice(-2)).toEqual(["rejected_line=1", "exit=3"]);
-      expect(r.psql).toHaveLength(2);
+      expect(r.lines).toEqual(["role_override=0", "stats_visible=1", "rejected_line=1", "exit=3"]);
+      expect(r.psql).toHaveLength(3);
     });
   });
 
   describe("argumenty i środowisko", () => {
-    it("--dry-run: bez połączenia, dry_run=yes, steps=4", () => {
+    it("--dry-run: bez połączenia, dry_run=yes, steps=5", () => {
       const r = run(SCRIPT, ["--dry-run"]);
       expect(r.status).toBe(0);
-      expect(r.lines).toEqual(["dry_run=yes", "steps=4", "exit=0"]);
+      expect(r.lines).toEqual(["dry_run=yes", "steps=5", "exit=0"]);
       expect(r.psql).toHaveLength(0);
     });
 
@@ -422,6 +480,11 @@ describe.each(SCRIPTS)("$name", (s) => {
       ["adres aplikacji zdalny bez verify-full", [], { ...ENV_REMOTE, VERIFY_PGSSLMODE: "require" }],
       ["pooler jako adres administracyjny", [], { ...ENV_REMOTE, PGHOST: "ep-x-1-pooler.eu-central-1.aws.neon.tech" }],
       ["zdalny adres aplikacji bez poolera", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-x-1.eu-central-1.aws.neon.tech" }],
+      ["endpoint aplikacji ≠ endpoint administracyjny", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-y-2-pooler.eu-central-1.aws.neon.tech" }],
+      ["endpoint aplikacji w innym regionie", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-x-1-pooler.us-east-2.aws.neon.tech" }],
+      ["endpoint aplikacji z przedrostkiem administracyjnego", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-x-1-2-pooler.eu-central-1.aws.neon.tech" }],
+      ["adres administracyjny lokalny, aplikacji zdalny", [], { ...ENV_REMOTE, PGHOST: "127.0.0.1", PGSSLMODE: undefined }],
+      ["adres administracyjny zdalny, aplikacji lokalny", [], { ...ENV_REMOTE, VERIFY_PGHOST: "127.0.0.1", VERIFY_PGSSLMODE: undefined }],
     ])("%s → kod 2, bez połączenia, na ekranie tylko exit=2", (_l, args, env) => {
       const r = run(SCRIPT, args, { env, psql: s.ok.map((x) => ({ ...x })) });
       expect(r.status).toBe(2);
