@@ -4,8 +4,10 @@
  *
  * Trasa: limit IP → schemat → termin nie w przeszłości → gość/sesja →
  * przynależność refów → kwota z serwera → salon z długością usługi (długość
- * wizyty = usługa + wariant) → numer BLIK salonu → kolizja i blokady → zapis wizyty
- * `scheduled/false` (bez wiersza `deposit_payments`) w transakcji forSalon.
+ * wizyty = usługa + wariant) → numer BLIK salonu → blokada doradcza, limit
+ * salonu i limit gościa (personel tego salonu je pomija) → kolizja i blokady
+ * → zapis wizyty `scheduled/false` (bez wiersza `deposit_payments`)
+ * w transakcji forSalon.
  *
  * Wiersze-fikstury przechodzą przez WHERE trasy (prawdziwy drizzle,
  * `sqlMatches`), więc test pilnuje też znaczenia predykatów: salon, pracownik,
@@ -13,6 +15,7 @@
  * (z treścią obiektów `Error`: message, stack, cause) nie zawierają cyfr
  * testowego numeru BLIK salonu ani telefonu gościa w zapisach użytych w testach.
  */
+import { PgDialect, QueryBuilder } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // vi.mock niżej jest wynoszony nad importy — trasa ładuje się już z atrapami.
 import { POST } from "@/app/api/deposits/blik-booking/route";
@@ -22,6 +25,7 @@ import { TEST_PHONE } from "@/lib/test-phone";
 import { deadlock, wrapped } from "./deadlock-fixture";
 import { createChainMock, createMockRequest, parseResponse } from "./helpers";
 import { sqlMatches } from "./sql-predicate";
+import type { SQL } from "drizzle-orm";
 
 const SALON = "11111111-1111-4111-8111-111111111111";
 const OTHER_SALON = "99999999-9999-4999-8999-999999999999";
@@ -43,10 +47,21 @@ const VARIANT_UNAVAILABLE = "Wybrany wariant uslugi nie jest juz dostepny. Odswi
 const PAST_START_MESSAGE = "Wybrany termin juz minal. Wybierz inny termin.";
 
 const h = vi.hoisted(() => ({
-  /** Wyniki kolejnych select w transakcjach forSalon (każdy filtrowany przez WHERE). */
-  queue: [] as Record<string, unknown>[][],
+  /**
+   * Wyniki kolejnych select w transakcjach forSalon. Tablica jest filtrowana
+   * przez WHERE; `{ unfiltered }` wraca bez filtra (liczniki limitu salonu
+   * i gościa: `is not null`, `now()` i `regexp_replace` są poza gramatyką
+   * `sqlMatches`).
+   */
+  queue: [] as (Record<string, unknown>[] | { unfiltered: Record<string, unknown>[] })[],
   /** Argument każdego tx.select(...) — jawna lista kolumn. */
   selectArgs: [] as unknown[],
+  /** Każdy tx.select: kolumny, tabela z from(), WHERE i argument limit(). */
+  selects: [] as { cols: unknown; table: () => unknown; where: () => unknown; limit: () => unknown }[],
+  /** Argument każdego tx.execute(...) (obiekt SQL). */
+  executeArgs: [] as unknown[],
+  /** Kolejność wywołań w transakcji: "execute:<sql>" albo "select:<n>". */
+  events: [] as string[],
   selectCalls: 0,
   /** Numer wywołania select, które rzuca (0 = żadne). */
   failAt: 0,
@@ -67,15 +82,30 @@ const h = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-function filteringChain(rows: Record<string, unknown>[]) {
+function filteringChain(cols: unknown, entry: Record<string, unknown>[] | { unfiltered: Record<string, unknown>[] }) {
   const c = createChainMock([]);
   let where: unknown;
+  let table: unknown;
+  let limit: unknown;
   c.where = vi.fn((w: unknown) => {
     where = w;
     return c;
   });
-  c.then = (resolve: (v: unknown[]) => unknown) =>
-    resolve(where === undefined ? rows : rows.filter((r) => sqlMatches(where as Parameters<typeof sqlMatches>[0], r)));
+  c.from = vi.fn((t: unknown) => {
+    table = t;
+    return c;
+  });
+  c.limit = vi.fn((n: unknown) => {
+    limit = n;
+    return c;
+  });
+  h.selects.push({ cols, table: () => table, where: () => where, limit: () => limit });
+  c.then = (resolve: (v: unknown[]) => unknown) => {
+    if (!Array.isArray(entry)) return resolve(entry.unfiltered);
+    return resolve(
+      where === undefined ? entry : entry.filter((r) => sqlMatches(where as Parameters<typeof sqlMatches>[0], r))
+    );
+  };
   return c;
 }
 
@@ -99,8 +129,14 @@ vi.mock("@/lib/server/repository", () => {
     select: (cols?: unknown) => {
       h.selectArgs.push(cols);
       h.selectCalls++;
+      h.events.push(`select:${h.selectCalls}`);
       if (h.failAt === h.selectCalls) throw new Error("db down");
-      return filteringChain(h.queue.shift() ?? []);
+      return filteringChain(cols, h.queue.shift() ?? []);
+    },
+    execute: (query: unknown) => {
+      h.executeArgs.push(query);
+      h.events.push(`execute:${new PgDialect().sqlToQuery(query as SQL).sql}`);
+      return Promise.resolve([]);
     },
     insert: (table: unknown) => {
       h.insert(table);
@@ -230,8 +266,16 @@ const detailsRow = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-/** Kolejka zapytań ścieżki szczęśliwej: salon, kolizje, blokady, szczegóły do SMS. */
+/**
+ * Kolejka zapytań ścieżki szczęśliwej: salon, licznik limitu salonu (pusty),
+ * licznik limitu gościa (pusty), kolizje, blokady, szczegóły do SMS.
+ */
 function primeHappyPath(details: Record<string, unknown>[] = [detailsRow()]) {
+  h.queue.push([salonRow()], [], [], [], [], details);
+}
+
+/** Kolejka personelu tego salonu (bez liczników): salon, kolizje, blokady, szczegóły do SMS. */
+function primeStaffPath(details: Record<string, unknown>[] = [detailsRow()]) {
   h.queue.push([salonRow()], [], [], details);
 }
 
@@ -244,6 +288,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.queue.length = 0;
   h.selectArgs.length = 0;
+  h.selects.length = 0;
+  h.executeArgs.length = 0;
+  h.events.length = 0;
   h.selectCalls = 0;
   h.failAt = 0;
   h.insertError = null;
@@ -378,10 +425,10 @@ describe("201 — wizyta scheduled/false z danymi BLIK", () => {
     primeHappyPath();
     await post();
     expect(h.forSalon.mock.calls.map((c) => c[0])).toEqual([SALON, SALON]);
-    // Trzy transakcje: odczyt salonu, potem kolizja + blokady + zapis razem,
-    // potem szczegóły do SMS.
+    // Trzy transakcje: odczyt salonu, potem liczniki + kolizja + blokady + zapis
+    // razem, potem szczegóły do SMS.
     expect(h.raw.mock.calls.map((c) => c[0])).toEqual([SALON, SALON, SALON]);
-    expect(h.selectArgs).toHaveLength(4);
+    expect(h.selectArgs).toHaveLength(6);
     for (const cols of h.selectArgs) {
       expect(cols).toBeTypeOf("object");
       expect(Object.keys(cols as object).length).toBeGreaterThan(0);
@@ -392,7 +439,7 @@ describe("201 — wizyta scheduled/false z danymi BLIK", () => {
   });
 
   it("assertSalonRefs dostaje salonId z body i wszystkie refy (z wariantem)", async () => {
-    h.queue.push([{ ...salonRow(), variantRowId: VARIANT }], [], [], [detailsRow()]);
+    h.queue.push([{ ...salonRow(), variantRowId: VARIANT }], [], [], [], [], [detailsRow()]);
     await post({ ...validBody, variantId: VARIANT });
     expect(h.refs).toHaveBeenCalledWith(SALON, {
       clientId: null,
@@ -413,24 +460,32 @@ describe("201 — wizyta scheduled/false z danymi BLIK", () => {
     h.refs.mockResolvedValue(null);
     h.calc.mockResolvedValue({ ok: true, required: true, amount: 50, serviceName: "Strzyzenie" });
     h.rate.mockReturnValue({ success: true, remaining: 4, reset: 60_000 });
-    primeHappyPath();
+    primeStaffPath();
     expect((await post({ ...validBody, clientId: CLIENT })).status).toBe(201);
     expect(h.insertValues.mock.calls[0]![0]).toMatchObject({ clientId: CLIENT });
   });
 
   it("wizyta tego pracownika zapisana pod innym salonem nie trafia w warunek kolizji → 201", async () => {
-    h.queue.push([salonRow()], [appt("10:30", "11:30", { salon_id: OTHER_SALON })], []);
+    h.queue.push([salonRow()], [], [], [appt("10:30", "11:30", { salon_id: OTHER_SALON })], []);
     expect((await post()).status).toBe(201);
   });
 
   it("styk z istniejącą wizytą (11–12 po 10–11) i anulowana w tym terminie → 201", async () => {
-    h.queue.push([salonRow()], [appt("11:00", "12:00"), appt("10:00", "11:00", { status: "cancelled" })], []);
+    h.queue.push(
+      [salonRow()],
+      [],
+      [],
+      [appt("11:00", "12:00"), appt("10:00", "11:00", { status: "cancelled" })],
+      []
+    );
     expect((await post()).status).toBe(201);
   });
 
   it("blokada INNEGO pracownika albo pracownika innego salonu → 201", async () => {
     h.queue.push(
       [salonRow()],
+      [],
+      [],
       [],
       [block("10:00", "11:00", { employee_id: OTHER_EMPLOYEE }), block("10:00", "11:00", { salon_id: OTHER_SALON })]
     );
@@ -491,7 +546,7 @@ describe("SMS z numerem BLIK, kwotą i tytułem — tylko po 201", () => {
   it("personel z klientem z kartoteki: SMS na telefon z kartoteki, z clientId i imieniem klienta", async () => {
     h.session.mockResolvedValue({ user: { id: "owner-1" } });
     h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
-    primeHappyPath([detailsRow({ clientFirstName: "Maria", clientPhone: STAFF_CLIENT_PHONE })]);
+    primeStaffPath([detailsRow({ clientFirstName: "Maria", clientPhone: STAFF_CLIENT_PHONE })]);
     const { status, body } = await parseResponse<Ok>(
       await post({ ...validBody, clientId: CLIENT, guestName: undefined, guestPhone: undefined })
     );
@@ -519,7 +574,7 @@ describe("SMS z numerem BLIK, kwotą i tytułem — tylko po 201", () => {
     primeHappyPath();
     await post();
     expect(h.forSalon.mock.calls.at(-1)![0]).toBe(SALON);
-    expect(Object.keys(h.selectArgs[3] as object).sort()).toEqual(
+    expect(Object.keys(h.selectArgs[5] as object).sort()).toEqual(
       ["clientFirstName", "clientPhone", "employeeFirstName", "employeeLastName", "serviceName"]
     );
   });
@@ -551,7 +606,7 @@ describe("SMS z numerem BLIK, kwotą i tytułem — tylko po 201", () => {
 
   it("błąd odczytu szczegółów → 201 bez SMS, log bez treści błędu", async () => {
     primeHappyPath();
-    h.failAt = 4;
+    h.failAt = 6;
     const { status, body } = await parseResponse<Ok>(await post());
     expect(status).toBe(201);
     expect(body.data.blik.phone).toBe(BLIK_PHONE);
@@ -562,7 +617,7 @@ describe("SMS z numerem BLIK, kwotą i tytułem — tylko po 201", () => {
 
   it.each<[string, () => void, Record<string, unknown>?]>([
     ["409 brak numeru BLIK", () => h.queue.push([salonRow(null)])],
-    ["409 termin zajęty", () => h.queue.push([salonRow()], [appt("10:30", "11:30")], [], [detailsRow()])],
+    ["409 termin zajęty", () => h.queue.push([salonRow()], [], [], [appt("10:30", "11:30")], [], [detailsRow()])],
     ["409 wyścig EXCLUDE", () => {
       primeHappyPath();
       h.insertError = wrapped({ code: "23P01", constraint_name: "appointments_no_overlap" });
@@ -812,6 +867,8 @@ describe("długość wizyty = baseDuration usługi + durationModifier wariantu z
       [{ ...salonRow(), variantRowId: VARIANT, variantDurationModifier: modifier }],
       [],
       [],
+      [],
+      [],
       [detailsRow()]
     );
     const res = await post({ ...validBody, variantId: VARIANT, endTime: iso(end) });
@@ -922,7 +979,7 @@ describe("log wyniku SMS — id wizyty i powód z zamkniętej listy", () => {
 
 describe("409 — termin, blokada, brak numeru BLIK, wyścig", () => {
   it("nakładająca się wizyta tego pracownika → 409, bez zapisu", async () => {
-    h.queue.push([salonRow()], [appt("10:30", "11:30")], []);
+    h.queue.push([salonRow()], [], [], [appt("10:30", "11:30")], []);
     const { status, body } = await parseResponse<Err>(await post());
     expect(status).toBe(409);
     expect(body.error).toBe("Wybrany termin jest juz zajety. Wybierz inny termin.");
@@ -931,7 +988,7 @@ describe("409 — termin, blokada, brak numeru BLIK, wyścig", () => {
   });
 
   it("blokada czasu tego pracownika → 409, bez zapisu", async () => {
-    h.queue.push([salonRow()], [], [block("10:59", "18:00")]);
+    h.queue.push([salonRow()], [], [], [], [block("10:59", "18:00")]);
     const { status, body } = await parseResponse<Err>(await post());
     expect(status).toBe(409);
     expect(body.error).toBe("Pracownik nie jest dostepny w wybranym terminie.");
@@ -967,7 +1024,7 @@ describe("409 — termin, blokada, brak numeru BLIK, wyścig", () => {
   });
 
   it("numeru BLIK nie ma w ciele 409 innego niż brak numeru (zajęty termin przy ustawionym numerze)", async () => {
-    h.queue.push([salonRow()], [appt("10:00", "11:00")], []);
+    h.queue.push([salonRow()], [], [], [appt("10:00", "11:00")], []);
     const res = await post();
     expect(res.status).toBe(409);
     expect(await res.text()).not.toContain("000600703");
@@ -1012,8 +1069,8 @@ describe("429, 500, 503", () => {
   });
 
   it("błąd odczytu kalendarza → 500, bez zapisu", async () => {
-    h.queue.push([salonRow()]);
-    h.failAt = 2;
+    h.queue.push([salonRow()], [], []);
+    h.failAt = 4;
     expect((await post()).status).toBe(500);
     expect(h.insert).not.toHaveBeenCalled();
   });
@@ -1035,6 +1092,317 @@ describe("429, 500, 503", () => {
   it("kwota nie jest liczbą skończoną → 503, bez zapisu", async () => {
     h.calc.mockResolvedValue({ ok: true, required: true, amount: Number.NaN, serviceName: "S" });
     expect((await post()).status).toBe(503);
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Limit salonu: 20 rezerwacji z zadatkiem na 24 h ────────────────────────
+
+const RATE_LIMIT_MESSAGE = "Zbyt wiele żądań. Spróbuj ponownie później.";
+const SALON_LIMIT = 20;
+const LOCK_TIMEOUT_SQL = "set local lock_timeout = '5s'";
+const ADVISORY_LOCK_SQL = "select pg_advisory_xact_lock(730201, hashtext($1))";
+
+/** Wynik licznika: `n` wierszy bez filtra WHERE (gramatyka `sqlMatches` nie zna `is not null`). */
+const counterRows = (n: number) => ({
+  unfiltered: Array.from({ length: n }, (_, i) => ({ id: `cccccccc-0000-4000-8000-${String(i).padStart(12, "0")}` })),
+});
+
+/**
+ * Kolejka: salon, licznik salonu z `n` wierszami, licznik gościa z `guest`
+ * wierszami, kolizje, blokady, szczegóły do SMS.
+ */
+function primeWithCounter(
+  n: number,
+  salonOverrides: Record<string, unknown> = {},
+  details = [detailsRow()],
+  guest = 0
+) {
+  h.queue.push([{ ...salonRow(), ...salonOverrides }], counterRows(n), counterRows(guest), [], [], details);
+}
+
+/**
+ * Selecty liczników: `limit()` na tabeli wizyt z samą kolumną `id` (odczyt
+ * szczegółów do SMS też ma `limit(1)`, ale inne kolumny). [0] licznik salonu,
+ * [1] licznik gościa.
+ */
+const limitedSelects = () =>
+  h.selects.filter(
+    (s) => s.table() === appointments && s.limit() !== undefined && Object.keys(s.cols as object).join() === "id"
+  );
+/** Select licznika salonu: pierwszy select z `limit()` na tabeli wizyt. */
+const counterSelect = () => limitedSelects()[0];
+/** Select licznika gościa: drugi select z `limit()` na tabeli wizyt. */
+const guestCounterSelect = () => limitedSelects()[1];
+
+/** Pełne zapytanie licznika salonu wyrenderowane dialektem Postgresa. */
+function renderCounter() {
+  return renderLimited(counterSelect(), "brak selecta licznika salonu");
+}
+
+/** Pełne zapytanie licznika gościa wyrenderowane dialektem Postgresa. */
+function renderGuestCounter() {
+  return renderLimited(guestCounterSelect(), "brak selecta licznika gościa");
+}
+
+function renderLimited(s: (typeof h.selects)[number] | undefined, missing: string) {
+  expect(s, missing).toBeDefined();
+  return new QueryBuilder(new PgDialect())
+    .select(s!.cols as { id: typeof appointments.id })
+    .from(appointments)
+    .where(s!.where() as SQL)
+    .limit(s!.limit() as number)
+    .toSQL();
+}
+
+/** Wywołania tx.execute jako `{ sql, params }` (bez `typings` dialektu). */
+const renderedExecutes = () =>
+  h.executeArgs.map((q) => {
+    const { sql, params } = new PgDialect().sqlToQuery(q as SQL);
+    return { sql, params };
+  });
+
+const normParam = (p: unknown) => (p instanceof Date ? p.toISOString() : p);
+
+describe("limit salonu — 20 rezerwacji z zadatkiem na salon w 24 h", () => {
+  it("19 rezerwacji w oknie → 201 i SMS", async () => {
+    primeWithCounter(SALON_LIMIT - 1);
+    const { status, body } = await parseResponse<Ok>(await post());
+    expect(status).toBe(201);
+    expect(body).toEqual(OK_BODY);
+    expect(h.insert).toHaveBeenCalledTimes(1);
+    expect(h.sms).toHaveBeenCalledTimes(1);
+  });
+
+  it("20 rezerwacji w oknie → 429 z treścią limitu IP, Retry-After 3600, bez zapisu i SMS", async () => {
+    primeWithCounter(SALON_LIMIT);
+    const res = await post();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("3600");
+    const body = (await res.json()) as Err;
+    expect(body).toEqual({ success: false, error: RATE_LIMIT_MESSAGE });
+    expect(body.code).toBeUndefined();
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+    // Licznik gościa, kolizja i blokady nieodpytywane: licznik salonu kończy transakcję.
+    expect(h.selectCalls).toBe(2);
+    expect(guestCounterSelect()).toBeUndefined();
+  });
+
+  it("log odmowy: warn z samym salonId i powodem", async () => {
+    primeWithCounter(SALON_LIMIT);
+    await post();
+    const calls = logCallsMatching(h.logger.warn, "salon daily limit");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![0]).toBe("[BlikBooking API] Deposit booking refused — salon daily limit");
+    expect(calls[0]![1]).toEqual({ salonId: SALON, reason: "salon_daily_limit" });
+    expect(calls[0]).toHaveLength(2);
+  });
+
+  it("kolejność w transakcji: lock_timeout → blokada doradcza salonu → licznik salonu → licznik gościa → kolizja", async () => {
+    primeHappyPath();
+    expect((await post()).status).toBe(201);
+    // select:1 = odczyt salonu (osobna transakcja), select:2 = licznik salonu,
+    // select:3 = licznik gościa, select:4 = kolizja.
+    expect(h.events.slice(0, 6)).toEqual([
+      "select:1",
+      `execute:${LOCK_TIMEOUT_SQL}`,
+      `execute:${ADVISORY_LOCK_SQL}`,
+      "select:2",
+      "select:3",
+      "select:4",
+    ]);
+    expect(h.selects[1]).toBe(counterSelect());
+    expect(h.selects[2]).toBe(guestCounterSelect());
+    expect(h.selects[3]!.limit()).toBeUndefined();
+    const [timeout, lock] = renderedExecutes();
+    expect(timeout).toEqual({ sql: LOCK_TIMEOUT_SQL, params: [] });
+    expect(lock).toEqual({ sql: ADVISORY_LOCK_SQL, params: [SALON] });
+  });
+
+  it("SQL licznika salonu: salon, deposit_amount niepuste, bez anulowanych i kartoteki, created_at z zegara bazy, start_time, limit 20", async () => {
+    primeHappyPath();
+    await post();
+    const { sql, params } = renderCounter();
+    expect(sql).toContain('"appointments"."salon_id" = $1');
+    expect(params[0]).toBe(SALON);
+    expect(sql).toContain('"appointments"."deposit_amount" is not null');
+    expect(sql).toContain('"appointments"."status" <> $2');
+    expect(params[1]).toBe("cancelled");
+    expect(sql).toContain('"appointments"."client_id" is null');
+    expect(sql).toContain(`"appointments"."created_at" >= now() - interval '24 hours'`);
+    expect(sql).toMatch(/"appointments"\."start_time" >= \$3/);
+    expect(normParam(params[2])).toBe(new Date(NOW.getTime() - 24 * 60 * MINUTE_MS - 10 * MINUTE_MS).toISOString());
+    expect(sql).toMatch(/limit \$4$/);
+    expect(params[3]).toBe(SALON_LIMIT);
+    expect(params).toHaveLength(4);
+  });
+
+  it("licznik rzuca → 500, bez zapisu i SMS", async () => {
+    primeHappyPath();
+    h.failAt = 2;
+    const { status, body } = await parseResponse<Err>(await post());
+    expect(status).toBe(500);
+    expect(body.error).toBe("Nie udalo sie utworzyc rezerwacji");
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, () => void, Record<string, unknown>?]>([
+    ["400 walidacja", () => primeHappyPath(), { employeeId: undefined }],
+    ["400 zła kwota", () => {
+      h.calc.mockResolvedValue({ ok: true, required: true, amount: 60, serviceName: "S" });
+      primeHappyPath();
+    }],
+    ["400 długość wizyty", () => primeHappyPath(), { endTime: iso("10:59") }],
+    ["404 salon niewidoczny", () => h.queue.push([])],
+    ["404 usługa", () => h.calc.mockResolvedValue({ ok: false, error: "service_not_found" })],
+    ["409 brak numeru BLIK", () => h.queue.push([salonRow(null)])],
+  ])("%s → bez blokady i bez licznika", async (_n, arrange, patch = {}) => {
+    arrange();
+    const res = await post({ ...validBody, ...patch });
+    expect([400, 404, 409]).toContain(res.status);
+    expect(h.executeArgs).toHaveLength(0);
+    expect(counterSelect()).toBeUndefined();
+    expect(h.selectCalls).toBeLessThanOrEqual(1);
+  });
+
+  it("salon B: blokada i licznik niosą salon B, nie A", async () => {
+    primeWithCounter(0, { id: OTHER_SALON }, [detailsRow({ salon_id: OTHER_SALON })]);
+    expect((await post({ ...validBody, salonId: OTHER_SALON })).status).toBe(201);
+    const [, lock] = renderedExecutes();
+    expect(lock).toEqual({ sql: ADVISORY_LOCK_SQL, params: [OTHER_SALON] });
+    const { params } = renderCounter();
+    expect(params[0]).toBe(OTHER_SALON);
+    expect(params).not.toContain(SALON);
+    const guest = renderGuestCounter();
+    expect(guest.params[0]).toBe(OTHER_SALON);
+    expect(guest.params).not.toContain(SALON);
+  });
+});
+
+// ─── Limit gościa: 3 niewpłacone rezerwacje na numer albo konto w salonie ───
+
+const GUEST_LIMIT = 3;
+
+describe("limit gościa — 3 niewpłacone rezerwacje z zadatkiem na gościa w salonie w 24 h", () => {
+  it("gość z 2 rezerwacjami w oknie → 201 i SMS", async () => {
+    primeWithCounter(0, {}, [detailsRow()], GUEST_LIMIT - 1);
+    const { status, body } = await parseResponse<Ok>(await post());
+    expect(status).toBe(201);
+    expect(body).toEqual(OK_BODY);
+    expect(h.insert).toHaveBeenCalledTimes(1);
+    expect(h.sms).toHaveBeenCalledTimes(1);
+  });
+
+  it("gość z 3 rezerwacjami w oknie → 429 z treścią limitu IP, Retry-After 3600, bez zapisu i SMS", async () => {
+    primeWithCounter(0, {}, [detailsRow()], GUEST_LIMIT);
+    const res = await post();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("3600");
+    expect(await res.json()).toEqual({ success: false, error: RATE_LIMIT_MESSAGE });
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+    // Odczyt salonu, licznik salonu, licznik gościa; kolizja i blokady nieodpytywane.
+    expect(h.selectCalls).toBe(3);
+  });
+
+  it("log odmowy: warn z samym salonId i powodem", async () => {
+    primeWithCounter(0, {}, [detailsRow()], GUEST_LIMIT);
+    await post();
+    const calls = logCallsMatching(h.logger.warn, "guest daily limit");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![0]).toBe("[BlikBooking API] Deposit booking refused — guest daily limit");
+    expect(calls[0]![1]).toEqual({ salonId: SALON, reason: "guest_daily_limit" });
+    expect(calls[0]).toHaveLength(2);
+    expect(logCallsMatching(h.logger.warn, "salon daily limit")).toHaveLength(0);
+  });
+
+  it("SQL licznika gościa bez sesji: niewpłacone, nieanulowane, 9 ostatnich cyfr telefonu z body, limit 3", async () => {
+    primeHappyPath();
+    await post();
+    const { sql, params } = renderGuestCounter();
+    expect(sql).toContain('"appointments"."salon_id" = $1');
+    expect(params[0]).toBe(SALON);
+    expect(sql).toContain('"appointments"."deposit_amount" is not null');
+    expect(sql).toContain('"appointments"."status" <> $2');
+    expect(params[1]).toBe("cancelled");
+    expect(sql).toContain(`coalesce("appointments"."deposit_paid", false) = false`);
+    expect(sql).toContain(`"appointments"."created_at" >= now() - interval '24 hours'`);
+    expect(sql).toMatch(/"appointments"\."start_time" >= \$3/);
+    expect(normParam(params[2])).toBe(new Date(NOW.getTime() - 24 * 60 * MINUTE_MS - 10 * MINUTE_MS).toISOString());
+    expect(sql).toContain(
+      `right(regexp_replace(coalesce("appointments"."guest_phone", ''), '[^0-9]', '', 'g'), 9) = right(regexp_replace($4, '[^0-9]', '', 'g'), 9)`
+    );
+    // Klucz to telefon gościa z body (po normalizacji schematu), nie numer zaszyty w SQL.
+    expect(params[3]).toBe(GUEST_PHONE_E164);
+    expect(sql).not.toContain("000600700");
+    expect(params.filter((p) => String(p).includes("000600700"))).toEqual([GUEST_PHONE_E164]);
+    expect(sql).not.toContain("booked_by_user_id");
+    expect(sql).toMatch(/limit \$5$/);
+    expect(params[4]).toBe(GUEST_LIMIT);
+    expect(params).toHaveLength(5);
+  });
+
+  it("inny telefon gościa w body → inny klucz licznika", async () => {
+    primeHappyPath();
+    expect((await post({ ...validBody, guestPhone: "+48 000 600 702" })).status).toBe(201);
+    const { params } = renderGuestCounter();
+    expect(params[3]).toBe("+48000600702");
+    expect(params).not.toContain(GUEST_PHONE_E164);
+  });
+
+  it("klient portalu (sesja, nie personel): klucz = id użytkownika sesji, SQL bez guest_phone", async () => {
+    h.session.mockResolvedValue({ user: { id: "user-1" } });
+    primeHappyPath();
+    expect((await post({ ...validBody, guestName: undefined, guestPhone: undefined })).status).toBe(201);
+    const { sql, params } = renderGuestCounter();
+    expect(sql).toContain('"appointments"."booked_by_user_id" = $4');
+    expect(params[3]).toBe("user-1");
+    expect(sql).not.toContain("guest_phone");
+    expect(sql).not.toContain("regexp_replace");
+  });
+
+  it("licznik gościa rzuca → 500, bez zapisu i SMS", async () => {
+    primeHappyPath();
+    h.failAt = 3;
+    const { status, body } = await parseResponse<Err>(await post());
+    expect(status).toBe(500);
+    expect(body.error).toBe("Nie udalo sie utworzyc rezerwacji");
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Personel salonu poza limitami ──────────────────────────────────────────
+
+describe("personel salonu omija blokadę i oba liczniki", () => {
+  it("personel tego salonu → 201 bez lock_timeout, blokady i liczników", async () => {
+    h.session.mockResolvedValue({ user: { id: "owner-1" } });
+    h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
+    primeStaffPath();
+    const { status, body } = await parseResponse<Ok>(await post());
+    expect(status).toBe(201);
+    expect(body).toEqual(OK_BODY);
+    expect(h.executeArgs).toHaveLength(0);
+    expect(limitedSelects()).toHaveLength(0);
+    // Jedyny select z limit() na wizytach to odczyt szczegółów do SMS (limit 1).
+    expect(h.selects.filter((s) => s.table() === appointments && s.limit() !== undefined).map((s) => s.limit())).toEqual(
+      [1]
+    );
+    expect(h.insert).toHaveBeenCalledTimes(1);
+    expect(h.sms).toHaveBeenCalledTimes(1);
+  });
+
+  it("personel INNEGO salonu → blokada i oba liczniki działają, klucz = jego konto", async () => {
+    h.session.mockResolvedValue({ user: { id: "owner-2" } });
+    h.salonCtx.mockResolvedValue({ salonId: OTHER_SALON, role: "owner" });
+    primeWithCounter(0, {}, [detailsRow()], GUEST_LIMIT);
+    const res = await post();
+    expect(res.status).toBe(429);
+    expect(renderedExecutes().map((e) => e.sql)).toEqual([LOCK_TIMEOUT_SQL, ADVISORY_LOCK_SQL]);
+    expect(limitedSelects()).toHaveLength(2);
+    expect(renderGuestCounter().params[3]).toBe("owner-2");
     expect(h.insert).not.toHaveBeenCalled();
   });
 });

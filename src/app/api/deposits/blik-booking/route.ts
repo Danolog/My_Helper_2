@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { parseBody, blikBookingSchema } from "@/lib/api-validation";
 import {
   appointmentConflictWhere,
@@ -18,7 +18,7 @@ import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, clients, employees, salons, serviceVariants, services, timeBlocks } from "@/lib/schema";
-import { forSalon } from "@/lib/server/repository";
+import { forSalon, type DbTx } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
 import {
   SMS_PROVIDER_UNAVAILABLE_ERROR,
@@ -63,7 +63,31 @@ import {
  * i zapytania samej trasy idą przez `forSalon(salonId)` (kontekst RLS) z jawną
  * listą kolumn i jawnym `eq(salonId)` tam, gdzie tabela ma `salon_id`; wariant
  * usługi zawęża sprawdzona usługa, blok czasu — pracownik.
+ *
+ * Limit salonu: najwyżej 20 rezerwacji z zadatkiem (`deposit_amount` niepuste)
+ * na salon w 24 h kroczących, liczonych zegarem bazy (`created_at` wobec
+ * `now()`), bez anulowanych i bez wizyt z kartoteką klienta. Właściciel
+ * odblokowuje salon, anulując podejrzane rezerwacje w panelu.
+ *
+ * Limit gościa: najwyżej 3 niewpłacone, nieanulowane rezerwacje z zadatkiem
+ * w salonie w tych samych 24 h na jeden numer telefonu gościa (ostatnie 9
+ * cyfr, niezależnie od zapisu) albo na jedno konto klienta portalu.
+ *
+ * Oba liczniki czyta transakcja zapisu pod blokadą doradczą salonu, przed
+ * insertem i przed SMS. Przekroczenie → 429 z treścią limitu IP i
+ * `Retry-After: 3600`; wizyta nie powstaje, SMS nie wychodzi. Personel tego
+ * salonu omija blokadę i oba liczniki.
  */
+
+const RATE_LIMIT_MESSAGE = "Zbyt wiele żądań. Spróbuj ponownie później.";
+
+const BLIK_BOOKING_SALON_DAILY_LIMIT = 20;
+const BLIK_BOOKING_SALON_WINDOW_MS = 24 * 60 * 60_000;
+/** Przestrzeń `pg_advisory_xact_lock(<przestrzeń>, hashtext(salonId))`; inna niż przestrzenie subskrypcji. */
+const BLIK_BOOKING_SALON_LOCK_NAMESPACE = 730_201;
+const BLIK_BOOKING_GUEST_DAILY_LIMIT = 3;
+/** Wspólny `Retry-After` limitu salonu i gościa: stały, nie zdradza rytmu rezerwacji salonu. */
+const BOOKING_LIMIT_RETRY_AFTER_S = 3600;
 
 const SLOT_TAKEN_MESSAGE = "Wybrany termin jest juz zajety. Wybierz inny termin.";
 const EMPLOYEE_UNAVAILABLE_MESSAGE = "Pracownik nie jest dostepny w wybranym terminie.";
@@ -116,6 +140,96 @@ function blikNotConfiguredResponse(salonPhone: string | null) {
 /** Niepusty napis albo null — `settingsJson` może mieć dowolny kształt. */
 function toBlikPhone(raw: unknown): string | null {
   return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+}
+
+type BookingLimitRefusal = { kind: "salon_daily_limit" } | { kind: "guest_daily_limit" };
+
+/**
+ * 429 limitu salonu albo gościa: treść identyczna z limitem IP, bez `code`
+ * i liczby, więc klient nie odróżni, który limit zadziałał.
+ */
+function bookingLimitResponse() {
+  return NextResponse.json(
+    { success: false, error: RATE_LIMIT_MESSAGE },
+    { status: 429, headers: { "Retry-After": String(BOOKING_LIMIT_RETRY_AFTER_S) } }
+  );
+}
+
+/**
+ * Klucz gościa w liczniku gościa: konto klienta portalu albo numer telefonu
+ * gościa. Numer porównujemy po ostatnich 9 cyfrach po obu stronach, więc
+ * `+48 000 600 700` i `000600700` to ten sam gość. Bez konta i bez numeru
+ * (trasa wymaga numeru od gościa bez sesji) — błąd zamiast licznika, który
+ * dopasowałby wszystkie wizyty bez numeru.
+ */
+function guestKeyWhere(bookedByUserId: string | null, guestPhone: string | null): SQL {
+  if (bookedByUserId) return eq(appointments.bookedByUserId, bookedByUserId);
+  if (guestPhone) {
+    return sql`right(regexp_replace(coalesce(${appointments.guestPhone}, ''), '[^0-9]', '', 'g'), 9) = right(regexp_replace(${guestPhone}, '[^0-9]', '', 'g'), 9)`;
+  }
+  throw new Error("BLIK booking without guest key");
+}
+
+/**
+ * Limity salonu i gościa na początku transakcji zapisu. Blokada doradcza
+ * salonu szereguje równoległe rezerwacje BLIK tego salonu spoza personelu,
+ * więc między nimi liczniki i insert widzą ten sam stan; personel tego salonu
+ * tej funkcji nie woła. Warunek `start_time` tylko zawęża skan: trasa
+ * odrzuca początek wcześniejszy niż teraz − 5 min, więc rezerwacja z ostatnich 24 h startuje nie wcześniej niż teraz − 24 h
+ * 5 min (+5 min zapasu na rozjazd zegarów).
+ *
+ * Licznik salonu pomija anulowane (właściciel odblokowuje salon anulowaniem)
+ * i wizyty z kartoteką klienta (podpina ją tylko personel). Licznik gościa
+ * liczy tylko niewpłacone i nieanulowane: opłacony zadatek to prawdziwy klient.
+ */
+async function enforceBookingLimits(
+  tx: DbTx,
+  input: { salonId: string; bookedByUserId: string | null; guestPhone: string | null }
+): Promise<BookingLimitRefusal | null> {
+  const { salonId } = input;
+  await tx.execute(sql.raw("set local lock_timeout = '5s'"));
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(${sql.raw(String(BLIK_BOOKING_SALON_LOCK_NAMESPACE))}, hashtext(${salonId}))`
+  );
+  const earliestCountedStart = new Date(Date.now() - BLIK_BOOKING_SALON_WINDOW_MS - 10 * MS_PER_MINUTE);
+  const recentSalonBookings = await tx
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.salonId, salonId),
+        isNotNull(appointments.depositAmount),
+        ne(appointments.status, "cancelled"),
+        isNull(appointments.clientId),
+        gte(appointments.createdAt, sql`now() - interval '24 hours'`),
+        gte(appointments.startTime, earliestCountedStart)
+      )
+    )
+    .limit(BLIK_BOOKING_SALON_DAILY_LIMIT);
+  if (recentSalonBookings.length >= BLIK_BOOKING_SALON_DAILY_LIMIT) {
+    return { kind: "salon_daily_limit" };
+  }
+
+  const recentGuestBookings = await tx
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.salonId, salonId),
+        isNotNull(appointments.depositAmount),
+        ne(appointments.status, "cancelled"),
+        sql`coalesce(${appointments.depositPaid}, false) = false`,
+        gte(appointments.createdAt, sql`now() - interval '24 hours'`),
+        gte(appointments.startTime, earliestCountedStart),
+        guestKeyWhere(input.bookedByUserId, input.guestPhone)
+      )
+    )
+    .limit(BLIK_BOOKING_GUEST_DAILY_LIMIT);
+  if (recentGuestBookings.length >= BLIK_BOOKING_GUEST_DAILY_LIMIT) {
+    return { kind: "guest_daily_limit" };
+  }
+
+  return null;
 }
 
 interface BookingSmsInput {
@@ -222,7 +336,7 @@ export async function POST(request: Request) {
   const rateLimitResult = strictRateLimit.check(ip);
   if (!rateLimitResult.success) {
     return NextResponse.json(
-      { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+      { success: false, error: RATE_LIMIT_MESSAGE },
       { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
     );
   }
@@ -446,6 +560,18 @@ export async function POST(request: Request) {
     // Kolizja, blokady czasu i zapis w jednej transakcji z kontekstem salonu.
     // Wyścig, którego SELECT nie złapie, odrzuca EXCLUDE w bazie (catch → 409).
     const outcome = await salonDb.raw(async (tx) => {
+      // Personel tego salonu jest uwierzytelniony i przypisany do salonu, a
+      // limity chronią salon przed obcym — personel ich nie przechodzi (bez
+      // blokady i bez liczników). Personel innego salonu jest tu obcym.
+      if (!isSalonStaff) {
+        const refusal = await enforceBookingLimits(tx, {
+          salonId,
+          bookedByUserId,
+          guestPhone: guestPhone ?? null,
+        });
+        if (refusal) return refusal;
+      }
+
       const overlapping = await tx
         .select({ id: appointments.id })
         .from(appointments)
@@ -495,6 +621,21 @@ export async function POST(request: Request) {
       return created ? { kind: "created" as const, appointment: created } : { kind: "not_created" as const };
     });
 
+    if (outcome.kind === "salon_daily_limit") {
+      logger.warn("[BlikBooking API] Deposit booking refused — salon daily limit", {
+        salonId,
+        reason: "salon_daily_limit",
+      });
+      return bookingLimitResponse();
+    }
+    if (outcome.kind === "guest_daily_limit") {
+      // Bez telefonu, IP i id użytkownika: to dane gościa.
+      logger.warn("[BlikBooking API] Deposit booking refused — guest daily limit", {
+        salonId,
+        reason: "guest_daily_limit",
+      });
+      return bookingLimitResponse();
+    }
     if (outcome.kind === "slot_taken") {
       return NextResponse.json({ success: false, error: SLOT_TAKEN_MESSAGE }, { status: 409 });
     }

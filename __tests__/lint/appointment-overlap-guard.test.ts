@@ -10,8 +10,9 @@
  *  2. W tych plikach żadnego własnego porównania `lt/lte/gt/gte` na
  *     `appointments.startTime/endTime` ani `timeBlocks.startTime/endTime`
  *     (blokady idą przez `overlapsRange`). Wyjątek: filtr zakresu dat listy
- *     GET /api/appointments, pobranie dnia w available-slots i warunek wyboru
- *     powiązanej wizyty na liście oczekujących (to nie kolizje).
+ *     GET /api/appointments, pobranie dnia w available-slots, warunek wyboru
+ *     powiązanej wizyty na liście oczekujących i zawężenie skanu liczników
+ *     dziennego limitu rezerwacji z zadatkiem BLIK (to nie kolizje).
  *  3. W całym `src/app/api/**` i `src/lib/**` żadnego `gte(appointments.endTime`
  *     ani pary `lte(appointments.startTime` + `gte(appointments.endTime` —
  *     to kształt dawnej kolizji „włącznie”.
@@ -53,6 +54,11 @@ const ALLOWED: Record<string, string[]> = {
   "src/lib/waiting-list.ts": [
     "gt(appointments.startTime, offeredStart)",
     "gt(appointments.startTime, now)",
+  ],
+  // Zawężenie skanu liczników dziennego limitu rezerwacji BLIK (okno 24 h):
+  // to nie kolizja terminów.
+  "src/app/api/deposits/blik-booking/route.ts": [
+    "gte(appointments.startTime, earliestCountedStart)",
   ],
 };
 
