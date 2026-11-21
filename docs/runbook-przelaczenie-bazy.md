@@ -45,7 +45,10 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   `interactivecomments` wykonałby je — `docs/runbook-krok-d.md` sekcja 5).
   W blokach są wyłącznie symbole zastępcze w `<…>`; prawdziwych nazw hostów,
   instancji, projektów i haseł nie zapisuje się w repo, w notatce okna ani w
-  zgłoszeniach.
+  zgłoszeniach. Wyjątek — tylko w notatce okna (nigdy w repo ani
+  w zgłoszeniach): host `<domena Vercel Production>` i pozostałe domeny projektu z F1,
+  adresy `*.vercel.app` wybrane według F1 i 0.3 procedury zatrzymania zapisów oraz `<LB_IP>`.
+  Identyfikator projektu GCP i nazwy instancji nie mają wyjątku.
 - **Strażnik zmiennej w tym samym wierszu.** Polecenia gcloud zaczynają się od
   `: "${CSQL_INSTANCE:?}" &&`: przy pustej zmiennej zsh przerywa cały wiersz,
   ale wykonałby następny wklejony wiersz — dlatego strażnik i polecenie są
@@ -73,7 +76,8 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
    **cofnięcie** przełączenia ruchu (wycofanie, droga B w sekcji 2, i powrót,
    3.3 krok 10). Każdy krok z poleceniem i oczekiwanym wynikiem. **Bez tej
    procedury nie startuje ani próba generalna, ani okno.** Ten runbook (2.1,
-   2.9, wycofanie, 3.3) tylko się do niej odwołuje.
+   2.9, wycofanie, 3.3) tylko się do niej odwołuje. Procedura:
+   `docs/runbook-zatrzymanie-zapisow.md`.
 2. **Role Cloud SQL w stanie docelowym** — osobny krok wykonywany za zgodą
    właściciela, z recenzją bezpieczeństwa, **przed** próbą generalną (żeby próba
    sprawdziła stan docelowy; instancja próbna z 1.1 jest klonem z tym stanem):
@@ -379,10 +383,15 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 |---|---|
 | przed próbą generalną, na instancji produkcyjnej Cloud SQL: zmiana ról (`REVOKE`/`GRANT`), kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis). Jeśli właściciel daje zgodę na zmianę ról i na przebieg osobno — dwa wiersze; jedna zgoda nie obejmuje drugiej | 1.0 pkt 2 |
 | przywrócenie z kopii `pre-migrate` po czerwonym jobie | 1.0 pkt 2 |
-| start okna: zatrzymanie zapisów aplikacji i cronów, ingress Cloud Run `internal`, zamrożenie produkcyjnego Neona | 2.1–2.2 |
+| próba generalna na produkcji (procedura zatrzymania zapisów, L8): ingress Cloud Run `internal` i z powrotem `all`, pauza i wznowienie zadań Scheduler, przełącznik cronów Vercela wyłącz/włącz, reguła zapory Vercela na adresie jednego starszego wdrożenia (utworzenie, sprawdzenie, usunięcie) | 1.1; procedura zatrzymania zapisów L8 |
+| przed oknem, poza repo, bez wpływu na ruch: ochrona wdrożeń Vercela „Standard Protection”, usunięcie `POSTGRES_URL` z zakresu Preview, utworzenie **wyłączonej** reguły zapory Vercela (`Deny`, cały projekt), dopisanie adresu przekierowania i originu `app.nordsignal.cc` do klienta Google OAuth, wersja `stripe-webhook-secret` = sekret endpointu Stripe. Każda pozycja potwierdzana osobno | procedura zatrzymania zapisów L1, L3, L5, L6 |
+| przed oknem: zmienne środowiska `production-gcp` (`BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL` = `https://app.nordsignal.cc`, `GOOGLE_CLIENT_ID` według L5), wersja `google-client-secret` według L5 i przebieg `deploy-cloud-run.yml` z `main` o `<sha okna>` (nowa rewizja usługi, ruch nadal na Vercelu) | procedura zatrzymania zapisów, sekcja 1 (P4, P5) |
+| start okna: zatrzymanie zapisów Vercel Production (włączenie reguły zapory Vercela, L1), wyłączenie cronów Vercela (L2), ingress Cloud Run `internal`, wstrzymanie zadań Cloud Scheduler (W6), zamrożenie produkcyjnego Neona; przy wycofaniu (droga A pkt 3, także po drodze B) wznowienie stanu sprzed okna: wyłączenie reguły zapory Vercela (R1), włączenie cronów Vercela (R3), ingress Cloud Run `all` (R4) | 2.1–2.2; wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R1–R4) |
 | kopia na żądanie Cloud SQL „przed importem” i — w razie potrzeby — przywrócenie z niej | 2.4; wycofanie (sekcja 2) |
-| przełączenie ruchu aplikacji na GCP, ingress Cloud Run z powrotem `all`; przy wycofaniu (droga B) cofnięcie przełączenia | 2.9; wycofanie (sekcja 2) |
+| przełączenie ruchu aplikacji na GCP: ingress Cloud Run z powrotem `all`, utworzenie rekordu `A app` → LB (DNS only), włączenie polityki alertu `myhelper-app-health-alert`, zmiana adresu endpointu webhooka Stripe; przy wycofaniu (droga B): usunięcie rekordu `app`, przywrócenie adresu endpointu, wyłączenie polityki alertu, ingress Cloud Run `internal` (zapora i dalsze wznowienie: wiersz „start okna”, droga A pkt 3) | 2.9; wycofanie (sekcja 2), droga B |
 | odmrożenie Cloud SQL (początek zapisów na GCP) | 2.10 |
+| po 2.10 z kodem 0 albo po drodze C, przy warunkach przed K1.1 (W4 = `<sha okna>`; T5 z serwera autorytatywnego, a resolvery publiczne z `<LB_IP>` albo upłynęło minimum SOA od T4; T6 o oczekiwanym wyniku): scalenie K1 (przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`, wdrożenie Vercel Production) i zawężenie reguły zapory Vercela do metod innych niż `GET`/`HEAD` | procedura zatrzymania zapisów L4 (K1, warunki przed K1.1); wycofanie, droga C |
+| po oknie albo przy wycofaniu (droga A pkt 3): wznowienie zadań Cloud Scheduler, wyłącznie tych, które w W0 miały `ENABLED` (lista z notatki okna) | 2.10; wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R5) |
 | okno powrotu (osobne okno, osobna zgoda) z gałęzią Neona „przed powrotem” i kopią Cloud SQL | sekcja 3 |
 
 ### 1.3 Zatrzymanie zapisów PRZED zamrożeniem
@@ -763,7 +772,7 @@ potwierdzony odczytem `off`**: aplikacja na GCP mogła już zapisać, więc
 przesłanka drogi A nie obowiązuje. **Okno uznaje się za zakończone**, ruch
 zostaje na GCP. Problem sesji tylko do odczytu usuwa ponowne
 `unfreeze-neon.sh` (blok 2.10). Domknięcie jak wiersz 0 w 2.10: zadania
-Scheduler według decyzji właściciela, koniec tunelu i haseł (1.5, 1.6).
+Scheduler według decyzji właściciela, koniec tunelu i haseł (1.5, 1.6); przekierowanie starej domeny według procedury zatrzymania zapisów, sekcja 3 (K1, warunek po drodze C).
 Powrót na Neon — wyłącznie sekcją 3 (osobne okno, osobna zgoda).
 
 ### 2.1 Zatrzymanie zapisów
@@ -1027,7 +1036,9 @@ Oczekiwane (`rls-check.sh:136-138`): `salon_context_empty=yes`,
 (1.0 pkt 1); bez niej okno nie startuje.** Za zgodą właściciela (1.2): ruch
 na usługę GCP (DNS `app` i LB, `BETTER_AUTH_URL` / `NEXT_PUBLIC_APP_URL`,
 przekierowania OAuth, adresy webhooków) i ingress Cloud Run z powrotem na
-`all` (koniec głównej kontroli z 2.1). Neon zostaje zamrożony, więc aplikacja
+`all` (koniec głównej kontroli z 2.1). `BETTER_AUTH_URL` /
+`NEXT_PUBLIC_APP_URL` i przekierowania OAuth są ustawiane przed oknem (procedura
+zatrzymania zapisów, sekcja 1: P4, P5, P8), w oknie tylko odczyt. Neon zostaje zamrożony, więc aplikacja
 na Vercelu nie zapisze. Do 2.10 zapisy na GCP kończą się błędem tylko do
 odczytu — ten odcinek ma być krótki. Stop od tej chwili do 2.10: najpierw
 odczyt stanu (blok w 2.10); `on` → droga B (cofnięcie przełączenia, potem
