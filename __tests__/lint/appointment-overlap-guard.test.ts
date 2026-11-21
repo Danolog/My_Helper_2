@@ -54,6 +54,11 @@ const ALLOWED: Record<string, string[]> = {
     "gt(appointments.startTime, offeredStart)",
     "gt(appointments.startTime, now)",
   ],
+  // Zawężenie skanu liczników dziennego limitu rezerwacji BLIK (okno 24 h):
+  // to nie kolizja terminów.
+  "src/app/api/deposits/blik-booking/route.ts": [
+    "gte(appointments.startTime, earliestCountedStart)",
+  ],
 };
 
 const COMPARISON = /\b(lt|lte|gt|gte)\(\s*(appointments|timeBlocks)\.(startTime|endTime)\s*,\s*([^()]*(?:\([^()]*\))?[^()]*)\)/g;
