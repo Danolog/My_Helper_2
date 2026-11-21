@@ -143,7 +143,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
     if (ids.length > 0) await cancelAsOwner(browser, baseURL!, ids);
   });
 
-  test('server prices the BLIK deposit at full price in happy hours window: 30 PLN rejected, 60 PLN accepted', { tag: '@full' }, async ({ page }) => {
+  test('server prices the BLIK deposit at full price in happy hours window: 30 PLN rejected, 60 PLN accepted', { tag: ['@full', '@smoke'] }, async ({ page }) => {
     const frozenCalls: string[] = [];
     page.on('request', (r) => {
       if (/\/api\/promotions\/check/.test(new URL(r.url()).pathname)) frozenCalls.push(r.url());
@@ -185,7 +185,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
   // odrzucony: ten test przestalby wysylac prawdziwe body formularza, a to
   // jest jego jedyny przedmiot. Kolejnosc testow nie ma znaczenia — kazdy
   // otwiera wlasny termin i sprzata swoja wizyte.
-  test('guest submits the booking form with a deposit and blik-booking accepts it', { tag: '@full' }, async ({ page }) => {
+  test('guest submits the booking form with a deposit and blik-booking accepts it', { tag: ['@full', '@smoke'] }, async ({ page }) => {
     // Platnosc online zamrozona — formularz nie moze pytac create-session.
     const createSessionCalls: string[] = [];
     page.on('request', (r) => {
