@@ -45,6 +45,51 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+// Dokładne zbiory kluczy odpowiedzi — każde nowe pole wymaga świadomej zmiany testu.
+const LIST_ITEM_KEYS = [
+  "id",
+  "salonId",
+  "salonName",
+  "salonAddress",
+  "employeeName",
+  "employeeColor",
+  "serviceName",
+  "servicePrice",
+  "serviceDuration",
+  "startTime",
+  "endTime",
+  "status",
+  "depositAmount",
+  "depositPaid",
+  "createdAt",
+];
+
+const DETAIL_KEYS = [
+  "id",
+  "salonId",
+  "salonName",
+  "salonAddress",
+  "salonPhone",
+  "salonEmail",
+  "employeeName",
+  "employeeColor",
+  "serviceName",
+  "serviceDescription",
+  "servicePrice",
+  "serviceDuration",
+  "variantName",
+  "variantPriceModifier",
+  "variantDurationModifier",
+  "startTime",
+  "endTime",
+  "status",
+  "depositAmount",
+  "depositPaid",
+  "createdAt",
+  "treatment",
+  "depositPayment",
+];
+
 const USER_ID = "user-1";
 const APPOINTMENT_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -95,6 +140,7 @@ describe("GET /api/client/appointments (lista)", () => {
     expect(body.success).toBe(true);
     expect(body.count).toBe(2);
     for (const item of body.data) {
+      expect(Object.keys(item).sort()).toEqual([...LIST_ITEM_KEYS].sort());
       expect(item).not.toHaveProperty("notes");
       expect(item.id).toBeDefined();
       expect(item.status).toBeDefined();
@@ -136,6 +182,7 @@ describe("GET /api/client/appointments/[id] (szczegół)", () => {
     const res = await detailRequest(APPOINTMENT_ID);
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(Object.keys(body.data).sort()).toEqual([...DETAIL_KEYS].sort());
     expect(body.data).not.toHaveProperty("notes");
     expect(body.data.treatment).toBeNull();
     expect(JSON.stringify(body)).not.toContain("notatka personelu");
@@ -159,8 +206,10 @@ describe("GET /api/client/appointments/[id] (szczegół)", () => {
     const res = await detailRequest(APPOINTMENT_ID);
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(Object.keys(body.data).sort()).toEqual([...DETAIL_KEYS].sort());
     expect(body.data).not.toHaveProperty("notes");
     expect(body.data.treatment).toBeNull();
+    // Dokładny kształt depositPayment pilnuje osobny test.
     expect(body.data.depositPayment).not.toBeNull();
     expect(h.state.fromCalls).toEqual([appointments, depositPayments]);
   });
@@ -170,6 +219,7 @@ describe("GET /api/client/appointments/[id] (szczegół)", () => {
     const res = await detailRequest(APPOINTMENT_ID);
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(Object.keys(body.data).sort()).toEqual([...DETAIL_KEYS].sort());
     expect(body.data).not.toHaveProperty("notes");
     expect(body.data.treatment).toBeNull();
   });
