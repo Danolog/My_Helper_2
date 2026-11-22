@@ -95,7 +95,7 @@ generalna na produkcji”; każdy wynik w `docs/drills/`. W `docs/drills/` wynik
 | przełącznik cronów Vercela wyłącz → włącz | F3, ścieżka w panelu |
 | reguła zapory jak w L1, zawężona warunkiem do hosta `<adres starszego wdrożenia>`; potem usunięta | czy zapora obejmuje adresy wdrożeń; kod odpowiedzi W1 |
 | odczyt W2 | kod odpowiedzi przy ochronie wdrożeń |
-| skrót sekretu Stripe (P9) | zgodność sekretu |
+| zgodność sekretu Stripe (P9): tylko `yes`/`no` | zgodność sekretu |
 | zmiana adresu endpointu i ponowienie zdarzeń w **trybie testowym** Stripe | czy Stripe ponawia zdarzenia na zmieniony adres |
 | W7 na gałęzi próbnej Neona (zasada 1.1) | składnia i zachowanie liczników |
 
