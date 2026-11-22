@@ -65,7 +65,7 @@ export function StepConfirmation({
                 {selectedPlanData.name}
               </span>
               <span className="text-muted-foreground">
-                - {planPriceText(selectedPlanData.priceMonthly)}/mies.
+                - {planPriceText(selectedPlanData.priceMonthly)} / mies.
               </span>
             </div>
           </div>

@@ -262,8 +262,8 @@ export default function PricingPage() {
             Gotowy, zeby zaczac?
           </h2>
           <p className="text-muted-foreground max-w-lg mx-auto">
-            Sprawdź MyHelper w swoim salonie. Zacznij z
-            {TRIAL_DAYS}-dniowym okresem probnym - bez zobowiazan.
+            Sprawdź MyHelper w swoim salonie. Zacznij z{" "}
+            {TRIAL_DAYS}-dniowym okresem próbnym — bez zobowiązań.
           </p>
           {showCheckoutButton && (
             <div className="flex items-center justify-center gap-4">

@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PLANS } from "@/lib/constants";
+import { isPlanPurchaseOpen } from "@/lib/features";
 import { isPlanOnSale } from "@/lib/plan-catalog";
 import { PRO_INCLUDES_BASIC, proOnlyFeatures } from "@/lib/plan-features";
 import {
@@ -114,7 +115,7 @@ export function PlanActions({
       )}
 
       {/* Reactivate subscription if canceled and a new purchase is possible */}
-      {subscription.status === "canceled" && !purchaseBlockedUntil && (
+      {subscription.status === "canceled" && !purchaseBlockedUntil && isPlanPurchaseOpen() && (
         <Button asChild>
           <Link href="/pricing">
             <ArrowUpRight className="h-4 w-4 mr-2" />

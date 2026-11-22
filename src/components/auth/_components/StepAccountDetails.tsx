@@ -101,7 +101,7 @@ export function StepAccountDetails({
               Plan {selectedPlanData.name}
             </span>
             <span className="text-xs text-muted-foreground">
-              {planPriceText(selectedPlanData.priceMonthly)}/mies.
+              {planPriceText(selectedPlanData.priceMonthly)} / mies.
             </span>
           </button>
         )}

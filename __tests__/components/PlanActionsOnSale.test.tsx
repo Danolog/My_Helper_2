@@ -23,6 +23,12 @@ import { PlanActions } from "@/app/dashboard/subscription/_components/plan-actio
 import { PLAN_FEATURES } from "@/lib/plan-features";
 
 const catalog = vi.hoisted(() => ({ withPro: false }));
+const purchase = vi.hoisted(() => ({ open: false }));
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return { ...actual, isPlanPurchaseOpen: () => purchase.open };
+});
 
 vi.mock("@/lib/plan-catalog", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/plan-catalog")>();
@@ -72,7 +78,11 @@ const pro: PlanFixture = {
   features: [...PLAN_FEATURES.pro],
 };
 
-function renderActions(plan: PlanFixture, status: "active" | "trialing") {
+function renderActions(
+  plan: PlanFixture,
+  status: "active" | "trialing" | "canceled",
+  purchaseBlockedUntil: string | null = null,
+) {
   render(
     <PlanActions
       subscription={
@@ -85,7 +95,7 @@ function renderActions(plan: PlanFixture, status: "active" | "trialing") {
       }
       plan={plan as never}
       allPlans={{ basic, pro } as never}
-      purchaseBlockedUntil={null}
+      purchaseBlockedUntil={purchaseBlockedUntil as never}
       changePlanLoading={false}
       downgradeLoading={false}
       cancelLoading={false}
@@ -106,6 +116,7 @@ const cancelButton = () =>
 
 beforeEach(() => {
   catalog.withPro = false;
+  purchase.open = false;
 });
 
 afterEach(() => {
@@ -160,5 +171,33 @@ describe("PlanActions — przycisk „Zmien na Pro” a lista PLANS_ON_SALE", ()
       expect(upgradeButton()).toBeNull();
       expect(downgradeButton()).not.toBeNull();
     });
+  });
+});
+
+describe("PlanActions — „Aktywuj ponownie” a zamknięty zakup planu", () => {
+  const reactivateLink = () =>
+    screen.queryByRole("link", { name: /Aktywuj ponownie/ });
+
+  it("zakup zamknięty: anulowana subskrypcja nie dostaje odnośnika do cennika", () => {
+    renderActions(basic, "canceled");
+    expect(reactivateLink()).toBeNull();
+  });
+
+  it("zakup otwarty: anulowana subskrypcja dostaje „Aktywuj ponownie” do /pricing", () => {
+    purchase.open = true;
+    renderActions(basic, "canceled");
+    expect(reactivateLink()).toHaveAttribute("href", "/pricing");
+  });
+
+  it("zakup otwarty, ale zakup zablokowany do końca dostępu: bez odnośnika", () => {
+    purchase.open = true;
+    renderActions(basic, "canceled", "2026-12-01T00:00:00.000Z");
+    expect(reactivateLink()).toBeNull();
+  });
+
+  it("zakup otwarty, subskrypcja aktywna: bez odnośnika", () => {
+    purchase.open = true;
+    renderActions(basic, "active");
+    expect(reactivateLink()).toBeNull();
   });
 });
