@@ -143,16 +143,6 @@ describe("G-C6: deploy-cloud-run.yml", () => {
     }
   });
 
-  it("e2e po wdrożeniu (e2e-production.yml): akcje zewnętrzne przypięte do pełnego sha", () => {
-    const e2eFile = read(".github/workflows/e2e-production.yml");
-    const uses = [...code(e2eFile).matchAll(/uses:\s*([^\s#]+)/g)].map((m) => m[1]!);
-    expect(uses.length).toBeGreaterThanOrEqual(4);
-    for (const u of uses) {
-      if (u.startsWith("./")) continue;
-      expect(u, u).toMatch(/@[0-9a-f]{40}$/);
-    }
-  });
-
   it("budowa linux/amd64, 3 build-argi NEXT_PUBLIC_* i GCS_BUCKET", () => {
     // polecenie z kontynuacjami `\` — do pierwszego końca linii bez `\` przed nim
     const builds = [...DEPLOY.matchAll(/docker build ([\s\S]*?)(?<!\\)\n/g)].map((m) => m[1]!);
@@ -311,6 +301,15 @@ describe("G-C6: skrypty wdrożenia", () => {
 });
 
 describe("G-C6: e2e-production.yml", () => {
+  it("akcje zewnętrzne przypięte do pełnego sha", () => {
+    const uses = [...code(E2E).matchAll(/uses:\s*([^\s#]+)/g)].map((m) => m[1]!);
+    expect(uses.length).toBeGreaterThanOrEqual(4);
+    for (const u of uses) {
+      if (u.startsWith("./")) continue;
+      expect(u, u).toMatch(/@[0-9a-f]{40}$/);
+    }
+  });
+
   it("deployment_status (Vercel, do C4) + workflow_call", () => {
     expect(triggers(E2E)).toEqual(["deployment_status", "workflow_call"]);
   });
