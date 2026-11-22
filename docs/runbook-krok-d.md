@@ -88,8 +88,8 @@ grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/
 
 Przebieg z `--apply` jest idempotentny: ponowne uruchomienie etapu nie tworzy
 zasobów drugi raz (`state: exists`) i nie zmienia haseł bazy (sekcja 3.6).
-**Wyjątek: etapu `sql` nie uruchamiać ponownie** do czasu jego poprawki — tworzy
-login przez `gcloud sql users create`, czyli z `cloudsqlsuperuser` (sekcja 3.6).
+Etap `sql` też można powtórzyć: **nie tworzy loginu aplikacji**, a przy jego
+braku (także w dry-run, gdzie stanu nie sprawdza) zatrzymuje się (sekcja 3.6).
 
 ## 2a. Cofanie etapu (sesja główna)
 
@@ -100,7 +100,7 @@ zasób powstał z błędną konfiguracją, której nie da się zmienić w miejsc
 | Etap | Cofnięcie | Pułapka |
 |---|---|---|
 | `run` | `gcloud --project=$P run services delete myhelper --region=$R` i `… run jobs delete myhelper-migrate --region=$R` | wiązania na zasobie znikają razem z nim — powtórzyć cały etap `run` |
-| `sql` | padło po utworzeniu instancji → **nie usuwać**; powtórzenie etapu dopiero po jego poprawce (sekcja 3.6 — dziś tworzy login z `cloudsqlsuperuser`) (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji — starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
+| `sql` | padło po utworzeniu instancji → **nie usuwać**; powtórzyć etap (nie tworzy loginu aplikacji — przy jego braku zatrzymuje się, sekcja 3.6) (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji, a login `myhelper_svc` na nowej instancji już utworzył SQL-em `postgres` — sekcja 3.6; starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
 | `sa` | `… remove-iam-policy-binding` dla każdego wiązania z sekcji 3.5 (sekrety, zasobnik, repo, actAs); konta (`iam service-accounts delete`) **dopiero na końcu** | usunięte konto zostawia w politykach wpisy `deleted:serviceAccount:…` — dlatego najpierw wiązania |
 | `secrets` | `… secrets delete NAZWA` | usuwa wszystkie wersje — tylko przed D-5 albo z kopią wartości u źródła |
 | `bucket` | najpierw `… storage buckets remove-iam-policy-binding gs://NAZWA --member=allUsers --role=roles/storage.legacyObjectReader`; zasobnik usuwać (`storage buckets delete`) tylko pusty | nazwy zasobników są globalne — usunięta może zostać zajęta przez kogoś innego |
@@ -174,8 +174,8 @@ Tworzy:
   LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`), bo login
   z `gcloud sql users create` dostaje członkostwo w `cloudsqlsuperuser` (m.in.
   `CREATE ROLE`, `CREATE EXTENSION`, `pg_signal_backend`), którego na Cloud SQL
-  nie da się odebrać. Etap `sql` dziś tworzy login inaczej, przez `gcloud sql
-  users create` (akapity niżej), dlatego nie uruchamia się go ponownie. Prawa
+  nie da się odebrać. Etap `sql` loginu nie tworzy: ustawia tylko hasło (gdy
+  `postgres-url` nie ma wersji), a gdy loginu brak — zatrzymuje się. Prawa
   potrzebne migracjom nadano jawnie: `CONNECT`, `TEMPORARY`, `CREATE` na bazie
   i `USAGE`, `CREATE` na schemacie `public`. Drugi login (osobny dla migracji)
   to #131 (P3, przed pierwszym płacącym salonem) — bootstrap go nie przewiduje;
@@ -200,7 +200,7 @@ Tworzy:
   Po stronie deploy nic nie łączy się z bazą, więc deploy nie ma `cloudsql.client`.
 
 Hasła: generowane w pamięci procesu, do gcloud tylko przez `--flags-file`
-ze strumienia (`sql users create|set-password`) i `--data-file=-`
+ze strumienia (`sql users set-password`) i `--data-file=-`
 (`secrets versions add`); nie są wypisywane. Wywołania `sql users …` (B-1)
 i `secrets versions add` (N2, K-1b) idą z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`. Gdy sekret ma już wersję
 ENABLED, etap pomija dany login (hasło bez zmian). Gdy wersji brak, a login
@@ -215,10 +215,10 @@ Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005;
 `myhelper_svc` jest jej członkiem (`GRANT myhelper_app TO myhelper_svc`,
 wykonuje `postgres`), bo `forSalon` przełącza się na nią `SET LOCAL ROLE`.
 
-**Etapu `sql` nie uruchamia się ponownie** do czasu jego poprawki: dziś tworzy
-login przez `gcloud sql users create`, czyli z członkostwem
-w `cloudsqlsuperuser`, więc ponowny przebieg odtworzyłby stan sprzed zmiany
-loginu na `myhelper_svc`.
+**Etap `sql` można powtórzyć.** Nie tworzy loginu aplikacji: gdy `myhelper_svc`
+nie istnieje (w dry-run stanu nie sprawdza — tak samo), stop przed jego hasłem;
+hasło `postgres` idzie wcześniej, więc na nowej instancji `postgres` tworzy login
+SQL-em jak wyżej, a potem etap powtarza się.
 
 Odczyt stanu po etapie:
 
