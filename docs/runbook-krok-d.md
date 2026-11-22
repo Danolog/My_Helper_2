@@ -1180,11 +1180,12 @@ przy T1.
 
 ## 11. Punkty otwarte
 
-- ~~`wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
+- `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
   `guard-deploy-subagent` podpisany i zainstalowany z próbą kontrolną albo konto
-  maszynowe).~~ Zamknięte: etap wykonany, workflow wdrożenia przechodzi
-  logowanie przez WIF (przebiegi 44817913061 i 44821507855 opisane
-  w `__tests__/lib/workflows.test.ts`; workflow nie ma kluczy JSON).
+  maszynowe). Stan: logowanie przez WIF działa (przebiegi 44817913061
+  i 44821507855 opisane w `__tests__/lib/workflows.test.ts`; workflow nie ma
+  kluczy JSON). Otwarte: czym spełniono bramkę 3.8 i odczyt D-4e
+  (`attributeCondition` równy plikowi warunku) — w repo nie ma zapisu.
 - ~~K-1 (#144): musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
   sekrety tylko z wersją, bez `--allow-unauthenticated`, `GCS_PUBLIC_BASE_URL`
   z jednego źródła.~~ Zamknięte: wszystkie cztery punkty na `main`
@@ -1199,8 +1200,8 @@ przy T1.
   tworzy zadania wstrzymane i odczytuje stan (sekcja 8; strażnik
   `__tests__/lib/scheduler-paused.test.ts`).
 - Logowanie Google: na betę wyłączone (plan 1.4, `production-gcp` bez
-  `GOOGLE_CLIENT_ID`). Przycisk Google wyświetla się mimo to i po kliknięciu
-  pokazuje błąd (`src/components/auth/sign-in-button.tsx:168-206`). Ukrycie
+  `GOOGLE_CLIENT_ID`). Przycisk Google wyświetla się mimo to, a po kliknięciu
+  logowanie nie działa (`src/components/auth/sign-in-button.tsx:168-206`). Ukrycie
   przycisku bez `GOOGLE_CLIENT_ID` to osobna zmiana przed przełączeniem
   (warunek P10 w `docs/runbook-zatrzymanie-zapisow.md`).
 - Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
@@ -1219,14 +1220,16 @@ Zasady:
 - pomiar na domenie po K1 zamyka 0.6.
 
 Polecenie: trzy próby, wynik to mediana (środkowa z trzech wartości).
-`<adres>` to adres z kolumny „Adres” razem ze ścieżką. Hostów spoza tego
-runbooka nie wpisujemy do repo.
+`<adres>` to pełny adres miejsca z kolumny „Adres” razem ze ścieżką. Hostów
+spoza tego runbooka nie wpisujemy do repo. Drugie pole wyniku to kod odpowiedzi:
+próba z kodem innym niż 200 (albo `000`, brak połączenia) nie liczy się —
+powtórzyć pomiar.
 
 ```bash
-for i in 1 2 3; do curl -s -o /dev/null -w '%{time_starttransfer}\n' "<adres>"; done | sort -n | sed -n 2p
+for i in 1 2 3; do curl -s -o /dev/null -w '%{time_starttransfer} %{http_code}\n' "<adres>"; done | LC_ALL=C sort -n | sed -n 2p
 ```
 
 | Data | Adres | Ścieżka | Mediana z 3 | Uwagi |
 |---|---|---|---|---|
 | 2026-11-22 | Vercel produkcja | `/api/health` | 0,91 s | pomiar z Polski |
-| 2026-11-22 | Cloud Run `run.app` | `/api/health` | 0,12 s | pomiar z Polski; rewizja bez ruchu, ciepła |
+| 2026-11-22 | Cloud Run `run.app` (główny adres usługi) | `/api/health` | 0,12 s | pomiar z Polski; bez ruchu użytkowników, instancja ciepła |
