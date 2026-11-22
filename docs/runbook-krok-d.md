@@ -760,10 +760,10 @@ ani lokalnego logu gcloud — `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`, B-1).
 Ostatnia linia bloku (`kill %1`, K-1e) kończy proxy po wyjściu z `psql` —
 proxy do bazy nie zostaje w tle.
 
-## 10. Opcjonalnie — przeniesienie danych Neon → Cloud SQL
+## 10. Dane Neon → Cloud SQL: bez kopii
 
-Założenie kroku D: baza na starcie **pusta**. Jeśli Oliver to zmieni, procedurę
-pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
+Obowiązujący wariant (decyzja z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.
+Na produkcji były tylko konta testowe. Neon zostaje nietknięty do 0.13. Bramka bazy (j'): plan, wiersz 0.5 (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, etap 0).
 Procedura okna przełączenia bazy i powrotu: `docs/runbook-przelaczenie-bazy.md`.
 
 ## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)

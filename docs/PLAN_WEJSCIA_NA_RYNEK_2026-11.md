@@ -74,7 +74,7 @@ Wszystko poniżej zweryfikowane w kodzie albo na produkcji, chyba że zaznaczono
 | B9 | **Marketing obiecuje wyłączone funkcje** | „Asystent głosowy" jest w statystykach na stronie głównej, w planie Pro w cenniku, w rejestracji i na stronie subskrypcji, a moduł `voiceAi` ma `hardOff`. Do tego „Dołącz do setek salonów", ocena 4,9 i opinie podpisane „Tester Beta". | Wysoka |
 | B10 | **Produkcja i development dzielą jedną bazę** | Publiczna lista salonów pokazuje „Salon Test User" i „Beauty Studio Demo". `.env.local` wskazuje tę samą bazę Neon co produkcja. | Wysoka — na GCP: osobna instancja Cloud SQL dla produkcji |
 | B11 | **Sesja wygasa po 15 minutach bezczynności** | `src/lib/auth.ts:26-27`. Właścicielka przy fotelu będzie wylogowywana kilkanaście razy dziennie. `updateAge: 0` dodatkowo zapisuje sesję do bazy przy każdym żądaniu. | Wysoka |
-| B12 | **Brak monitoringu błędów** | W `package.json` nie ma Sentry ani odpowiednika. O awarii dowiesz się od klienta. | Wysoka |
+| B12 | **Brak monitoringu błędów** | W `package.json` nie ma Sentry ani odpowiednika. O awarii dowiesz się od klienta. | Wysoka — na GCP: Error Reporting + alerty w Cloud Monitoring |
 | B13 | **Brak własnej domeny** | Adres `my-helper-2.vercel.app`. Domena jest potrzebna do Resend (DKIM), nazwy nadawcy SMS i zaufania. | Wysoka |
 | B14 | **Błędy CSP na każdej stronie produkcji** | Od 2 do 50 błędów „Applying inline style violates Content Security Policy" na stronę. Część stylów wstawianych w atrybutach jest blokowana. Wpływu na wygląd nie zmierzyłem. | Średnia |
 
@@ -317,14 +317,14 @@ Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To sz
 | 0.2 | Konteneryzacja: `output: 'standalone'` w `next.config.ts`, `Dockerfile`, build lokalny i uruchomienie obrazu | S | agent |
 | 0.3 | GCP: włączenie API, Artifact Registry, konto serwisowe z minimalnymi rolami, Secret Manager na wszystkie sekrety | S | Darek + agent |
 | 0.4 | Cloud SQL Postgres 18 w `europe-central2` (pgvector, kopie automatyczne, PITR, połączenie przez Cloud SQL connector), osobna baza produkcyjna; lokalnie Docker | M | Darek + agent |
-| 0.5 | Przeniesienie danych Neon → Cloud SQL (zrzut i odtworzenie, role RLS/BYPASSRLS, weryfikacja liczby wierszy), usunięcie danych testowych z produkcji. Działanie nieodwracalne na danych produkcyjnych — wykonuje Ethan (delegacja v1.26) pod bramką (j): zrzut Neon zachowany, zgodna liczba wierszy we wszystkich tabelach, role RLS/BYPASSRLS odtworzone, próbne odtworzenie kopii Cloud SQL — dopiero potem przełączenie ruchu | M | Ethan |
+| 0.5 | Dane Neon → Cloud SQL: bez kopii. Na produkcji są tylko konta testowe, więc Cloud SQL startuje z pustą bazą i schematem z migracji. Neon zostaje nietknięty do 0.13 i do tego czasu sam jest zrzutem. Dane testowe nie trafiają do Cloud SQL, a konta zakłada się od nowa po przełączeniu. Bramka (j'): przed przełączeniem ruchu role RLS/BYPASSRLS na Cloud SQL potwierdzone kontrolą stanu docelowego (`docs/runbook-przelaczenie-bazy.md`, 1.0 pkt 2) i próbne odtworzenie kopii Cloud SQL (= 4.3) z wynikiem w `docs/drills/restore-<data>.md`; po pierwszym salonie testowym na GCP `rls-check` (na pustej bazie niczego nie dowodzi). Zrzut Neona i porównanie liczby wierszy odpadają, bo nie ma czego przenosić | M | Ethan |
 | 0.6 | Cloud Run w `europe-central2`, pomiar TTFB przed i po (punkt odniesienia: 2,5–3,5 s na Vercelu) | S | agent |
 | 0.7 | Cloud Scheduler dla 5 tras z `src/app/api/cron/` z `CRON_SECRET`; usunięcie `cron-scheduler.yml`; usunięcie klucza `crons` z `vercel.json` po okresie powrotu, cały plik w 0.13 (`docs/runbook-zatrzymanie-zapisow.md`, sekcja 7) | S | agent |
 | 0.8 | `@vercel/blob` → Cloud Storage w `src/lib/storage.ts`, bez przenoszenia istniejących plików (tylko konta testowe; bramka w `docs/runbook-zatrzymanie-zapisow.md`, sekcja 7); usunięcie `@vercel/analytics` | S | agent |
 | 0.9 | CI/CD: odblokowanie GitHub Actions (limit wydatków), wdrożenie na Cloud Run z `main` (Workload Identity Federation, bez kluczy JSON), `e2e-production.yml` przepięty z wdrożenia Vercela | M | Darek + agent |
-| 0.10 | Domena i DNS na Cloud Run, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, przekierowania OAuth Google i webhook Stripe na nowy adres | S | Darek |
-| 0.11 | Przegląd zmiennych według `ZADANIA_WLASCICIELA.md` (Resend, SMSAPI, Upstash, Stripe) przeniesionych do Secret Manager | M | Darek |
-| 0.12 | Sentry + uptime check i alert w Cloud Monitoring na `/api/health`; budżet i alert kosztów w GCP | S | agent |
+| 0.10 | Domena i DNS na Cloud Run, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`. Logowanie Google wyłączone na betę (tylko e-mail i hasło), więc przekierowania OAuth Google odpadają. Webhook Stripe: nie dotyczy (Stripe nieużywany na produkcji) | S | Darek |
+| 0.11 | Przegląd zmiennych według `ZADANIA_WLASCICIELA.md` (Resend, SMSAPI, Upstash) przeniesionych do Secret Manager. Stripe: nie dotyczy (nieużywany na produkcji) | M | Darek |
+| 0.12 | Monitoring błędów: Error Reporting + alerty w Cloud Monitoring, bez Sentry (nowy dostawca danych dopiero przy potrzebie błędów z przeglądarki); uptime check i alert w Cloud Monitoring na `/api/health`; budżet i alert kosztów w GCP | S | agent |
 | 0.13 | Wyłączenie projektu na Vercelu i bazy Neon dopiero po tygodniu stabilnej pracy na GCP i udanym odtworzeniu kopii | S | Darek |
 
 ### Etap 1 — Pieniądze i prawda
