@@ -73,8 +73,8 @@ w notatce okna).
 (`app.nordsignal.cc`) nie istnieje dziś w Cloudflare. Vercel Production działa
 pod `<domena Vercel Production>`, której repo nie zna (testy produkcyjne
 Vercela biorą ją z sekretu, `.github/workflows/e2e-production.yml:7-8`, `:29`).
-Komentarz w `.github/workflows/deploy-cloud-run.yml:216-218` („domena
-aplikacji wskazuje Vercela”) jest nieaktualny. GCP startuje pod nową domeną
+Komentarz przy jobie e2e w `.github/workflows/deploy-cloud-run.yml` mówi,
+dlaczego e2e idzie na tag rewizji, a nie na domenę. GCP startuje pod nową domeną
 `app.nordsignal.cc`; `<domena Vercel Production>` po oknie przekierowuje na nią
 (krok K1).
 
