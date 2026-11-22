@@ -82,7 +82,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
    generalną (żeby próba sprawdziła stan docelowy; instancja próbna z 1.1 jest
    klonem z tym stanem):
    - login aplikacji jest jeden: `myhelper_svc` (aplikacja i migracje,
-     `docs/runbook-krok-d.md:167-179`); pula połączeń musi być właścicielem
+     `docs/runbook-krok-d.md:169-181`); pula połączeń musi być właścicielem
      tabel (kontrola roli puli), więc osobnego loginu puli nie tworzymy;
    - **zmiana loginu jest wykonana przed próbą** (osobny krok za zgodą
      właściciela, z recenzją bezpieczeństwa, najpierw na klonie): odebranie
@@ -108,9 +108,9 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
      w trybie awaryjnym;
    - **przebieg migracji idzie na instancji produkcyjnej**, nie na klonie: job
      `myhelper-migrate` działa jako `myhelper-runtime`
-     (`docs/runbook-krok-d.md:195-197`), a jego `roles/cloudsql.client` ma
+     (`docs/runbook-krok-d.md:197-199`), a jego `roles/cloudsql.client` ma
      warunek IAM ograniczony do instancji produkcyjnej
-     (`docs/runbook-krok-d.md:183-184`). Instancja produkcyjna przed oknem nie
+     (`docs/runbook-krok-d.md:185-186`). Instancja produkcyjna przed oknem nie
      ma danych, a kopia jest `--data-only` (`copy-neon-to-cloudsql.sh:12-13`),
      więc cel i tak potrzebuje schematu z migracji;
    - terminal jak w oknie: 1.7 → 1.5 (blok „Tylko w oknie” + tunel, port
@@ -153,7 +153,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
         Oczekiwane: jeden wiersz `<ID> SUCCESSFUL pre-migrate-<RRRRMMDD>`; ID
         do zapisu próby. Kopia, którą workflow robi sam przed migracją (rola
-        `myhelperSqlBackup`, `docs/runbook-krok-d.md:185-188`), jej nie
+        `myhelperSqlBackup`, `docs/runbook-krok-d.md:187-190`), jej nie
         zastępuje. Inny wynik = stop, jobu nie uruchamiamy;
      5. przebieg workflow z migracjami (`run_migrations=true`) z `main` o tym
         samym sha co 1.7 i zapis próby; sha przebiegu do zapisu. Przebieg może
@@ -207,7 +207,7 @@ instancji produkcyjnej: przywrócenie kopii (1.1 pkt 4) nadpisuje **całą**
 instancję. Powstaje po 1.0 pkt 2 jako klon instancji produkcyjnej (ta sama
 wersja, role i hasła; danych produkcyjnych jeszcze nie ma). Przed próbą:
 koszt instancji próbnej (godziny tieru i dysk na czas próby) policzony
-i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:782-783`).
+i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:784-785`).
 W terminalu próby zmienna `CSQL_INSTANCE` ma wyłącznie nazwę instancji próbnej;
 nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu (blok
 „Tylko w oknie” z 1.5 w próbie się nie wkleja). Do potwierdzenia w próbie,
@@ -223,7 +223,7 @@ CSQL_INSTANCE='<instancja próbna>'
 
 Oczekiwane: `drill_instance_ok=yes`, klon kończy się bez błędu, opis
 `RUNNABLE POSTGRES_18 <tier instancji produkcyjnej>`
-(`docs/runbook-krok-d.md:160`). `drill_instance_ok=no` = stop. Tunel w próbie
+(`docs/runbook-krok-d.md:162`). `drill_instance_ok=no` = stop. Tunel w próbie
 (1.5) prowadzi do instancji próbnej, na `<port tunelu>` **innym** niż port
 z `docs/runbook-krok-d.md` sekcja 9, żeby żaden blok próby nie trafił w tunel
 produkcyjny.
@@ -432,7 +432,7 @@ Dlatego przed `freeze-neon.sh`:
      Preview bez produkcyjnego `POSTGRES_URL` albo bez działających wdrożeń
      na czas okna;
    - **ingress Cloud Run = `internal`** od 2.1 do 2.9. Dziś ingress to `all`
-     (`docs/runbook-krok-d.md:763-767`): adres `run.app` przyjmowałby zapisy do
+     (`docs/runbook-krok-d.md:765-769`): adres `run.app` przyjmowałby zapisy do
      Cloud SQL w trakcie 2.3–2.6, a wtedy `count_auth_rate_limit` > 0 na
      Cloud SQL i 2.7 stoi. To **główna kontrola** braku zapisów na Cloud SQL;
      zamrożenie w 2.6 jest obroną w głąb;
@@ -444,7 +444,7 @@ Dlatego przed `freeze-neon.sh`:
 2. Rola logowania aplikacji (adres `VERIFY_PG*`) **nie** jest
    superużytkownikiem — na Neonie (`psql_neon_app`) i na Cloud SQL
    (`psql_csql_app`; na Cloud SQL to `myhelper_svc`, jedyny login aplikacji,
-   `docs/runbook-krok-d.md:167`):
+   `docs/runbook-krok-d.md:169`):
 
    ```bash
    set +x
@@ -591,10 +591,10 @@ echo
 ```
 
 Hasła Cloud SQL są wyłącznie w Secret Managerze
-(`docs/runbook-krok-d.md:167-182`): `postgres-admin-password` (rola `postgres`)
+(`docs/runbook-krok-d.md:169-184`): `postgres-admin-password` (rola `postgres`)
 i `postgres-url` (URL loginu `myhelper_svc`, z którego wycinamy samo hasło).
 Odczyt do zmiennej, bez ekranu i bez lokalnego logu gcloud — ten sam wzorzec
-co `docs/runbook-krok-d.md:742`. `<projekt GCP>` = identyfikator projektu z
+co `docs/runbook-krok-d.md:744`. `<projekt GCP>` = identyfikator projektu z
 `docs/runbook-krok-d.md` sekcja 9 (nie zapisuje się go w notatce okna):
 
 ```bash
@@ -607,7 +607,7 @@ CSQL_OWNER_PW="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt
 
 Oczekiwane: `neon_owner_pw_set=yes`, `neon_app_pw_set=yes`, `admin_pw_set=yes`,
 `owner_pw_format=yes` (hasło loginu ma postać `[A-Za-z0-9]{32}`,
-`docs/runbook-krok-d.md:167-168`; inna wartość = `sed` nie wyciął hasła z URL,
+`docs/runbook-krok-d.md:169-170`; inna wartość = `sed` nie wyciął hasła z URL,
 np. URL ma inny login niż `myhelper_svc`).
 Kontrola wypisuje tylko `yes`/`no`, nigdy wartości. Wynik `no` = stop,
 `unset` (niżej) i wyjaśnienie przed oknem. W próbie instancja próbna jest
@@ -705,7 +705,7 @@ neonctl --version
 
 Oczekiwane: `0` zmienionych plików; `git rev-parse HEAD` w oknie = ten sam
 sha co w zapisie próby; wersja główna `psql`, `pg_dump`, `pg_restore` ≥
-wersji serwerów (Cloud SQL `POSTGRES_18`, `docs/runbook-krok-d.md:160`; Neon
+wersji serwerów (Cloud SQL `POSTGRES_18`, `docs/runbook-krok-d.md:162`; Neon
 niżej). Wszystkie wersje trafiają do zapisu próby; w oknie muszą być
 identyczne. Inny sha albo inna wersja = stop, nowa próba albo decyzja przed
 oknem.
