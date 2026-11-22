@@ -172,7 +172,7 @@ odpowiedzi zapory (`403`) na domenie i na adresie wdrożenia; kod odpowiedzi
 ochrony wdrożeń (`401` albo `403`); czy wywołanie crona przechodzi przez
 zaporę (dlatego L2 jest osobnym krokiem); ponawianie zdarzeń Stripe na
 zmieniony adres (inny wynik = zdarzenia z okna ponawia się ręcznie z panelu
-Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6 (w próbie wariantem z `--resolve`, jak P6); nazwy zmiennych rewizji w P5 (`spec.containers[0].env[].name`) i odczyt wyników zadań Schedulera po R5. Ponawianie zdarzeń Stripe — nie dotyczy (Stripe nieużywany).
+Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6 (w próbie wariantem z `--resolve`, jak P6); nazwy zmiennych rewizji w P5 (`spec.containers[0].env[].name`) i odczyt wyników zadań Schedulera po R5; odczyt `metadata.creationTimestamp` rewizji i zapytanie o wpisy „Invalid origin” (sekcja 3, „Kontrola originu logowania”: pola `message` i `origin` w `jsonPayload`, `--bucket`/`--view`). Ponawianie zdarzeń Stripe — nie dotyczy (Stripe nieużywany).
 
 ## 1. Warunki przed oknem
 
@@ -375,6 +375,38 @@ z kodem 0 → K1 (K1.1–K1.4) → R5 → koniec tunelu i haseł; R5 nie czeka n
 K1.1, gdy K1.1 czeka na minimum SOA. 2.8 z kodem innym niż 0 = stan „bez
 K1”, bez R5 (L7). Zdania o 2.10, drogach B i C, zapisach tylko do odczytu
 i zdarzeniach Stripe nie dotyczą.
+
+**Kontrola originu logowania (po P4).** Odrzucony origin Better Auth zapisuje
+jako WARNING „Invalid origin” z polem `origin` (`src/lib/auth-log.ts`), nie jako
+ERROR, więc alert błędów (`infra/gcp/monitoring.sh`) go nie złapie. Jeśli
+`BETTER_AUTH_URL` albo `trustedOrigins` nie zgadza się z originem
+`https://app.nordsignal.cc`, każda rejestracja i każde logowanie z przeglądarki
+dostaje 403 `INVALID_ORIGIN`, a alert milczy. Pierwszy raz żądanie z originu
+domeny idzie przy salonie testowym z 2.8 (runbook przełączenia): przez LB
+z mapowaniem na `<LB_IP>` (przed T5) albo wprost na domenę (po T5). Kontrola
+idzie przy tym pierwszym żądaniu, przed K1:
+
+1. rejestracja i logowanie konta salonu testowego z
+   `https://app.nordsignal.cc` przechodzą (bez 403);
+2. wpisów WARNING „Invalid origin” z originem `https://app.nordsignal.cc` od
+   chwili, gdy działa rewizja z P5, jest 0 (`<czas rewizji z P5>` =
+   `metadata.creationTimestamp` tej rewizji):
+
+```bash
+set +x
+gcloud --project='<projekt GCP>' run revisions describe <nazwa rewizji z P5> --region=europe-central2 --format='value(metadata.creationTimestamp)'
+gcloud --project='<projekt GCP>' logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity=WARNING AND jsonPayload.message="Invalid origin" AND jsonPayload.origin="https://app.nordsignal.cc" AND timestamp>="<czas rewizji z P5>"' --bucket=myhelper-logs --location=europe-central2 --view=_AllLogs --limit=5 --format='value(timestamp)'
+```
+
+Oczekiwane (oba polecenia do potwierdzenia w próbie, sekcja 0.3): rejestracja
+i logowanie bez 403; drugie polecenie bez błędu gcloud i z pustym wynikiem.
+Wpisy z innymi originami (obcy ruch na publicznym adresie) filtr pomija
+celowo. Dowolny wiersz wyniku albo 403 `INVALID_ORIGIN` przy rejestracji lub
+logowaniu = stop. Przed oknem (salon testowy przez LB przed W0) okno nie
+startuje (reguła sekcji 1). W oknie powrót według reguły „Stop” z bloku na
+górze: przed T4 sekcja 5, po T4 powrót bez danych (sekcja 6). Nowej procedury
+cofania nie ma. Po poprawce adresów (P4) i nowym przebiegu wdrożenia (P5 od
+nowa) kontrolę powtarza się od początku, z nowym `<czas rewizji z P5>`.
 
 **K1 — przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`.**
 Wykonuje się po 2.10 z kodem 0 albo po drodze C, czyli zawsze po zakazie
