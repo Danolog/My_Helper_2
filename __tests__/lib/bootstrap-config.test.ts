@@ -18,6 +18,9 @@
  *  - hasło: błąd odczytu wersji sekretu przerywa etap, ścieżka samonaprawy
  *    (login istnieje, sekret bez wersji → set-password), wywołania haseł
  *    bez lokalnego logu gcloud (B-1);
+ *  - bootstrap nigdy nie tworzy loginu bazy (login z Admin API dostaje
+ *    cloudsqlsuperuser): brak loginu aplikacji przy --apply → stop przed hasłem
+ *    (dry-run: nota i pełny plan, kod 0);
  *  - rola kopii: dokładnie trzy uprawnienia, warunek Instance + BackupRun (W-1);
  *  - idempotencja: istniejące zasoby nie są tworzone ponownie.
  * Mutacje (scratchpad, wynik w PR): usunąć --edition; edycja enterprise-plus;
@@ -84,7 +87,7 @@ case " $* " in
   *" sql instances describe "*"--format=value(state)"*)
     echo "\${FAKE_SQL_STATE:-RUNNABLE}"; exit 0 ;;
   *" sql users describe "*)
-    [ -n "$FAKE_EXISTS$FAKE_USERS_EXIST" ] && exit 0; exit 1 ;;
+    [ -n "$FAKE_USERS_MISSING" ] && exit 1; exit 0 ;;
 esac
 [ -n "$FAKE_EXISTS" ] && exit 0
 case " $* " in *" describe "*) exit 1 ;; esac
@@ -114,7 +117,8 @@ interface Run {
 
 interface Opts {
   exists?: boolean;
-  usersExist?: boolean;
+  /** Login aplikacji nie istnieje (`sql users describe` → kod 1). Domyślnie istnieje (stan produkcji). */
+  usersMissing?: boolean;
   versionsError?: boolean;
   sqlState?: string;
 }
@@ -138,7 +142,7 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
       FAKE_ENV: env,
       FAKE_ENV_ADD: envAdd,
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
-      ...(opts.usersExist ? { FAKE_USERS_EXIST: "1" } : {}),
+      ...(opts.usersMissing ? { FAKE_USERS_MISSING: "1" } : {}),
       ...(opts.versionsError ? { FAKE_VERSIONS_ERROR: "1" } : {}),
       ...(opts.sqlState ? { FAKE_SQL_STATE: opts.sqlState } : {}),
     },
@@ -181,7 +185,7 @@ describe("G-D1: dry-run i parametry", () => {
   it("wyjście dry-run to wyłącznie polecenia i odczyty stanu", () => {
     for (const stage of STAGES) {
       for (const line of bootstrap(base(stage)).stdout.split("\n").filter(Boolean)) {
-        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |\+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud |  state: |  policy: |  condition: |  skip: |  GCP_[A-Z_]+=|stage [a-z]+: done$)/);
+        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |\+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud |  state: |  policy: |  condition: |  skip: |  note: |  GCP_[A-Z_]+=|stage [a-z]+: done$)/);
       }
     }
   });
@@ -400,23 +404,29 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(r.calls.join("\n")).not.toMatch(/--password[= ]/);
     const users = r.calls.filter((c) => /sql users (create|set-password)/.test(c));
     expect(users).toEqual([
-      expect.stringMatching(/sql users create myhelper_owner --instance=myhelper-pg --flags-file=\S+$/),
       expect.stringMatching(/sql users set-password postgres --instance=myhelper-pg --flags-file=\S+$/),
+      expect.stringMatching(/sql users set-password myhelper_svc --instance=myhelper-pg --flags-file=\S+$/),
     ]);
-    // stdin: najpierw postgres-url, potem samo hasło postgres — oba z wygenerowanych haseł.
-    const [url, admin] = r.stdin.split("\n");
+    // stdin: najpierw samo hasło postgres (potrzebne do utworzenia loginu aplikacji SQL-em
+    // na nowej instancji), potem postgres-url — oba z wygenerowanych haseł.
+    const [admin, url] = r.stdin.split("\n");
+    expect(admin).toBe(pw[0]);
     expect(url).toBe(
-      `postgresql://myhelper_owner:${pw[0]}@localhost/myhelper?host=/cloudsql/${PROJECT}:europe-central2:myhelper-pg`,
+      `postgresql://myhelper_svc:${pw[1]}@localhost/myhelper?host=/cloudsql/${PROJECT}:europe-central2:myhelper-pg`,
     );
     expect(url).not.toMatch(/sslmode/);
-    expect(admin).toBe(pw[1]);
     const adds = r.calls.filter((c) => c.includes("versions add"));
-    expect(adds.map((c) => c.split(" ")[5])).toEqual(["postgres-url", "postgres-admin-password"]);
+    expect(adds.map((c) => c.split(" ")[5])).toEqual(["postgres-admin-password", "postgres-url"]);
     for (const c of adds) expect(c).toMatch(/ --data-file=-$/);
   });
 
-  it("bootstrap tworzy jeden login myhelper_owner — nigdy ról NOLOGIN ani SQL (to robią migracje)", () => {
-    expect(SOURCE).toMatch(/^DB_USER="myhelper_owner"$/m);
+  it("login aplikacji to myhelper_svc; bootstrap nie tworzy ani loginów, ani ról NOLOGIN, ani SQL (to robią `postgres` i migracje)", () => {
+    expect(SOURCE).toMatch(/^DB_USER="myhelper_svc"$/m);
+    expect(SOURCE).not.toMatch(/myhelper_owner/);
+    // Login z Cloud SQL Admin API dostaje cloudsqlsuperuser — gałęzi tworzenia loginu nie ma wcale.
+    expect(SOURCE).not.toMatch(/sql users create/);
+    expect(SOURCE).not.toMatch(/verb="create"/);
+    expect(r.calls.join("\n")).not.toMatch(/sql users create/);
     const code = SOURCE.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
     expect(code).not.toMatch(/myhelper_app|NOLOGIN|CREATE ROLE|\bpsql\b|sql connect/i);
     expect(r.calls.join("\n")).not.toMatch(/myhelper_app|sql connect|psql/);
@@ -453,23 +463,48 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
   it("błąd odczytu wersji sekretu (≠ brak wersji) przerywa etap przed hasłem", () => {
     const e = bootstrap([...base("sql"), "--apply"], { versionsError: true });
     expect(e.status).toBe(2);
-    expect(e.stderr).toMatch(/cannot read versions of secret postgres-url/);
+    expect(e.stderr).toMatch(/cannot read versions of secret postgres-admin-password/);
     expect(e.calls.filter((c) => /sql users (create|set-password)|versions add/.test(c))).toEqual([]);
     expect(e.flags + e.stdin).toBe("");
   });
 
-  it("samonaprawa: login istnieje, sekret bez wersji → set-password (nie create) i nowa wersja", () => {
-    const h = bootstrap([...base("sql"), "--apply"], { usersExist: true });
+  it("samonaprawa: login istnieje, sekret bez wersji → set-password myhelper_svc (nie create) i wersja URL z myhelper_svc", () => {
+    const h = bootstrap([...base("sql"), "--apply"]);
     expect(h.status, h.stderr).toBe(0);
+    expect(h.calls).toContain(`--project=${PROJECT} --quiet sql users describe myhelper_svc --instance=myhelper-pg`);
     const users = h.calls.filter((c) => /sql users (create|set-password)/.test(c));
     expect(users).toEqual([
-      expect.stringMatching(/sql users set-password myhelper_owner --instance=myhelper-pg --flags-file=\S+$/),
       expect.stringMatching(/sql users set-password postgres --instance=myhelper-pg --flags-file=\S+$/),
+      expect.stringMatching(/sql users set-password myhelper_svc --instance=myhelper-pg --flags-file=\S+$/),
     ]);
     expect(h.calls.filter((c) => c.includes("versions add")).map((c) => c.split(" ")[5])).toEqual([
-      "postgres-url",
       "postgres-admin-password",
+      "postgres-url",
     ]);
+    expect(h.stdin.split("\n")[1]).toMatch(/^postgresql:\/\/myhelper_svc:[A-Za-z0-9]{32}@localhost\/myhelper\?host=\/cloudsql\//);
+  });
+
+  it("brak loginu aplikacji → stop (kod 2) ze wskazaniem sekcji 3.6; zero create, zero set-password i wersji postgres-url dla myhelper_svc", () => {
+    const m = bootstrap([...base("sql"), "--apply"], { usersMissing: true });
+    expect(m.status).toBe(2);
+    expect(m.stderr).toMatch(/login myhelper_svc not found on instance myhelper-pg/);
+    expect(m.stderr).toMatch(/created with SQL by postgres \(docs\/runbook-krok-d\.md, section 3\.6\)/);
+    expect(m.calls.filter((c) => /sql users create/.test(c))).toEqual([]);
+    expect(m.calls.filter((c) => /sql users set-password myhelper_svc|versions add postgres-url/.test(c))).toEqual([]);
+    expect(m.stdout).not.toMatch(/sql users create|set-password myhelper_svc|versions add postgres-url/);
+    // Jedyne hasło w tym przebiegu to `postgres` (ustawiane przed loginem aplikacji); żadnego URL.
+    expect(m.flags.match(/^--password: /gm)).toHaveLength(1);
+    expect(m.stdin).not.toMatch(/postgresql:\/\//);
+    // Ostatnie wywołanie to sprawdzenie loginu — dalej nic (ani hasło aplikacji, ani wiązania).
+    expect(m.calls[m.calls.length - 1]).toBe(`--project=${PROJECT} --quiet sql users describe myhelper_svc --instance=myhelper-pg`);
+    expect(m.stdout).not.toContain("stage sql: done");
+  });
+
+  it("login aplikacji nie istnieje, ale postgres-url ma wersję → pominięty bez sprawdzania loginu (hasło bez zmian)", () => {
+    const s = bootstrap([...base("sql"), "--apply"], { exists: true, usersMissing: true });
+    expect(s.status, s.stderr).toBe(0);
+    expect(s.stdout).toContain("skip: postgres-url has a version (password of myhelper_svc unchanged)");
+    expect(s.calls.filter((c) => / sql users /.test(c))).toEqual([]);
   });
 
   // `value(state)` w gcloud potrafi wypisać enum małymi literami (secrets: `enabled`).
@@ -494,10 +529,18 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(ok).toBeLessThan(r.calls.findIndex((c) => c.includes("sql databases create")));
   });
 
-  it("dry-run sql nie generuje hasła (same placeholdery)", () => {
+  it("dry-run sql nie generuje hasła; nota o stopie przy --apply i pełny plan (wiązania IAM, rola kopii), kod 0", () => {
     const d = bootstrap(base("sql"));
-    expect(d.stdout).toContain("--flags-file=<(--password: <generated>)");
+    expect(d.status, d.stderr).toBe(0);
+    expect(d.stdout).toContain(`? gcloud --project=${PROJECT} --quiet sql users describe myhelper_svc --instance=myhelper-pg`);
+    expect(d.stdout).toContain("note: with --apply a missing myhelper_svc stops");
+    expect(d.stdout).toMatch(/sql users set-password myhelper_svc --instance=myhelper-pg --flags-file=<\(--password: <generated>\)/);
+    expect(d.stdout).not.toMatch(/sql users create/);
+    expect(d.stdout).toContain("roles/cloudsql.client");
+    expect(d.stdout).toContain("myhelperSqlBackup");
+    expect(d.stdout).toContain("stage sql: done");
     expect(d.stdout).not.toMatch(/[A-Za-z0-9]{32}/);
+    expect(d.calls).toEqual([]);
     expect(d.flags + d.stdin).toBe("");
   });
 

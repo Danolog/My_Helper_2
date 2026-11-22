@@ -37,7 +37,9 @@
 #            z auto-increase do 30 GB, 7 kopii, PITR 7 dni, ochrona przed
 #            usunięciem, okno serwisowe SUN 03:00 UTC, tylko szyfrowane
 #            połączenia, publiczne IP bez autoryzowanych sieci (połączenie przez
-#            wbudowany Cloud SQL Auth Proxy). Baza myhelper, login myhelper_owner,
+#            wbudowany Cloud SQL Auth Proxy). Baza myhelper, hasło istniejącego
+#            loginu myhelper_svc (login tworzy SQL-em `postgres`, nie bootstrap —
+#            docs/runbook-krok-d.md, sekcja 3.6; brak loginu = stop etapu),
 #            wersja sekretu postgres-url, losowe hasło wbudowanego `postgres`
 #            w osobnym sekrecie (niepodpiętym do usługi). cloudsql.client
 #            wyłącznie dla runtime (usługa i job migracji działają jako runtime)
@@ -82,9 +84,12 @@ SQL_EDITION="enterprise"
 SQL_TIER="db-f1-micro"
 PG_VERSION="POSTGRES_18"
 DB_NAME="myhelper"
-# Jedyny login bazy (aplikacja i migracje; komentarz 6899299212).
+# Jedyny login bazy (aplikacja i migracje; komentarz 6899299212). Bootstrap go
+# NIE tworzy: login utworzony przez Cloud SQL Admin API dostaje członkostwo
+# w cloudsqlsuperuser, którego nie da się odebrać. Tworzy go SQL-em `postgres`
+# (docs/runbook-krok-d.md, sekcja 3.6); bootstrap ustawia tylko hasło.
 # Role NOLOGIN (myhelper_app) tworzą WYŁĄCZNIE migracje (0005), nigdy bootstrap.
-DB_USER="myhelper_owner"
+DB_USER="myhelper_svc"
 DB_URL_SECRET="postgres-url"
 # Hasło wbudowanego `postgres` — tylko do użytku awaryjnego, poza manifestem
 # (nie trafia do usługi ani joba).
@@ -310,10 +315,13 @@ process.stdout.write(s);
 # Plik flag gcloud (YAML) z hasłem — czytany ze strumienia, nie z argumentu.
 password_flags() { printf -- '--password: "%s"\n' "$1"; }
 
-# Hasło dla użytkownika bazy + wersja sekretu. Pomijane, gdy sekret ma już
-# wersję (hasło nie jest zmieniane przy ponownym przebiegu). Gdy wersji brak,
-# a użytkownik istnieje (przerwany poprzedni przebieg) — hasło jest ustawiane
-# od nowa, więc stan sam się naprawia.
+# Hasło dla istniejącego użytkownika bazy + wersja sekretu. Pomijane, gdy sekret
+# ma już wersję (hasło nie jest zmieniane przy ponownym przebiegu). Gdy wersji
+# brak — hasło jest ustawiane od nowa (set-password), więc stan sam się naprawia.
+# Bootstrap NIGDY nie tworzy loginu: przy --apply login inny niż `postgres`,
+# którego nie ma, zatrzymuje etap przed zmianą jego hasła i wersją sekretu
+# (dry-run nie sprawdza stanu — wypisuje notę i pełny plan). Login aplikacji
+# tworzy SQL-em `postgres` (runbook, 3.6).
 # $1 = użytkownik, $2 = sekret, $3 = „url” (sekret = POSTGRES_URL) albo „raw”
 db_password() {
   local user="$1" secret="$2" kind="$3"
@@ -321,12 +329,13 @@ db_password() {
     echo "  skip: $secret has a version (password of $user unchanged)"
     return 0
   fi
-  local user_exists=0
-  if [[ "$user" == "postgres" ]] || exists sql users describe "$user" --instance="$SQL_INSTANCE"; then
-    user_exists=1
+  if [[ "$user" != "postgres" ]] && ! exists sql users describe "$user" --instance="$SQL_INSTANCE"; then
+    if [[ "$APPLY" == 1 ]]; then
+      die "login $user not found on instance $SQL_INSTANCE — bootstrap does not create database logins; the app login is created with SQL by postgres (docs/runbook-krok-d.md, section 3.6). Stage stopped, password of $user unchanged"
+    fi
+    echo "  note: with --apply a missing $user stops the stage here (bootstrap never creates logins; docs/runbook-krok-d.md, section 3.6)"
   fi
-  local verb="create"
-  [[ "$user_exists" == 1 ]] && verb="set-password"
+  local verb="set-password"
   local shown="<generated>"
   local value_shown="$shown"
   [[ "$kind" == "url" ]] && value_shown="postgresql://${user}:${shown}@localhost/${DB_NAME}?host=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
@@ -397,8 +406,10 @@ stage_sql() {
   if ! exists secrets describe "$DB_ADMIN_SECRET"; then
     run secrets create "$DB_ADMIN_SECRET" --replication-policy=user-managed --locations="$REGION"
   fi
-  db_password "$DB_USER" "$DB_URL_SECRET" url
+  # Najpierw `postgres`: na nowej instancji jego hasło jest potrzebne, żeby
+  # utworzyć login aplikacji SQL-em, zanim etap przejdzie dalej (stop niżej).
   db_password postgres "$DB_ADMIN_SECRET" raw
+  db_password "$DB_USER" "$DB_URL_SECRET" url
   local cond="expression=resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\",title=only-${SQL_INSTANCE}"
   # Kopia na żądanie: operacje na kopiach mają typ zasobu BackupRun (W-1).
   # Cloud SQL sprawdza `cloudsql.backupRuns.create` z resource.type BackupRun
