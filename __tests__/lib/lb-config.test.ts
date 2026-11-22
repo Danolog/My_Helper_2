@@ -383,7 +383,10 @@ describe("P1: zasoby (1)–(11)", () => {
     expect(p).toContain(`--ssl-policy-region=${REGION}`);
     expect(p).toContain("--url-map=myhelper-lb-https");
     expect(p).toContain(`--url-map-region=${REGION}`);
-    expect(p).toContain(`--certificate-manager-certificates=projects/${PROJECT}/locations/${REGION}/certificates/myhelper-lb-cert`);
+    // Sama nazwa: gcloud dokleja projects/…/locations/<region>/certificates/ sam;
+    // pełna ścieżka daje podwójny przedrostek i „Invalid value for field
+    // 'resource.sslCertificates[0]'”.
+    expect(p).toMatch(/ --certificate-manager-certificates=myhelper-lb-cert( |$)/);
   });
 
   it("(11) URL map 80 to wyłącznie przekierowanie 301 na https", () => {
