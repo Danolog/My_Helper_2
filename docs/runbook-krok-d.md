@@ -521,7 +521,7 @@ odmawia startu z nazwą brakującej zmiennej.
 | upstash-redis-rest-token | limitowanie zapytań w pamięci instancji |
 | vapid-private-key | push wyłączony |
 | openrouter-api-key | od K-1 poza Secret Manager i Cloud Run (klucz skasowany 14.11, AI przez Vertex w kroku F); bez klucza aplikacja startuje, czat AI nie działa (ostrzeżenie) |
-| google-client-secret | **moduł NIE wyłącza się sam**: przycisk Google jest zawsze widoczny (także bez `GOOGLE_CLIENT_ID`), logowanie Google kończy się błędem — P3 po K-1 |
+| google-client-secret | logowanie Google wyłączone: przycisk Google ukryty, a dostawca niezarejestrowany, gdy brakuje `GOOGLE_CLIENT_ID` albo sekretu (`src/lib/google-auth.ts`) |
 
 **Bloker pierwszego wdrożenia:** `run-deploy.sh` mapuje wszystkie sekrety z manifestu
 (`NAZWA=sekret:latest`). Cloud Run odrzuca rewizję, której sekret nie ma żadnej
@@ -568,10 +568,9 @@ klasy `var` z `infra/gcp/env-manifest.json` — analogicznie.
   #118 pkt 4 (spełniony), #118 pkt 5 (`legacyObjectReader` w etapie `bucket`),
   #132 na `main`. Na Vercelu obie zmienne nadal **nieustawione**.
 - `GOOGLE_CLIENT_ID` — **nie ustawiać** na Cloud Run, dopóki
-  `google-client-secret` nie ma wersji. Uwaga: przycisk logowania Google
-  (`src/components/auth/sign-in-button.tsx`) jest renderowany bezwarunkowo —
-  bez `GOOGLE_CLIENT_ID` nie znika, kliknięcie kończy się komunikatem błędu
-  (P3 po K-1).
+  `google-client-secret` nie ma wersji. Przycisk logowania Google pokazuje
+  się tylko przy obu wartościach (`src/lib/google-auth.ts`); bez nich jest
+  ukryty, a dostawca niezarejestrowany.
 - `MYHELPER_APP_DB_ROLE` — puste = domyślnie `myhelper_app`.
 
 ## 7. D-7 — pierwszy przebieg (sesja główna)

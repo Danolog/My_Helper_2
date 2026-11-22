@@ -95,13 +95,19 @@ Skutki:
   W wariancie bez kopii (plan 1.4) przebieg jest możliwy (ingress zostaje
   `all`). Chronią P14 (tylko `workflow_dispatch`) i odczyt rewizji w W4 na
   końcu okna.
-- po P4 rewizja GCP przyjmuje logowanie, rejestrację i inne żądania Better
-  Auth ze zmianą stanu tylko z originu `https://app.nordsignal.cc`
-  (`trustedOrigins` w `src/lib/auth.ts`; inny origin = 403 `INVALID_ORIGIN`).
-  Adresy `run.app` (główny i tagi) służą po P4 wyłącznie do odczytów: smoke
-  `/api/health` i e2e `@production` (`tests/production/health.spec.ts`, same
-  wejścia na strony, bez logowania). Próby z logowaniem przed K1 idą przez LB
-  z `--resolve` (jak w P6), nie przez `run.app`. Adresów `run.app` do
+- po P4 przeglądarka może logować się, rejestrować i zapisywać dane w panelu
+  tylko z originu `https://app.nordsignal.cc` (`trustedOrigins` w
+  `src/lib/auth.ts`). Z innego originu, także z adresów `run.app` (głównego
+  i tagów), Better Auth zwraca 403 `INVALID_ORIGIN`. To reguła użytkowania,
+  nie zabezpieczenie: klient bez nagłówków `Origin`, `Referer`, `Sec-Fetch-*`
+  i bez ciasteczka (np. `curl`) przechodzi bez sprawdzenia. Adresy `run.app`
+  służą po P4 wyłącznie do odczytów: smoke `/api/health` i e2e `@production`
+  (`tests/production/health.spec.ts`, same wejścia na strony, bez
+  logowania). Salon testowy (2.8), test SMS i inne próby z logowaniem idą
+  przez LB: przed T5 z mapowaniem `app.nordsignal.cc` na `<LB_IP>` (`curl
+  --resolve` jak w P6, w przeglądarce wpis w pliku hosts), po T5 wprost na
+  domenę. Linki z e-maili (weryfikacja, reset hasła) prowadzą na domenę, więc
+  przed T5 też otwierają się tylko z tym mapowaniem. Adresów `run.app` do
   `trustedOrigins` nie dopisujemy.
 
 ### 0.1 Decyzje
