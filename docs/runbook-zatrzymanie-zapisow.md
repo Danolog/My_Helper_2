@@ -110,7 +110,7 @@ odpowiedzi zapory (`403`) na domenie i na adresie wdrożenia; kod odpowiedzi
 ochrony wdrożeń (`401` albo `403`); czy wywołanie crona przechodzi przez
 zaporę (dlatego L2 jest osobnym krokiem); ponawianie zdarzeń Stripe na
 zmieniony adres (inny wynik = zdarzenia z okna ponawia się ręcznie z panelu
-Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6 (w próbie wariantem z `--resolve`, jak P6).
+Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6 (w próbie wariantem z `--resolve`, jak P6); nazwy zmiennych rewizji w P5 (`spec.containers[0].env[].name`) i odczyt wyników zadań Schedulera po R5.
 
 ## 1. Warunki przed oknem
 
@@ -124,7 +124,7 @@ P9, P11, P12) i „przed oknem: zmienne środowiska `production-gcp` …” (P4,
 | P2 | certyfikat LB aktywny | `gcloud --project='<projekt GCP>' certificate-manager certificates describe myhelper-lb-cert --location=europe-central2 --format='value(managed.state)'` | `ACTIVE` |
 | P3 | adres LB znany (do notatki, nie do repo) | `gcloud --project='<projekt GCP>' compute addresses describe myhelper-lb-ip --region=europe-central2 --format='value(address)'` (do potwierdzenia w próbie) | jeden adres IPv4 = `<LB_IP>` |
 | P4 | adresy domeny na GCP | `gh variable get BETTER_AUTH_URL --env production-gcp` i `gh variable get NEXT_PUBLIC_APP_URL --env production-gcp`; przy L5 „Google działa” także `[[ -n "$(gh variable get GOOGLE_CLIENT_ID --env production-gcp)" ]] && echo google_client_id_set=yes \|\| echo google_client_id_set=no` (identyfikator nie trafia na ekran) | oba adresy `https://app.nordsignal.cc`; `google_client_id_set=yes` (L5) |
-| P5 | rewizja zbudowana po ustawieniu P4 i wersji `cron-secret` (i wersji `google-client-secret`, L5) | `gh variable list --env production-gcp --json name,updatedAt` oraz `gh run list --workflow=deploy-cloud-run.yml --limit=1 --json headSha,conclusion,createdAt`; przy L5 „Google działa” także `gcloud --project='<projekt GCP>' secrets versions list google-client-secret --limit=1 --format='value(name.basename(),createTime)'`; rewizja obsługująca ruch: `gcloud --project='<projekt GCP>' run services describe myhelper --region=europe-central2 --format='value(status.traffic[0].revisionName)'` (wszystkie do potwierdzenia w próbie); przebieg wdrożył `cron-secret`: `gh run view <id przebiegu z poprzedniego polecenia> --log | grep -c 'skip: optional secret cron-secret'` (`infra/gcp/run-deploy.sh` pomija sekret opcjonalny bez włączonej wersji) | ostatni przebieg `success`, `headSha` = `<sha okna>`, `createdAt` późniejsze niż `updatedAt` zmiennych z P4 i niż `createTime` wersji `google-client-secret` (L5); nazwa rewizji do notatki okna (wartość odniesienia dla W4 na końcu okna); ruch nadal na Vercelu; `grep -c` = `0` (inny wynik = rewizja bez `CRON_SECRET`, każde zadanie Scheduler dostałoby 500: dodać wersję `cron-secret` i P5 od nowa) |
+| P5 | rewizja zbudowana po ustawieniu P4 i wersji `cron-secret` (i wersji `google-client-secret`, L5) | `gh variable list --env production-gcp --json name,updatedAt` oraz `gh run list --workflow=deploy-cloud-run.yml --limit=1 --json headSha,conclusion,createdAt`; przy L5 „Google działa” także `gcloud --project='<projekt GCP>' secrets versions list google-client-secret --limit=1 --format='value(name.basename(),createTime)'`; rewizja obsługująca ruch: `gcloud --project='<projekt GCP>' run services describe myhelper --region=europe-central2 --format='value(status.traffic[0].revisionName)'` (wszystkie do potwierdzenia w próbie); rewizja ma `CRON_SECRET` (`infra/gcp/run-deploy.sh` po cichu pomija sekret opcjonalny bez włączonej wersji): `gcloud --project='<projekt GCP>' run revisions describe <nazwa rewizji z poprzedniego polecenia> --region=europe-central2 --format='value(spec.containers[0].env[].name)'` — same nazwy zmiennych, bez wartości (do potwierdzenia w próbie; logu przebiegu `gh run view --log` nie czytać bez filtra: nagłówki kroków pokazują wartości `vars.*`) | ostatni przebieg `success`, `headSha` = `<sha okna>`, `createdAt` późniejsze niż `updatedAt` zmiennych z P4 i niż `createTime` wersji `google-client-secret` (L5); nazwa rewizji do notatki okna (wartość odniesienia dla W4 na końcu okna); ruch nadal na Vercelu; lista nazw zawiera `CRON_SECRET` (brak = każde zadanie Scheduler dostałoby 500: dodać wersję `cron-secret`, nowy przebieg wdrożenia, P5 od nowa) |
 | P6 | LB odpowiada przed utworzeniem rekordu | `curl -s -o /dev/null -w '%{http_code}\n' --resolve "app.nordsignal.cc:443:<LB_IP>" "https://app.nordsignal.cc/api/health"` (przy ingress `all`, przed W5) | `200` |
 | P7 | brak rekordu `app` | panel Cloudflare: brak rekordu `app` (A/AAAA/CNAME) do notatki; `dig +short NS nordsignal.cc`, potem `dig +short app.nordsignal.cc @<serwer NS strefy>`; `dig +short SOA nordsignal.cc` — ostatnie pole (minimum SOA) do notatki. Do T4 bez pytań o `app` do resolverów publicznych ani lokalnego (zapamiętałyby brak rekordu na czas minimum SOA, nie 60 s TTL) | pusty wynik z serwera autorytatywnego; minimum SOA w notatce |
 | P8 | Google OAuth (L5) | konsola Google: klient OAuth z F6 | lista przekierowań zawiera `https://app.nordsignal.cc/api/auth/callback/google` obok dotychczasowego, originy zawierają `https://app.nordsignal.cc`; przy L5 „nie działa” — „nie dotyczy” |
@@ -385,14 +385,18 @@ po godzinie). Tylko znacznik czasu i status; nigdy `scheduler jobs describe`
 (nagłówek niesie token):
 
 ```bash
+set +x
 gcloud --project='<projekt GCP>' logging read 'resource.type="cloud_scheduler_job" AND resource.labels.job_id="<nazwa zadania>" AND jsonPayload.@type="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"' --bucket=myhelper-logs --location=europe-central2 --view=_AllLogs --limit=1 --format='value(timestamp,httpRequest.status)'
 ```
 
-Oczekiwane: status `200` dla każdego zadania (polecenie do potwierdzenia
-w próbie, W6 → R5). `500` = rewizja bez `CRON_SECRET` (`CRON_SECRET not
-configured`), `401` = sekret w zadaniu inny niż w rewizji (np. rotacja bez
-ponownego `scheduler.sh`): pauza zadania (`gcloud … scheduler jobs pause`),
-decyzja właściciela.
+Oczekiwane: dla każdego zadania znacznik czasu późniejszy niż R5 i status
+`200` (polecenie do potwierdzenia w próbie, W6 → R5). Znacznik wcześniejszy
+niż R5 albo pusty wynik = zadanie jeszcze nie ruszyło po wznowieniu (wynik
+sprzed okna), powtórzyć później. Każdy status inny niż `200` = pauza zadania
+(`gcloud … scheduler jobs pause`), decyzja właściciela. Podpowiedzi przyczyny:
+`500` — rewizja bez `CRON_SECRET` albo błąd trasy (np. bazy), `401` — sekret
+w zadaniu inny niż w rewizji (np. rotacja bez ponownego `scheduler.sh`),
+`503` — `mh-sms-reminders` bez skonfigurowanego dostawcy SMS.
 
 **Okno w przód zakończone (2.10 z kodem 0 albo droga C).** Neon jest
 zamrożony. Vercel: K1 scalony i reguła zapory zawężona do metod innych niż
