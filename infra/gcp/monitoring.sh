@@ -178,7 +178,7 @@ http5xx_alert_json() {
   "displayName": "${HTTP5XX_ALERT}",
   "enabled": true,
   "combiner": "OR",
-  "documentation": {"content": "$(json_str "Usługa ${SERVICE}: więcej niż ${HTTP5XX_THRESHOLD} odpowiedzi 5xx w ${HTTP5XX_WINDOW}. Szczegóły: Error Reporting i logi myhelper-logs (europe-central2).")", "mimeType": "text/markdown"},
+  "documentation": {"content": "$(json_str "Usługa ${SERVICE}: więcej niż ${HTTP5XX_THRESHOLD} odpowiedzi 5xx w ${HTTP5XX_WINDOW}. Szczegóły: logi myhelper-logs (europe-central2).")", "mimeType": "text/markdown"},
   "conditions": [{
     "displayName": "${SERVICE} 5xx > ${HTTP5XX_THRESHOLD} / ${HTTP5XX_WINDOW}",
     "conditionThreshold": {
@@ -263,7 +263,7 @@ create_all() {
 
   # (1)
   create_policy "$ERRORS_ALERT" "$(log_alert_json "$ERRORS_ALERT" "$ERRORS_FILTER" \
-    "Błąd (severity>=ERROR) w usłudze ${SERVICE}. Szczegóły: Error Reporting i logi myhelper-logs (europe-central2).")"
+    "Błąd (severity>=ERROR) w usłudze ${SERVICE}. Szczegóły: logi myhelper-logs (europe-central2).")"
   # (2)
   create_policy "$HTTP5XX_ALERT" "$(http5xx_alert_json)"
   # (3)

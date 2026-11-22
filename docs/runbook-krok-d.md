@@ -1309,6 +1309,10 @@ przechowywania w EOG wyklucza „global”) albo wyłączyć. **Bez decyzji:
 wyłączyć** — `services disable clouderrorreporting.googleapis.com` i pominąć
 krok ręczny powiadomień; alerty z `monitoring.sh` działają bez Error Reporting.
 
+**Decyzja 2026-11-22: wyłączony** (wpis w #121). API nie było włączone, krok
+ręczny powiadomień pominięty, opisy alertów nie odsyłają do Error Reporting.
+Powrót po zamknięciu umowy powierzenia i polityki prywatności.
+
 ### Uptime run.app: do kiedy
 
 Uptime `myhelper-runapp-health` obowiązuje **do T7**. Po K1 domenę pilnuje
