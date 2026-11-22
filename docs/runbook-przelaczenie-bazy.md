@@ -6,9 +6,11 @@
 >
 > - **Obowiązuje:** sekcja 0; 1.0 (pkt 1 i 2); 1.1 — „Instancja próbna”,
 >   pkt 4 (próba odtworzenia kopii) i usunięcie po próbie; 1.2 (wiersze bez
->   dopisku „nie obowiązuje”); 1.3 pkt 1, 2 (część Cloud SQL) i 4; 1.5; 1.6
->   (część Cloud SQL: hasła i funkcje `psql_csql_*`); 1.7 (bez wersji serwera
->   Neona); 2.1; 2.8 (po pierwszym salonie testowym); 2.9; sekcje 4 i 5.
+>   dopisku „nie obowiązuje”); 1.3 pkt 1 bez ingress `internal` (W5 nie
+>   obowiązuje — procedura zatrzymania zapisów, blok wariantu), 1.3 pkt 2
+>   (część Cloud SQL) i 4; 1.5; 1.6 (część Cloud SQL: hasła i funkcje
+>   `psql_csql_*`); 1.7 (bez wersji serwera Neona); 2.1 bez ingress `internal`
+>   (jak wyżej); 2.8 (po pierwszym salonie testowym); 2.9; sekcje 4 i 5.
 >   Bloki poleceń z 2.3 i 2.4 obowiązują tam, gdzie odsyła do nich 1.0 pkt 2
 >   (dopisek przy bloku).
 > - **Nie obowiązuje:** kopia w przód — 2.2–2.7 i 2.10; powrót kopią
@@ -541,12 +543,13 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 | w próbie generalnej, zmiana konfiguracji konta Stripe w **trybie testowym**: zmiana adresu endpointu webhooka i ponowienie zdarzeń (bez trybu live) | procedura zatrzymania zapisów 0.3 |
 | przed oknem, poza repo, bez wpływu na ruch: ochrona wdrożeń Vercela „Standard Protection”, usunięcie `POSTGRES_URL` z zakresu Preview, utworzenie **wyłączonej** reguły zapory Vercela (`Deny`, cały projekt), dopisanie adresu przekierowania i originu `app.nordsignal.cc` do klienta Google OAuth, wersja `stripe-webhook-secret` = sekret endpointu Stripe. Każda pozycja potwierdzana osobno | procedura zatrzymania zapisów L1, L3, L5, L6 |
 | przed oknem: zmienne środowiska `production-gcp` (`BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL` = `https://app.nordsignal.cc`, `GOOGLE_CLIENT_ID` według L5), wersja `google-client-secret` według L5 i przebieg `deploy-cloud-run.yml` z `main` o `<sha okna>` (nowa rewizja usługi, ruch nadal na Vercelu) | procedura zatrzymania zapisów, sekcja 1 (P4, P5) |
-| start okna: zatrzymanie zapisów Vercel Production (włączenie reguły zapory Vercela, L1), wyłączenie cronów Vercela (L2), ingress Cloud Run `internal`, wstrzymanie zadań Cloud Scheduler (W6), zamrożenie produkcyjnego Neona (nie obowiązuje w wariancie bez kopii, plan 1.4); przy wycofaniu (droga A pkt 3, także po drodze B) wznowienie stanu sprzed okna: wyłączenie reguły zapory Vercela (R1), włączenie cronów Vercela (R3), ingress Cloud Run `all` (R4) | 2.1–2.2; wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R1–R4) |
+| start okna: zatrzymanie zapisów Vercel Production (włączenie reguły zapory Vercela, L1), wyłączenie cronów Vercela (L2), ingress Cloud Run `internal` (nie obowiązuje w wariancie bez kopii, plan 1.4), wstrzymanie zadań Cloud Scheduler (W6), zamrożenie produkcyjnego Neona (nie obowiązuje w wariancie bez kopii, plan 1.4); przy wycofaniu (droga A pkt 3, także po drodze B) wznowienie stanu sprzed okna: wyłączenie reguły zapory Vercela (R1), włączenie cronów Vercela (R3), ingress Cloud Run `all` (R4; w wariancie bez kopii R4 to sam odczyt, bez zmiany) | 2.1–2.2; wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R1–R4) |
 | nie obowiązuje w wariancie bez kopii (plan 1.4): kopia na żądanie Cloud SQL „przed importem” i — w razie potrzeby — przywrócenie z niej | 2.4; wycofanie (sekcja 2) |
-| przełączenie ruchu aplikacji na GCP: ingress Cloud Run z powrotem `all`, utworzenie rekordu `A app` → LB (DNS only), włączenie polityki alertu `myhelper-app-health-alert`, zmiana adresu endpointu webhooka Stripe; przy wycofaniu (droga B): usunięcie rekordu `app`, przywrócenie adresu endpointu, wyłączenie polityki alertu, ingress Cloud Run `internal` (zapora i dalsze wznowienie: wiersz „start okna”, droga A pkt 3) | 2.9; wycofanie (sekcja 2), droga B |
+| przełączenie ruchu aplikacji na GCP: ingress Cloud Run z powrotem `all` (w wariancie bez kopii T1 to sam odczyt, bez zmiany), utworzenie rekordu `A app` → LB (DNS only), włączenie polityki alertu `myhelper-app-health-alert`, zmiana adresu endpointu webhooka Stripe; przy wycofaniu (droga B): usunięcie rekordu `app`, przywrócenie adresu endpointu, wyłączenie polityki alertu, ingress Cloud Run `internal` (zapora i dalsze wznowienie: wiersz „start okna”, droga A pkt 3) | 2.9; wycofanie (sekcja 2), droga B |
 | nie obowiązuje w wariancie bez kopii (plan 1.4): odmrożenie Cloud SQL (początek zapisów na GCP) | 2.10 |
 | po 2.10 z kodem 0 albo po drodze C (w wariancie bez kopii: po 2.9 i po 2.8 z kodem 0), przy warunkach przed K1.1 (W4 = `<sha okna>`; T5 z serwera autorytatywnego, a resolvery publiczne z `<LB_IP>` albo upłynęło minimum SOA od T4; T6 o oczekiwanym wyniku): scalenie K1 (przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`, wdrożenie Vercel Production) i zawężenie reguły zapory Vercela do metod innych niż `GET`/`HEAD` | procedura zatrzymania zapisów L4 (K1, warunki przed K1.1); wycofanie, droga C |
-| po oknie (w wariancie bez kopii: po 2.8 z kodem 0) albo przy wycofaniu (droga A pkt 3): wznowienie zadań Cloud Scheduler, wyłącznie tych, które w W0 miały `ENABLED` (lista z notatki okna) | 2.10 (w wariancie bez kopii: 2.8, akapit wariantu w 2.9); wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R5) |
+| powrót bez danych (wariant bez kopii, plan 1.4): PR cofający K1 (wdrożenie Vercel Production) | procedura zatrzymania zapisów, sekcja 6 (pkt 1) |
+| po oknie (w wariancie bez kopii: po 2.8 z kodem 0 i po K1) albo przy wycofaniu (droga A pkt 3): wznowienie zadań Cloud Scheduler, wyłącznie tych, które w W0 miały `ENABLED` (lista z notatki okna) | 2.10 (w wariancie bez kopii: 2.8, akapit wariantu w 2.9); wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R5) |
 | nie obowiązuje w wariancie bez kopii (plan 1.4): okno powrotu (osobne okno, osobna zgoda) z gałęzią Neona „przed powrotem” i kopią Cloud SQL | sekcja 3 |
 
 ### 1.3 Zatrzymanie zapisów PRZED zamrożeniem
@@ -571,7 +574,8 @@ Dlatego przed `freeze-neon.sh`:
      (`docs/runbook-krok-d.md:774-778`): adres `run.app` przyjmowałby zapisy do
      Cloud SQL w trakcie 2.3–2.6, a wtedy `count_auth_rate_limit` > 0 na
      Cloud SQL i 2.7 stoi. To **główna kontrola** braku zapisów na Cloud SQL;
-     zamrożenie w 2.6 jest obroną w głąb;
+     zamrożenie w 2.6 jest obroną w głąb. Nie obowiązuje w wariancie bez
+     kopii (plan 1.4): ingress zostaje `all`;
    - zadania Cloud Scheduler wstrzymane (`docs/runbook-krok-d.md` sekcja 8:
      stan `PAUSED`).
 
@@ -948,7 +952,8 @@ Powrót na Neon — wyłącznie sekcją 3 (osobne okno, osobna zgoda).
 (1.0 pkt 1); bez niej okno nie startuje.** Wykonane i zapisane w notatce okna
 wszystkie punkty 1.3 pkt 1, w tym ingress Cloud Run przełączony na `internal`
 (zostaje do 2.9) i Preview Vercela bez zapisu do produkcyjnego Neona. Bez tego
-nie zamrażać.
+nie zamrażać. Ingress `internal` nie obowiązuje w wariancie bez kopii
+(plan 1.4): ingress zostaje `all`.
 
 ### 2.2 Zamrożenie Neona — `freeze-neon.sh` — nie obowiązuje w wariancie bez kopii (plan 1.4)
 
@@ -1258,10 +1263,15 @@ droga A), `off` → droga C.
 
 W wariancie bez kopii (plan 1.4) Cloud SQL nie jest zamrożony: zapisy na GCP
 działają od razu po przełączeniu, a zdania wyżej o zamrożeniu, 2.10 i drogach
-B i C nie dotyczą. Stop po przełączeniu = powrót bez danych (blok na górze
-pliku). Koniec okna w tym wariancie: po 2.8 z kodem 0 (2.8 „Kiedy”)
-wznowienie zadań Scheduler według decyzji właściciela (procedura
-zatrzymania zapisów R5, 1.2), potem koniec tunelu i haseł (1.5, 1.6).
+B i C nie dotyczą. Ingress zostaje `all` (bez W5), więc koniec głównej
+kontroli z 2.1 też nie dotyczy. Stop po przełączeniu = powrót bez danych
+(blok na górze pliku). Koniec okna w tym wariancie, w tej kolejności: 2.8
+z kodem 0 (2.8 „Kiedy”) → K1 (K1.1–K1.4) → R5 (wznowienie zadań Scheduler za zgodą z 1.2,
+procedura zatrzymania zapisów, 1.2) → koniec tunelu i haseł (1.5, 1.6). R5
+nie czeka na K1.1, gdy K1.1 czeka na minimum SOA. 2.8 z kodem innym niż 0 =
+stan „bez K1”, bez R5; zakaz scaleń kończy decyzja właściciela zapisana
+w notatce okna albo powrót bez danych (procedura zatrzymania zapisów,
+sekcja 6).
 
 ### 2.10 Odmrożenie Cloud SQL — `unfreeze-neon.sh` przez tunel — nie obowiązuje w wariancie bez kopii (plan 1.4)
 
