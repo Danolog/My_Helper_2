@@ -116,7 +116,6 @@ if [[ "$APPLY" == 1 && "$TEARDOWN" == 0 && -z "$NOTIFY_EMAIL" ]]; then
   die "--apply needs --notify-email=… or LB_NOTIFY_EMAIL (uptime check notification)"
 fi
 
-CERT_RESOURCE="projects/${PROJECT_ID}/locations/${REGION}/certificates/${CERT}"
 
 GC=(gcloud --project="$PROJECT_ID" --quiet)
 
@@ -235,7 +234,7 @@ create_all() {
   if ! exists compute target-https-proxies describe "$HTTPS_PROXY" "${R[@]}"; then
     run compute target-https-proxies create "$HTTPS_PROXY" "${R[@]}" \
       --url-map="$URL_MAP" --url-map-region="$REGION" \
-      --certificate-manager-certificates="$CERT_RESOURCE" \
+      --certificate-manager-certificates="$CERT" \
       --ssl-policy="$SSL_POLICY" --ssl-policy-region="$REGION"
   fi
 
