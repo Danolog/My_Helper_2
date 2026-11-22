@@ -164,10 +164,18 @@ Tworzy:
   publiczne IP **bez** autoryzowanych sieci (połączenia wyłącznie przez Cloud SQL
   Auth Proxy / wbudowany konektor Cloud Run);
 - bazę `myhelper`;
-- **jeden login** `myhelper_owner` (aplikacja i migracje; Oliver 19:44) z losowym
+- **jeden login** `myhelper_svc` (aplikacja i migracje; Oliver 19:44) z losowym
   hasłem `[A-Za-z0-9]{32}` i wersję sekretu `postgres-url`:
-  `postgresql://myhelper_owner:<HASŁO>@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg`
-  (bez `sslmode` — szyfruje konektor). Drugi login (osobny dla migracji) to #131
+  `postgresql://myhelper_svc:<HASŁO>@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg`
+  (bez `sslmode` — szyfruje konektor). Login tworzy **SQL-em rola `postgres`**
+  (`CREATE ROLE … LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+  NOBYPASSRLS`), a nie `gcloud sql users create`: login z `gcloud sql users
+  create` dostaje automatycznie członkostwo w `cloudsqlsuperuser` (m.in.
+  `CREATE ROLE`, `CREATE EXTENSION`, `pg_signal_backend`), którego na Cloud
+  SQL nie da się potem odebrać; login z `CREATE ROLE` go nie dostaje, a
+  `gcloud sql users set-password` go nie dodaje. Prawa potrzebne migracjom
+  nadaje się jawnie: `CONNECT`, `TEMPORARY`, `CREATE` na bazie i `USAGE`,
+  `CREATE` na schemacie `public`. Drugi login (osobny dla migracji) to #131
   (P3, przed pierwszym płacącym salonem) — bootstrap go nie przewiduje;
 - losowe hasło wbudowanego `postgres` w osobnym sekrecie
   `postgres-admin-password` — spoza manifestu, bez dostępu runtime, niepodpięty
@@ -201,7 +209,14 @@ jest traktowane jak „brak wersji” (Ethan, #134). Po utworzeniu instancji skr
 sprawdza `state`; baza, loginy i wiązania powstają tylko przy `RUNNABLE`, inaczej
 stop — powtórzyć etap później.
 
-Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005.
+Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005;
+`myhelper_svc` jest jej członkiem (`GRANT myhelper_app TO myhelper_svc`,
+wykonuje `postgres`), bo `forSalon` przełącza się na nią `SET LOCAL ROLE`.
+
+**Etapu `sql` nie uruchamia się ponownie** do czasu jego poprawki: dziś tworzy
+login przez `gcloud sql users create`, czyli z członkostwem
+w `cloudsqlsuperuser`, więc ponowny przebieg odtworzyłby stan sprzed zmiany
+loginu na `myhelper_svc`.
 
 Odczyt stanu po etapie:
 
@@ -218,7 +233,7 @@ gcloud --project=$P secrets versions list postgres-admin-password --format='valu
 Oczekiwane: `POSTGRES_18`, `ENTERPRISE`, `db-f1-micro`, `ZONAL`, `10`, `30`,
 kopie włączone z PITR i `retainedBackups: 7`, `location: europe-central2`, okno `day: 7 hour: 3`,
 `ENCRYPTED_ONLY`, brak `authorizedNetworks`, `deletionProtectionEnabled: true`;
-bazy zawierają `myhelper`; loginy: `myhelper_owner`, `postgres`; oba sekrety:
+bazy zawierają `myhelper`; loginy: `myhelper_svc`, `postgres`; oba sekrety:
 `1 ENABLED`.
 
 **Policy Troubleshooter po etapie `sql`** (W-1, Ryan): deploy ma
@@ -613,11 +628,12 @@ migracja z polityką dla nowej roli: rola w tej samej lub wcześniejszej migracj
 Po przebiegu z migracjami (przez Cloud SQL Auth Proxy, sekcja 9):
 
 ```sql
-SELECT rolname, rolcanlogin, rolbypassrls, rolsuper FROM pg_roles
- WHERE rolname IN ('myhelper_app', 'myhelper_owner');
+SELECT rolname, rolcanlogin, rolbypassrls, rolsuper,
+       pg_has_role(rolname, 'cloudsqlsuperuser', 'MEMBER') FROM pg_roles
+ WHERE rolname IN ('myhelper_app', 'myhelper_svc') ORDER BY rolname;
 ```
 
-Oczekiwane: `myhelper_app | f | f | f`, `myhelper_owner | t | f | f`.
+Oczekiwane: `myhelper_app | f | f | f | f`, `myhelper_svc | t | f | f | f`.
 
 **Migracje produkcyjne** idą wyłącznie przez workflow z `run_migrations=true`
 (kopia na żądanie przed migracją w `run-migrate.sh`) albo przez sesję główną.
