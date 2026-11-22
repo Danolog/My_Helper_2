@@ -72,6 +72,9 @@ export const FORBIDDEN_SHA256 = Object.freeze(new Set([
   "ed0257e97e8c51006601228c859edc6bf46e186a5ce4adac1dc423e030b5f2e9", // __tests__/lib/db-lazy.test.ts POSTGRES_URL
   "f9b0078b5df596d2ea19010c001bbd009e651de2c57e8fb7e355f31eb9d3f739", // __tests__/lib/env.test.ts BETTER_AUTH_SECRET
   "fdc0a90070072cd2e6545927095bd401952544f019be8c6523e246f4b7c3d470", // __tests__/lib/env.test.ts POSTGRES_URL
+  "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b", // __tests__/lib/google-auth.test.ts GOOGLE_CLIENT_SECRET
+  "481a36da141951626b4ef245a045f83a33e4c5af0c1b8b1cc6510a1f54a5e6c1", // __tests__/lib/google-auth.test.ts GOOGLE_CLIENT_SECRET
+  "9f9c052ae27393a875b9e11b282ffc9c81073d72e25dd5f9c892e73da5cf4f6a", // __tests__/lib/google-auth.test.ts GOOGLE_CLIENT_SECRET
   // FORBIDDEN_SHA256:END
 ]));
 
