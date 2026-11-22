@@ -321,6 +321,9 @@ describe("P1: zasoby (1)–(11)", () => {
   it("(3)+(10)+(11) IP regionalny i obie reguły w tym samym tierze, EXTERNAL_MANAGED, porty 443 i 80", () => {
     const tier = one(/^compute addresses create /).match(/ --network-tier=(PREMIUM|STANDARD)( |$)/)?.[1];
     expect(tier).toBeDefined();
+    // gcloud odrzuca --ip-version dla adresu regionalnego ("IP Version is not
+    // supported for regional addresses"); regionalny adres zewnętrzny i tak jest IPv4.
+    expect(one(/^compute addresses create /)).not.toContain("--ip-version");
     const fr443 = one(/^compute forwarding-rules create myhelper-lb-https-fr /);
     const fr80 = one(/^compute forwarding-rules create myhelper-lb-http-fr /);
     for (const fr of [fr443, fr80]) {
