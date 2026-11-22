@@ -318,9 +318,10 @@ password_flags() { printf -- '--password: "%s"\n' "$1"; }
 # Hasło dla istniejącego użytkownika bazy + wersja sekretu. Pomijane, gdy sekret
 # ma już wersję (hasło nie jest zmieniane przy ponownym przebiegu). Gdy wersji
 # brak — hasło jest ustawiane od nowa (set-password), więc stan sam się naprawia.
-# Bootstrap NIGDY nie tworzy loginu: login inny niż `postgres`, którego nie ma
-# (albo nie da się tego sprawdzić — dry-run), zatrzymuje etap przed zmianą jego
-# hasła i wersją sekretu. Login aplikacji tworzy SQL-em `postgres` (runbook, 3.6).
+# Bootstrap NIGDY nie tworzy loginu: przy --apply login inny niż `postgres`,
+# którego nie ma, zatrzymuje etap przed zmianą jego hasła i wersją sekretu
+# (dry-run nie sprawdza stanu — wypisuje notę i pełny plan). Login aplikacji
+# tworzy SQL-em `postgres` (runbook, 3.6).
 # $1 = użytkownik, $2 = sekret, $3 = „url” (sekret = POSTGRES_URL) albo „raw”
 db_password() {
   local user="$1" secret="$2" kind="$3"
@@ -329,7 +330,10 @@ db_password() {
     return 0
   fi
   if [[ "$user" != "postgres" ]] && ! exists sql users describe "$user" --instance="$SQL_INSTANCE"; then
-    die "login $user not found on instance $SQL_INSTANCE (or not checked in dry-run) — bootstrap does not create database logins; the app login is created with SQL by postgres (docs/runbook-krok-d.md, section 3.6). Stage stopped, password of $user unchanged"
+    if [[ "$APPLY" == 1 ]]; then
+      die "login $user not found on instance $SQL_INSTANCE — bootstrap does not create database logins; the app login is created with SQL by postgres (docs/runbook-krok-d.md, section 3.6). Stage stopped, password of $user unchanged"
+    fi
+    echo "  note: with --apply a missing $user stops the stage here (bootstrap never creates logins; docs/runbook-krok-d.md, section 3.6)"
   fi
   local verb="set-password"
   local shown="<generated>"

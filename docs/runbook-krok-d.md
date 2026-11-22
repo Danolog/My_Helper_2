@@ -62,7 +62,7 @@ później**, z bramką z sekcji 3.8. Etapy `run` i `wif` są od siebie niezależ
 workflow wdrożenia potrzebuje obu.
 
 **Etap `sql` nie rusza bez B-1** (Ryan 6899923012): wersja skryptu musi
-wywoływać `sql users create|set-password` z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`
+wywoływać `sql users set-password` z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`
 (inaczej hasła bazy lądują jawnym tekstem w `~/.config/gcloud/logs/`).
 Sprawdzenie przed etapem (oczekiwany wynik: `1`):
 
@@ -89,7 +89,7 @@ grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/
 Przebieg z `--apply` jest idempotentny: ponowne uruchomienie etapu nie tworzy
 zasobów drugi raz (`state: exists`) i nie zmienia haseł bazy (sekcja 3.6).
 Etap `sql` też można powtórzyć: **nie tworzy loginu aplikacji**, a przy jego
-braku (także w dry-run, gdzie stanu nie sprawdza) zatrzymuje się (sekcja 3.6).
+braku z `--apply` zatrzymuje się; dry-run pokazuje pełny plan z notą o stopie.
 
 ## 2a. Cofanie etapu (sesja główna)
 
@@ -215,8 +215,8 @@ Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005;
 `myhelper_svc` jest jej członkiem (`GRANT myhelper_app TO myhelper_svc`,
 wykonuje `postgres`), bo `forSalon` przełącza się na nią `SET LOCAL ROLE`.
 
-**Etap `sql` można powtórzyć.** Nie tworzy loginu aplikacji: gdy `myhelper_svc`
-nie istnieje (w dry-run stanu nie sprawdza — tak samo), stop przed jego hasłem;
+**Etap `sql` można powtórzyć.** Nie tworzy loginu aplikacji: gdy z `--apply`
+`myhelper_svc` nie istnieje, stop przed jego hasłem (dry-run: pełny plan + nota);
 hasło `postgres` idzie wcześniej, więc na nowej instancji `postgres` tworzy login
 SQL-em jak wyżej, a potem etap powtarza się.
 

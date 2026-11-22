@@ -19,7 +19,8 @@
  *    (login istnieje, sekret bez wersji → set-password), wywołania haseł
  *    bez lokalnego logu gcloud (B-1);
  *  - bootstrap nigdy nie tworzy loginu bazy (login z Admin API dostaje
- *    cloudsqlsuperuser): brak loginu aplikacji albo dry-run → stop przed hasłem;
+ *    cloudsqlsuperuser): brak loginu aplikacji przy --apply → stop przed hasłem
+ *    (dry-run: nota i pełny plan, kod 0);
  *  - rola kopii: dokładnie trzy uprawnienia, warunek Instance + BackupRun (W-1);
  *  - idempotencja: istniejące zasoby nie są tworzone ponownie.
  * Mutacje (scratchpad, wynik w PR): usunąć --edition; edycja enterprise-plus;
@@ -169,24 +170,12 @@ const base = (stage: string, wif = cond(VALID_CONDITION)) => [
 ];
 
 describe("G-D1: dry-run i parametry", () => {
-  it.each(STAGES.filter((s) => s !== "sql"))("etap %s: domyślnie dry-run — zero wywołań gcloud, także odczytów", (stage) => {
+  it.each(STAGES)("etap %s: domyślnie dry-run — zero wywołań gcloud, także odczytów", (stage) => {
     const r = bootstrap(base(stage));
     expect(r.status, r.stderr).toBe(0);
     expect(r.calls).toEqual([]);
     expect(r.stdout).toMatch(/^mode: DRY-RUN/);
     expect(r.stdout).toContain(`stage ${stage}: done`);
-  });
-
-  // Dry-run nie sprawdza, czy login aplikacji istnieje — więc zatrzymuje się tak samo
-  // jak przy braku loginu, zanim wypisze zmianę hasła tego loginu.
-  it("etap sql: domyślnie dry-run — zero wywołań gcloud; stop na niesprawdzonym loginie aplikacji", () => {
-    const r = bootstrap(base("sql"));
-    expect(r.status).toBe(2);
-    expect(r.calls).toEqual([]);
-    expect(r.stdout).toMatch(/^mode: DRY-RUN/);
-    expect(r.stderr).toMatch(/login myhelper_svc not found .*docs\/runbook-krok-d\.md, section 3\.6/);
-    expect(r.stdout).not.toMatch(/sql users create|set-password myhelper_svc|versions add postgres-url/);
-    expect(r.stdout).not.toContain("stage sql: done");
   });
 
   it("jawne --dry-run po --apply wygrywa (ostatnie słowo) i nic nie wykonuje", () => {
@@ -196,7 +185,7 @@ describe("G-D1: dry-run i parametry", () => {
   it("wyjście dry-run to wyłącznie polecenia i odczyty stanu", () => {
     for (const stage of STAGES) {
       for (const line of bootstrap(base(stage)).stdout.split("\n").filter(Boolean)) {
-        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |\+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud |  state: |  policy: |  condition: |  skip: |  GCP_[A-Z_]+=|stage [a-z]+: done$)/);
+        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |\+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud |  state: |  policy: |  condition: |  skip: |  note: |  GCP_[A-Z_]+=|stage [a-z]+: done$)/);
       }
     }
   });
@@ -540,13 +529,18 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(ok).toBeLessThan(r.calls.findIndex((c) => c.includes("sql databases create")));
   });
 
-  it("dry-run sql nie generuje hasła i nie wypisuje zmiany hasła (stop na niesprawdzonym loginie)", () => {
+  it("dry-run sql nie generuje hasła; nota o stopie przy --apply i pełny plan (wiązania IAM, rola kopii), kod 0", () => {
     const d = bootstrap(base("sql"));
-    expect(d.status).toBe(2);
+    expect(d.status, d.stderr).toBe(0);
     expect(d.stdout).toContain(`? gcloud --project=${PROJECT} --quiet sql users describe myhelper_svc --instance=myhelper-pg`);
-    expect(d.stdout).toContain("--flags-file=<(--password: <generated>)");
-    expect(d.stdout).not.toMatch(/set-password myhelper_svc|versions add postgres-url/);
+    expect(d.stdout).toContain("note: with --apply a missing myhelper_svc stops");
+    expect(d.stdout).toMatch(/sql users set-password myhelper_svc --instance=myhelper-pg --flags-file=<\(--password: <generated>\)/);
+    expect(d.stdout).not.toMatch(/sql users create/);
+    expect(d.stdout).toContain("roles/cloudsql.client");
+    expect(d.stdout).toContain("myhelperSqlBackup");
+    expect(d.stdout).toContain("stage sql: done");
     expect(d.stdout).not.toMatch(/[A-Za-z0-9]{32}/);
+    expect(d.calls).toEqual([]);
     expect(d.flags + d.stdin).toBe("");
   });
 
