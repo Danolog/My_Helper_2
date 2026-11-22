@@ -316,6 +316,8 @@ describe("monitoring --apply: zasoby", () => {
     for (const p of Object.values(policies(mon(APPLY).files))) {
       expect(p.enabled, p.displayName).toBe(true);
       expect(p.notificationChannels, p.displayName).toEqual([CHANNEL_ID]);
+      // Error Reporting jest wyłączony (lokalizacja „global”), opis nie może do niego odsyłać.
+      expect(p.documentation?.content ?? "", p.displayName).not.toMatch(/Error Reporting/);
     }
   });
 

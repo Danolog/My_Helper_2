@@ -1124,8 +1124,7 @@ Niepusto przy próbie z tokenem = stop (filtr nie działa na tej platformie).
 Wynik w #121: wyłącznie „pusto / jest” dla każdej z czterech prób.
 
 Ryzyko szczątkowe (sprawdzić przy próbie, nie blokuje): zakładka „Logs”
-w konsoli Cloud Run i Error Reporting po przekierowaniu. Alarmuje uptime check
-z kroku 1, nie Error Reporting.
+w konsoli Cloud Run po przekierowaniu. Alarmuje uptime check z kroku 1.
 
 **Ślad odczytu sekretu.** Po pierwszym `secrets versions access` w 4a.1:
 
@@ -1227,7 +1226,9 @@ Schedulera = jeden e-mail na 10 min), autoClose 30 min, **bez** `labelExtractors
 `/api/health` pinguje bazę, więc alert uptime odpala także przy awarii bazy
 (503), nie tylko usługi. Nieobsłużony wyjątek wypisany przez Node zwykłym
 tekstem na stderr ma zwykle ważność `DEFAULT`, więc alert błędów go nie złapie;
-pokrywają go alert 5xx, uptime i powiadomienia Error Reporting. Adres run.app skrypt czyta z usługi
+pokrywają go tylko alert 5xx i uptime (Error Reporting wyłączony, niżej).
+Wyjątek `DEFAULT` bez 5xx (np. błąd zadania w tle) nie alarmuje — luka
+przyjęta razem z wyłączeniem Error Reporting. Adres run.app skrypt czyta z usługi
 (`run services describe myhelper --format=value(status.url)`) i przyjmuje tylko
 host `myhelper-….run.app`. Istniejący zasób zostaje bez zmian (`skip: … exists`);
 zmiana stałych = `--undo`, potem `--apply`.
@@ -1254,8 +1255,9 @@ gcloud --project=my-helper-2-488419 monitoring uptime list-configs --filter='dis
 
 Oczekiwane: cztery polityki z `True`; uptime z `10s` i trzema regionami.
 
-### Krok ręczny: powiadomienia Error Reporting
+### Krok ręczny: powiadomienia Error Reporting — POMINIĘTY
 
+Error Reporting wyłączony (decyzja 2026-11-22, niżej); krok wraca razem z nim.
 Powiadomień o **nowych grupach błędów** w Error Reporting gcloud nie obsługuje.
 W konsoli: Error Reporting → „Configure notifications” → kanał
 `myhelper-lb-owner-email`. Przed testem niżej.
@@ -1275,29 +1277,20 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://logging.googleapis.com/
   -d '{"entries":[{"logName":"projects/'"$P"'/logs/monitoring-probe","resource":{"type":"cloud_run_revision","labels":{"project_id":"'"$P"'","service_name":"myhelper","revision_name":"monitoring-probe","configuration_name":"myhelper","location":"europe-central2"}},"severity":"ERROR","jsonPayload":{"message":"Error: monitoring-probe test error","stack_trace":"Error: monitoring-probe test error\n    at probe (/app/monitoring-probe.js:1:1)"}}]}'
 ```
 
-Oczekiwane: `200`; w ciągu ok. 10 min grupa `monitoring-probe test error`
-w Error Reporting **i** e-mail alertu `myhelper-run-errors-alert`. Wpis trafia
-przez ujście `_Default` do `myhelper-logs` (`europe-central2`), więc test
-sprawdza też, że Error Reporting czyta wpisy z regionalnego zasobnika. E-mail
-jest, a grupy brak = Error Reporting nie czyta tego zasobnika (albo formatu):
-**zapisać wynik w #121 i zatrzymać się** (decyzja przed oknem). Brak e-maila =
-stop. Treść: e-mail `myhelper-run-errors-alert` **nie** zawiera tekstu
-`monitoring-probe test error` (polityka bez treści wpisu), e-mail Error
-Reporting go zawiera (oczekiwane). Tekst w e-mailu alertu = stop. Incydent
-zamknąć w konsoli (albo poczekać na autoClose 30 min), grupę testową oznaczyć
-jako rozwiązaną.
+Oczekiwane: `200`; w ciągu ok. 10 min e-mail alertu `myhelper-run-errors-alert`.
+Brak e-maila = stop. Treść: e-mail **nie** zawiera tekstu
+`monitoring-probe test error` (polityka bez treści wpisu). Tekst w e-mailu = stop.
+Incydent zamknąć w konsoli (albo poczekać na autoClose 30 min). Wykonane
+2026-11-22: e-mail w ciągu minuty, bez tekstu wpisu.
 
-**Dane.** Dwa rodzaje e-maili, oba wyłącznie na adres właściciela (kanał
-z 10a); żadnych dodatkowych odbiorców, list ani integracji:
-
-- e-maile polityk z `monitoring.sh` — nazwa polityki, opis i link, **bez**
-  treści wpisu (brak `labelExtractors`; sprawdza test wyżej);
-- e-maile Error Reporting (krok ręczny) — komunikat i fragment stosu, mogą
-  zawierać dane osobowe klientów salonów.
-
-W skrzynce właściciela: reguła usuwania e-maili Error Reporting po 30 dniach
-(tyle co retencja logów). Oba przepływy (e-maile alertów, Error Reporting)
-dopisać do rejestru czynności przetwarzania (ten sam co przy T1) przed oknem.
+**Dane.** E-maile polityk z `monitoring.sh`, wyłącznie na adres właściciela
+(kanał z 10a); żadnych dodatkowych odbiorców, list ani integracji. Treść: nazwa
+polityki, opis, etykiety zasobu i link, **bez** treści wpisu (brak
+`labelExtractors`; sprawdza test wyżej). Przepływ dopisać do rejestru czynności
+przetwarzania (ten sam co przy T1) przed oknem. Po powrocie Error Reporting
+dochodzą jego e-maile (komunikat i fragment stosu, mogą zawierać dane osobowe
+klientów salonów): reguła usuwania po 30 dniach w skrzynce i drugi wpis
+w rejestrze.
 
 **Lokalizacja Error Reporting — decyzja przed krokiem 1 okna, wpis w #121.**
 Error Reporting jest usługą globalną; może przechowywać grupy błędów (komunikat,
@@ -1308,6 +1301,10 @@ obiecujemy salonom: umowa powierzenia, polityka prywatności — obietnica
 przechowywania w EOG wyklucza „global”) albo wyłączyć. **Bez decyzji:
 wyłączyć** — `services disable clouderrorreporting.googleapis.com` i pominąć
 krok ręczny powiadomień; alerty z `monitoring.sh` działają bez Error Reporting.
+
+**Decyzja 2026-11-22: wyłączony** (wpis w #121). API nie było włączone, krok
+ręczny powiadomień pominięty, opisy alertów nie odsyłają do Error Reporting.
+Powrót po zamknięciu umowy powierzenia i polityki prywatności.
 
 ### Uptime run.app: do kiedy
 
