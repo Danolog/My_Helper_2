@@ -1267,16 +1267,33 @@ przez ujście `_Default` do `myhelper-logs` (`europe-central2`), więc test
 sprawdza też, że Error Reporting czyta wpisy z regionalnego zasobnika. E-mail
 jest, a grupy brak = Error Reporting nie czyta tego zasobnika (albo formatu):
 **zapisać wynik w #121 i zatrzymać się** (decyzja przed oknem). Brak e-maila =
-stop. Incydent zamknąć w konsoli (albo poczekać na autoClose 30 min), grupę
-testową oznaczyć jako rozwiązaną.
+stop. Treść: e-mail `myhelper-run-errors-alert` **nie** zawiera tekstu
+`monitoring-probe test error` (polityka bez treści wpisu), e-mail Error
+Reporting go zawiera (oczekiwane). Tekst w e-mailu alertu = stop. Incydent
+zamknąć w konsoli (albo poczekać na autoClose 30 min), grupę testową oznaczyć
+jako rozwiązaną.
 
-**Dane.** E-mail alertu i Error Reporting przechowują treść błędu (komunikat,
-stos), która może zawierać dane osobowe. Kanał wyłącznie na adres właściciela
-(z 10a); żadnych dodatkowych odbiorców, list ani integracji.
+**Dane.** Dwa rodzaje e-maili, oba wyłącznie na adres właściciela (kanał
+z 10a); żadnych dodatkowych odbiorców, list ani integracji:
 
-**Do sprawdzenia przy teście:** Error Reporting jest usługą globalną i może
-przechowywać grupy błędów (komunikat, stos) poza `europe-central2`. Wynik
-i decyzję (przyjąć / wyłączyć) dopisać w notatce okna i tutaj.
+- e-maile polityk z `monitoring.sh` — nazwa polityki, opis i link, **bez**
+  treści wpisu (brak `labelExtractors`; sprawdza test wyżej);
+- e-maile Error Reporting (krok ręczny) — komunikat i fragment stosu, mogą
+  zawierać dane osobowe klientów salonów.
+
+W skrzynce właściciela: reguła usuwania e-maili Error Reporting po 30 dniach
+(tyle co retencja logów). Oba przepływy (e-maile alertów, Error Reporting)
+dopisać do rejestru czynności przetwarzania (ten sam co przy T1) przed oknem.
+
+**Lokalizacja Error Reporting — decyzja przed krokiem 1 okna, wpis w #121.**
+Error Reporting jest usługą globalną; może przechowywać grupy błędów (komunikat,
+stos) poza `europe-central2`. Testem tego nie da się ustalić — źródło to
+dokumentacja Google (Error Reporting, Data Location w Service Specific Terms).
+Wynik: przyjąć (wymaga podstawy w Google Cloud DPA i zgodności z tym, co
+obiecujemy salonom: umowa powierzenia, polityka prywatności — obietnica
+przechowywania w EOG wyklucza „global”) albo wyłączyć. **Bez decyzji:
+wyłączyć** — `services disable clouderrorreporting.googleapis.com` i pominąć
+krok ręczny powiadomień; alerty z `monitoring.sh` działają bez Error Reporting.
 
 ### Uptime run.app: do kiedy
 
