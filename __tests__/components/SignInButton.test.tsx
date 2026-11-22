@@ -266,12 +266,68 @@ describe("SignInButton", () => {
     });
   });
 
-  it("renders Google sign-in button", () => {
-    render(<SignInButton />);
+  describe("logowanie przez Google", () => {
+    it("bez propsa googleEnabled: brak przycisku Google i separatora", () => {
+      render(<SignInButton />);
 
-    expect(
-      screen.getByRole("button", { name: /Zaloguj sie przez Google/ })
-    ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Zaloguj sie przez Google/ })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("lub")).not.toBeInTheDocument();
+    });
+
+    it("googleEnabled=false: brak przycisku Google i separatora", () => {
+      render(<SignInButton googleEnabled={false} />);
+
+      expect(
+        screen.queryByRole("button", { name: /Zaloguj sie przez Google/ })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("lub")).not.toBeInTheDocument();
+      // Logowanie e-mailem działa bez zmian
+      expect(
+        screen.getByRole("button", { name: "Zaloguj sie" })
+      ).toBeInTheDocument();
+    });
+
+    it("googleEnabled=true: przycisk i separator są widoczne", () => {
+      render(<SignInButton googleEnabled />);
+
+      expect(
+        screen.getByRole("button", { name: /Zaloguj sie przez Google/ })
+      ).toBeInTheDocument();
+      expect(screen.getByText("lub")).toBeInTheDocument();
+    });
+
+    it("googleEnabled=true: kliknięcie woła signIn.social z bezpiecznym callbackURL", async () => {
+      mockSignInSocial.mockResolvedValue({});
+
+      render(<SignInButton googleEnabled returnTo="//evil.com" defaultRedirect="/salons" />);
+
+      await user.click(
+        screen.getByRole("button", { name: /Zaloguj sie przez Google/ })
+      );
+
+      await waitFor(() => {
+        expect(mockSignInSocial).toHaveBeenCalledWith({
+          provider: "google",
+          callbackURL: "/salons",
+        });
+      });
+    });
+
+    it("googleEnabled=true: wyjątek z signIn.social pokazuje komunikat", async () => {
+      mockSignInSocial.mockRejectedValue(new Error("boom"));
+
+      render(<SignInButton googleEnabled />);
+
+      await user.click(
+        screen.getByRole("button", { name: /Zaloguj sie przez Google/ })
+      );
+
+      expect(
+        await screen.findByText("Nie udalo sie zalogowac przez Google. Sprobuj ponownie.")
+      ).toBeInTheDocument();
+    });
   });
 
   it("renders 'forgot password' and 'register' links", () => {

@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { isGoogleAuthConfigured } from "@/lib/google-auth"
 import { getOptionalSession } from "@/lib/session"
 
 /**
@@ -46,7 +47,12 @@ export default async function LoginPage({
               Haslo zostalo zresetowane. Zaloguj sie nowym haslem.
             </p>
           )}
-          <SignInButton returnTo={returnTo} defaultRedirect="/dashboard" registerHref="/register" />
+          <SignInButton
+            returnTo={returnTo}
+            defaultRedirect="/dashboard"
+            registerHref="/register"
+            googleEnabled={isGoogleAuthConfigured()}
+          />
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Jestes klientem?{" "}
             <Link href="/dla-klientow" className="text-primary hover:underline">

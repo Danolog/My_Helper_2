@@ -6,6 +6,7 @@ import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from
 import { getAuthIpAddressOptions } from "./trusted-proxies"
 import { getAuthRateLimitStore } from "./auth-rate-limit-mode"
 import { buildAuthRateLimitOptions } from "./auth-rate-limit-options"
+import { getGoogleAuthCredentials } from "./google-auth"
 
 /**
  * Kontekst logu dla zdarzeń „wysłano link resetu hasła / weryfikacji e-mail".
@@ -52,6 +53,12 @@ const ipAddressOptions = getAuthIpAddressOptions()
  */
 const rateLimitOptions = buildAuthRateLimitOptions(getAuthRateLimitStore(process.env))
 
+/**
+ * Dane dostawcy Google czytane przy ładowaniu modułu, czyli przy starcie
+ * procesu — na Cloud Run zmienne środowiskowe są już wtedy ustawione.
+ */
+const googleCredentials = getGoogleAuthCredentials()
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   database: authAdapter,
@@ -77,12 +84,9 @@ export const auth = betterAuth({
     expiresIn: 15 * 60, // 15 minutes in seconds
     updateAge: 0, // Refresh session expiration on every request
   },
-  socialProviders: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-    },
-  },
+  // Google rejestrowany tylko przy komplecie danych. Bez nich dostawca nie
+  // istnieje, a formularze logowania nie pokazują przycisku (isGoogleAuthConfigured).
+  socialProviders: googleCredentials ? { google: googleCredentials } : {},
   user: {
     additionalFields: {
       phone: {
