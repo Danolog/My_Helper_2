@@ -25,12 +25,14 @@ zrobić w kodzie.
 4. Uruchom:
 
    ```bash
-   set +x
-   [ -n "$(pbpaste | tr -d '\r\n')" ] && pbpaste | tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions add <nazwa> --data-file=-
-   pbcopy </dev/null
+   set +x; set -o pipefail
+   P='<projekt GCP>'
+   add() { local v; v="$(tr -d '\r\n')"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
+   pbpaste | add <nazwa>; pbcopy </dev/null
    ```
 
-   Pierwsza część sprawdza, czy schowek nie jest pusty. Ostatnia linia czyści schowek.
+   To ta sama funkcja `add` co w `docs/runbook-krok-d.md`, sekcja 5. Usuwa enter
+   na końcu, a przy pustym schowku nie wywołuje gcloud. Ostatnie polecenie czyści schowek.
 5. Sprawdź, czy wersja powstała:
 
    ```bash
@@ -85,7 +87,7 @@ na adres konta Resend, `EMAIL_FROM` nie jest ustawiona.
 Bez tokena SMS na produkcji nie wychodzi: jest błąd w logu i brak wpisu w historii
 powiadomień. Symulacja działa tylko poza produkcją.
 
-**Test przed włączeniem przypomnień:** warunek w `docs/runbook-krok-d.md`, linie 736–748
+**Test przed włączeniem przypomnień:** warunek w `docs/runbook-krok-d.md`, linie 722–734
 (przed włączeniem zadania `mh-sms-reminders`). Brak SMS-a w teście = przypomnień nie włączać.
 
 ## 3. Przypomnienia i zadania cykliczne — Cloud Scheduler
@@ -174,6 +176,6 @@ Nie generuj pary ręcznie — obie połówki muszą do siebie pasować.
 - [ ] Rezerwacja z zadatkiem: salon oznacza zadatek ręcznie w panelu — dopiero gdy
       przełączenie na BLIK (zadanie 1.2 planu) będzie włączone w kodzie
 - [ ] Przypomnienie SMS przed wizytą — po włączeniu `mh-sms-reminders`; pierwszy przebieg
-      z wizytami bez błędów (`docs/runbook-krok-d.md`, linie 736–748, pkt 2)
+      z wizytami bez błędów (`docs/runbook-krok-d.md`, linie 722–734, pkt 2)
 - [ ] Galeria: upload i wyświetlanie zdjęć
 - [ ] Newsletter i faktura mailem — dopiero po odmrożeniu tych modułów

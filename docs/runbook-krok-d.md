@@ -409,27 +409,13 @@ Zasada (N2, Ryan, K-1b; K-1c, K-1d): wartość sekretu trafia do gcloud
 **wyłącznie przez stdin** (`--data-file=-`), zawsze bez lokalnego logu gcloud
 (`CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`), nigdy wartość w wierszu polecenia,
 nigdy `echo WARTOŚĆ`, nigdy `--data-file=ŚCIEŻKA`. Funkcje niżej nie tworzą
-żadnej kopii wartości na dysku (bez plików tymczasowych). Trzy drogi, innych nie używać:
+żadnej kopii wartości na dysku (bez plików tymczasowych). Dwie drogi, innych nie używać:
 - **sekret jednowierszowy** (klucze API, tokeny, hasła — wszystkie sekrety
   z dzisiejszego manifestu): funkcja `add`, przez `tr -d '\r\n'` (końce
   wierszy z pliku albo panelu dostawcy nie stają się częścią sekretu);
 - **sekret wielowierszowy** (PEM, JSON — końce wierszy są częścią wartości,
   `tr` by je zepsuł): funkcja `add_multiline`, **bez** `tr`, wartość
-  bajt w bajt ze stdin;
-- **sekret jednowierszowy ze schowka** (właściciel we własnym terminalu, opis
-  w `docs/ZADANIA_WLASCICIELA.md`, sekcja 0): przez `tr -d '\r\n'`, z odmową
-  przy pustym schowku i czyszczeniem schowka zaraz po wpisaniu:
-
-  ```bash
-  set +x
-  [ -n "$(pbpaste | tr -d '\r\n')" ] && pbpaste | tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions add <nazwa> --data-file=-
-  pbcopy </dev/null
-  ```
-
-  Sprawdzenie: `gcloud --project='<projekt GCP>' secrets versions list <nazwa>
-  --sort-by=~createTime --limit=1 --format='value(name,state)'` → nowy numer
-  i `ENABLED`. Oba znaczniki podmienić przed uruchomieniem (zsh czyta `<nazwa>`
-  jako przekierowanie z pliku).
+  bajt w bajt ze stdin.
 
 Plik od dostawcy (oryginał, zapisany z panelu poza repo) usuwa człowiek, po
 wpisaniu wartości i sprawdzeniu, że wersja sekretu powstała. `rm -P` na APFS
