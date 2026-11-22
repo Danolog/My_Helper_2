@@ -144,7 +144,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
         SELECT has_database_privilege('myhelper_svc', current_database(), 'CONNECT'), has_database_privilege('myhelper_svc', current_database(), 'TEMPORARY'), has_database_privilege('myhelper_svc', current_database(), 'CREATE'), has_schema_privilege('myhelper_svc', 'public', 'USAGE'), has_schema_privilege('myhelper_svc', 'public', 'CREATE');
         SELECT d.defaclobjtype::text || ':' || d.defaclacl::text FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace WHERE d.defaclrole = 'myhelper_svc'::regrole AND n.nspname = 'public' ORDER BY d.defaclobjtype;
         SQL
-        gcloud --project='<projekt GCP>' secrets versions list postgres-url --filter='state=ENABLED' --format='value(name)' | wc -l
+        gcloud --project='<projekt GCP>' secrets versions list postgres-url --filter='state=ENABLED' --format='value(name)' | wc -l | tr -d ' '
         ```
 
         Oczekiwane, po kolei: `0`; `0`; `0`; `f|f`; `t`; `0`; `t|t|t|t|t`;
