@@ -179,7 +179,7 @@ create_all() {
 
   # (3)
   if ! exists compute addresses describe "$ADDRESS" "${R[@]}"; then
-    run compute addresses create "$ADDRESS" "${R[@]}" --network-tier="$NETWORK_TIER" --ip-version=IPV4
+    run compute addresses create "$ADDRESS" "${R[@]}" --network-tier="$NETWORK_TIER"
   fi
   lookup compute addresses describe "$ADDRESS" "${R[@]}" "--format=value(address)"
   echo "  LB_IP=${LOOKUP:-<not checked (dry-run)>}"
