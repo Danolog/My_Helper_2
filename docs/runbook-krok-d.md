@@ -861,6 +861,16 @@ po kroku 3); włączenie w kroku 3 w konsoli Cloud Monitoring (polityka
 najpierw jako dry-run. Właściciel usuwa CNAME autoryzacji. Bez wpływu na
 użytkowników, dopóki rekord `app` nie wskazuje LB.
 
+**Najpierw monitoring (10c).** `--teardown` usuwa kanał
+`myhelper-lb-owner-email`, którego używają polityki z `monitoring.sh`; póki one
+istnieją, API odmówi usunięcia kanału i teardown stanie w połowie. Dlatego
+przed każdym `lb.sh --teardown` (także z `--release-ip`):
+
+```bash
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --undo
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --undo --apply
+```
+
 Statyczny IP `myhelper-lb-ip` **zostaje** (wyjście: `skip: myhelper-lb-ip kept`).
 Zwolniony adres wraca do puli Google i może trafić do innego projektu GCP; jeśli
 rekord DNS nadal na niego wskazuje, przejmujący dostaje ruch salonów i może
@@ -1177,6 +1187,139 @@ Zasobnik `_Required` (Admin Activity, 400 dni) ma lokalizację `global` i nie da
 się tego zmienić. Zawiera tożsamości operatorów (konto właściciela, konta usług),
 a nie dane salonów ani ich klientów; ograniczenie przyjęte i wpisane do rejestru
 przy T1.
+
+## 10c. Monitoring — błędy, 5xx, Scheduler, uptime run.app
+
+Skrypt: `infra/gcp/monitoring.sh`, strażnik `__tests__/lib/monitoring-config.test.ts`.
+Zasady jak w sekcji 0: domyślnie dry-run (zero wywołań gcloud, także odczytów),
+`--project` w każdym wywołaniu, region tylko `europe-central2`, stałe nazwy,
+filtry i progi. Skrypt nie tworzy kanału i nie ustawia wiązań IAM.
+
+**Kiedy.** Po `lb.sh --apply` (10a — skrypt używa jego kanału e-mail
+`myhelper-lb-owner-email`; bez kanału `--apply` kończy się kodem 2 przed
+jakąkolwiek zmianą) i po `logging.sh --apply` (10b), **przed oknem**.
+
+**Co tworzy** (alerty włączone, wszystkie na kanał z 10a):
+
+| Zasób | Warunek |
+|---|---|
+| `myhelper-run-errors-alert` | log: `resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR AND NOT log_id("run.googleapis.com/requests")` (log żądań ma `ERROR` przy każdej 5xx — te liczy alert 5xx) |
+| `myhelper-run-5xx-alert` | metryka `run.googleapis.com/request_count`, `response_code_class="5xx"`: suma > 3 w 5 min (liczba, nie procent) |
+| `myhelper-scheduler-errors-alert` | log: `resource.type="cloud_scheduler_job" AND severity>=ERROR` (nieudane próby) |
+| `myhelper-runapp-health` + `myhelper-runapp-health-alert` | uptime `https://<run.app>/api/health` co 1 min, timeout 10 s, 3 regiony, treść zawiera `"status":"healthy"`; alert: co najmniej 2 regiony z błędem przez 1 min |
+
+Alerty z logów: limit powiadomień 10 min (seria błędów i ponowienia zadania
+Schedulera = jeden e-mail na 10 min), autoClose 30 min, **bez** `labelExtractors`.
+`/api/health` pinguje bazę, więc alert uptime odpala także przy awarii bazy
+(503), nie tylko usługi. Nieobsłużony wyjątek wypisany przez Node zwykłym
+tekstem na stderr ma zwykle ważność `DEFAULT`, więc alert błędów go nie złapie;
+pokrywają go alert 5xx, uptime i powiadomienia Error Reporting. Adres run.app skrypt czyta z usługi
+(`run services describe myhelper --format=value(status.url)`) i przyjmuje tylko
+host `myhelper-….run.app`. Istniejący zasób zostaje bez zmian (`skip: … exists`);
+zmiana stałych = `--undo`, potem `--apply`.
+
+### Wykonanie
+
+```bash
+infra/gcp/monitoring.sh --project=my-helper-2-488419
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --apply
+```
+
+Dry-run: najpierw `? … channels list` i `? … run services describe`, potem
+`+ …` w kolejności: trzy `policies create` (błędy, 5xx, Scheduler),
+`uptime create myhelper-runapp-health`, `policies create` (alert uptime).
+`--apply`: `state: exists` przy kanale, `run.app host: myhelper-….run.app`,
+pięć zasobów utworzonych; ponowne `--apply` = same `skip: … exists`.
+
+Sprawdzenie (bez adresów e-mail):
+
+```bash
+gcloud --project=my-helper-2-488419 alpha monitoring policies list --filter='displayName~"^myhelper-(run|scheduler|runapp)"' --format='value(displayName,enabled)'
+gcloud --project=my-helper-2-488419 monitoring uptime list-configs --filter='displayName="myhelper-runapp-health"' --format='value(displayName,timeout,selectedRegions)'
+```
+
+Oczekiwane: cztery polityki z `True`; uptime z `10s` i trzema regionami.
+
+### Krok ręczny: powiadomienia Error Reporting
+
+Powiadomień o **nowych grupach błędów** w Error Reporting gcloud nie obsługuje.
+W konsoli: Error Reporting → „Configure notifications” → kanał
+`myhelper-lb-owner-email`. Przed testem niżej.
+
+### Test po wdrożeniu (jeden błąd testowy)
+
+Jeden wpis `ERROR` w kształcie loggera aplikacji (`severity`, `message`,
+`stack_trace`), z zasobem usługi `myhelper`, bez żadnych danych. Token dostępu
+idzie nagłówkiem z `-H @<(…)` (nie trafia do argumentów `curl`); blok w bash
+albo zsh:
+
+```bash
+set +x
+P=my-helper-2-488419
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://logging.googleapis.com/v2/entries:write \
+  -H @<(printf 'Authorization: Bearer %s\n' "$(gcloud auth print-access-token)") -H 'Content-Type: application/json' \
+  -d '{"entries":[{"logName":"projects/'"$P"'/logs/monitoring-probe","resource":{"type":"cloud_run_revision","labels":{"project_id":"'"$P"'","service_name":"myhelper","revision_name":"monitoring-probe","configuration_name":"myhelper","location":"europe-central2"}},"severity":"ERROR","jsonPayload":{"message":"Error: monitoring-probe test error","stack_trace":"Error: monitoring-probe test error\n    at probe (/app/monitoring-probe.js:1:1)"}}]}'
+```
+
+Oczekiwane: `200`; w ciągu ok. 10 min grupa `monitoring-probe test error`
+w Error Reporting **i** e-mail alertu `myhelper-run-errors-alert`. Wpis trafia
+przez ujście `_Default` do `myhelper-logs` (`europe-central2`), więc test
+sprawdza też, że Error Reporting czyta wpisy z regionalnego zasobnika. E-mail
+jest, a grupy brak = Error Reporting nie czyta tego zasobnika (albo formatu):
+**zapisać wynik w #121 i zatrzymać się** (decyzja przed oknem). Brak e-maila =
+stop. Treść: e-mail `myhelper-run-errors-alert` **nie** zawiera tekstu
+`monitoring-probe test error` (polityka bez treści wpisu), e-mail Error
+Reporting go zawiera (oczekiwane). Tekst w e-mailu alertu = stop. Incydent
+zamknąć w konsoli (albo poczekać na autoClose 30 min), grupę testową oznaczyć
+jako rozwiązaną.
+
+**Dane.** Dwa rodzaje e-maili, oba wyłącznie na adres właściciela (kanał
+z 10a); żadnych dodatkowych odbiorców, list ani integracji:
+
+- e-maile polityk z `monitoring.sh` — nazwa polityki, opis i link, **bez**
+  treści wpisu (brak `labelExtractors`; sprawdza test wyżej);
+- e-maile Error Reporting (krok ręczny) — komunikat i fragment stosu, mogą
+  zawierać dane osobowe klientów salonów.
+
+W skrzynce właściciela: reguła usuwania e-maili Error Reporting po 30 dniach
+(tyle co retencja logów). Oba przepływy (e-maile alertów, Error Reporting)
+dopisać do rejestru czynności przetwarzania (ten sam co przy T1) przed oknem.
+
+**Lokalizacja Error Reporting — decyzja przed krokiem 1 okna, wpis w #121.**
+Error Reporting jest usługą globalną; może przechowywać grupy błędów (komunikat,
+stos) poza `europe-central2`. Testem tego nie da się ustalić — źródło to
+dokumentacja Google (Error Reporting, Data Location w Service Specific Terms).
+Wynik: przyjąć (wymaga podstawy w Google Cloud DPA i zgodności z tym, co
+obiecujemy salonom: umowa powierzenia, polityka prywatności — obietnica
+przechowywania w EOG wyklucza „global”) albo wyłączyć. **Bez decyzji:
+wyłączyć** — `services disable clouderrorreporting.googleapis.com` i pominąć
+krok ręczny powiadomień; alerty z `monitoring.sh` działają bez Error Reporting.
+
+### Uptime run.app: do kiedy
+
+Uptime `myhelper-runapp-health` obowiązuje **do T7**. Po K1 domenę pilnuje
+uptime z `lb.sh` (`myhelper-app-health`, alert włączany w kroku 3) — wtedy
+uptime run.app usunąć:
+
+```bash
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --undo --only-runapp
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --undo --only-runapp --apply
+```
+
+i w osobnym PR usunąć część run.app ze skryptu (inaczej kolejne `--apply`
+utworzy ją ponownie). Dziś ingress usługi to `all`; przy zamknięciu długu
+ingress (10a, `internal-and-cloud-load-balancing`) adres run.app przestaje
+odpowiadać, a alert uptime run.app odpalałby stale — usunięcie najpóźniej razem
+ze zmianą ingress.
+
+### Wycofanie
+
+`--undo` (najpierw dry-run, potem `--apply`) usuwa wyłącznie pięć zasobów tego
+skryptu; kanał `myhelper-lb-owner-email` zostaje (należy do `lb.sh`).
+
+Przy wycofaniu LB (10a) `monitoring.sh --undo --apply` idzie **przed**
+`lb.sh --teardown`: teardown usuwa kanał, a API nie usunie kanału, którego
+używają polityki tego skryptu.
 
 ## 11. Punkty otwarte
 
