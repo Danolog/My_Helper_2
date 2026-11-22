@@ -127,17 +127,30 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
         Oczekiwane: `myhelper_svc`. Inny wynik = stop, decyzja architektury
         i bezpieczeństwa;
-     2. kontrole stanu docelowego: 1.3 pkt 4 = `f | f | f` i właściciel
-        tabel (`psql_csql_admin`):
+     2. kontrole stanu docelowego: 1.3 pkt 4 = `f | f | f`, właściciel obiektów,
+        uprawnienia i domyślne uprawnienia loginu aplikacji (`psql_csql_admin`;
+        `has_*_privilege` z listą praw zwraca `t` przy którymkolwiek z nich,
+        dlatego każde prawo osobno):
 
         ```bash
         set +x
         psql_csql_admin <<'SQL'
-        SELECT count(*) FROM pg_tables WHERE schemaname IN ('public', 'drizzle') AND tableowner <> 'myhelper_svc';
+        SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public', 'drizzle') AND c.relowner <> 'myhelper_svc'::regrole;
+        SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public', 'drizzle') AND p.proowner <> 'myhelper_svc'::regrole;
+        SELECT count(*) FROM pg_namespace WHERE nspname = 'drizzle' AND nspowner <> 'myhelper_svc'::regrole;
+        SELECT rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = 'myhelper_svc';
+        SELECT pg_has_role('myhelper_svc', 'myhelper_app', 'MEMBER');
+        SELECT count(*) FROM pg_roles WHERE rolname = 'myhelper_owner';
+        SELECT has_database_privilege('myhelper_svc', current_database(), 'CONNECT'), has_database_privilege('myhelper_svc', current_database(), 'TEMPORARY'), has_database_privilege('myhelper_svc', current_database(), 'CREATE'), has_schema_privilege('myhelper_svc', 'public', 'USAGE'), has_schema_privilege('myhelper_svc', 'public', 'CREATE');
+        SELECT d.defaclobjtype::text || ':' || d.defaclacl::text FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace WHERE d.defaclrole = 'myhelper_svc'::regrole AND n.nspname = 'public' ORDER BY d.defaclobjtype;
         SQL
+        gcloud --project='<projekt GCP>' secrets versions list postgres-url --filter='state=ENABLED' --format='value(name)' | wc -l
         ```
 
-        Oczekiwane: `0`. Inny wynik = stop, decyzja architektury
+        Oczekiwane, po kolei: `0`; `0`; `0`; `f|f`; `t`; `0`; `t|t|t|t|t`;
+        dwa wiersze `S:{myhelper_app=rU/myhelper_svc}` i
+        `r:{myhelper_app=arwd/myhelper_svc}`; `1`. Do 1.1 trafia wynik każdego
+        wiersza z osobna. Inny wynik = stop, decyzja architektury
         i bezpieczeństwa;
      3. pustość: blok 2.3 (`compare.sh --expect-empty`) = `expect_empty=yes`,
         `exit=0`. Kod 5 = stop: jobu nie uruchamiamy, decyzja architektury
