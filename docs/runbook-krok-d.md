@@ -100,7 +100,7 @@ zasób powstał z błędną konfiguracją, której nie da się zmienić w miejsc
 | Etap | Cofnięcie | Pułapka |
 |---|---|---|
 | `run` | `gcloud --project=$P run services delete myhelper --region=$R` i `… run jobs delete myhelper-migrate --region=$R` | wiązania na zasobie znikają razem z nim — powtórzyć cały etap `run` |
-| `sql` | padło po utworzeniu instancji → **nie usuwać**; powtórzyć etap (nie tworzy loginu aplikacji — przy jego braku zatrzymuje się, sekcja 3.6) (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji, a login `myhelper_svc` na nowej instancji już utworzył SQL-em `postgres` — sekcja 3.6; starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
+| `sql` | padło po utworzeniu instancji → **nie usuwać**; powtórzyć etap (nie tworzy loginu aplikacji — przy jego braku zatrzymuje się; nowa instancja: login i rola `myhelper_app` SQL-em, sekcja 3.6) (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji, a login `myhelper_svc` na nowej instancji już utworzył SQL-em `postgres` — sekcja 3.6; starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
 | `sa` | `… remove-iam-policy-binding` dla każdego wiązania z sekcji 3.5 (sekrety, zasobnik, repo, actAs); konta (`iam service-accounts delete`) **dopiero na końcu** | usunięte konto zostawia w politykach wpisy `deleted:serviceAccount:…` — dlatego najpierw wiązania |
 | `secrets` | `… secrets delete NAZWA` | usuwa wszystkie wersje — tylko przed D-5 albo z kopią wartości u źródła |
 | `bucket` | najpierw `… storage buckets remove-iam-policy-binding gs://NAZWA --member=allUsers --role=roles/storage.legacyObjectReader`; zasobnik usuwać (`storage buckets delete`) tylko pusty | nazwy zasobników są globalne — usunięta może zostać zajęta przez kogoś innego |
@@ -218,7 +218,16 @@ wykonuje `postgres`), bo `forSalon` przełącza się na nią `SET LOCAL ROLE`.
 **Etap `sql` można powtórzyć.** Nie tworzy loginu aplikacji: gdy z `--apply`
 `myhelper_svc` nie istnieje, stop przed jego hasłem (dry-run: pełny plan + nota);
 hasło `postgres` idzie wcześniej, więc na nowej instancji `postgres` tworzy login
-SQL-em jak wyżej, a potem etap powtarza się.
+SQL-em jak wyżej, a potem etap powtarza się. Na **nowej instancji** `postgres`
+przed pierwszą migracją wykonuje też (login aplikacji jest `NOCREATEROLE`, więc
+`CREATE ROLE` z migracji 0005 by padł; **do potwierdzenia na klonie przed
+użyciem** — nie sprawdzono, czy `GRANT myhelper_app TO current_user` z 0005
+przechodzi przy samym ADMIN):
+
+```sql
+CREATE ROLE myhelper_app NOLOGIN;
+GRANT myhelper_app TO myhelper_svc WITH ADMIN OPTION;
+```
 
 Odczyt stanu po etapie:
 

@@ -220,7 +220,7 @@ instancji produkcyjnej: przywrócenie kopii (1.1 pkt 4) nadpisuje **całą**
 instancję. Powstaje po 1.0 pkt 2 jako klon instancji produkcyjnej (ta sama
 wersja, role i hasła; danych produkcyjnych jeszcze nie ma). Przed próbą:
 koszt instancji próbnej (godziny tieru i dysk na czas próby) policzony
-i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:784-785`).
+i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:793-794`).
 W terminalu próby zmienna `CSQL_INSTANCE` ma wyłącznie nazwę instancji próbnej;
 nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu (blok
 „Tylko w oknie” z 1.5 w próbie się nie wkleja). Do potwierdzenia w próbie,
@@ -445,7 +445,7 @@ Dlatego przed `freeze-neon.sh`:
      Preview bez produkcyjnego `POSTGRES_URL` albo bez działających wdrożeń
      na czas okna;
    - **ingress Cloud Run = `internal`** od 2.1 do 2.9. Dziś ingress to `all`
-     (`docs/runbook-krok-d.md:765-769`): adres `run.app` przyjmowałby zapisy do
+     (`docs/runbook-krok-d.md:774-778`): adres `run.app` przyjmowałby zapisy do
      Cloud SQL w trakcie 2.3–2.6, a wtedy `count_auth_rate_limit` > 0 na
      Cloud SQL i 2.7 stoi. To **główna kontrola** braku zapisów na Cloud SQL;
      zamrożenie w 2.6 jest obroną w głąb;
@@ -607,7 +607,7 @@ Hasła Cloud SQL są wyłącznie w Secret Managerze
 (`docs/runbook-krok-d.md:169-184`): `postgres-admin-password` (rola `postgres`)
 i `postgres-url` (URL loginu `myhelper_svc`, z którego wycinamy samo hasło).
 Odczyt do zmiennej, bez ekranu i bez lokalnego logu gcloud — ten sam wzorzec
-co `docs/runbook-krok-d.md:744`. `<projekt GCP>` = identyfikator projektu z
+co `docs/runbook-krok-d.md:753`. `<projekt GCP>` = identyfikator projektu z
 `docs/runbook-krok-d.md` sekcja 9 (nie zapisuje się go w notatce okna):
 
 ```bash
