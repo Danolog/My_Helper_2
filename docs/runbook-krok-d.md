@@ -861,6 +861,16 @@ po kroku 3); włączenie w kroku 3 w konsoli Cloud Monitoring (polityka
 najpierw jako dry-run. Właściciel usuwa CNAME autoryzacji. Bez wpływu na
 użytkowników, dopóki rekord `app` nie wskazuje LB.
 
+**Najpierw monitoring (10c).** `--teardown` usuwa kanał
+`myhelper-lb-owner-email`, którego używają polityki z `monitoring.sh`; póki one
+istnieją, API odmówi usunięcia kanału i teardown stanie w połowie. Dlatego
+przed każdym `lb.sh --teardown` (także z `--release-ip`):
+
+```bash
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --undo
+infra/gcp/monitoring.sh --project=my-helper-2-488419 --undo --apply
+```
+
 Statyczny IP `myhelper-lb-ip` **zostaje** (wyjście: `skip: myhelper-lb-ip kept`).
 Zwolniony adres wraca do puli Google i może trafić do innego projektu GCP; jeśli
 rekord DNS nadal na niego wskazuje, przejmujący dostaje ruch salonów i może
@@ -1193,7 +1203,7 @@ jakąkolwiek zmianą) i po `logging.sh --apply` (10b), **przed oknem**.
 
 | Zasób | Warunek |
 |---|---|
-| `myhelper-run-errors-alert` | log: `resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR` |
+| `myhelper-run-errors-alert` | log: `resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR AND NOT log_id("run.googleapis.com/requests")` (log żądań ma `ERROR` przy każdej 5xx — te liczy alert 5xx) |
 | `myhelper-run-5xx-alert` | metryka `run.googleapis.com/request_count`, `response_code_class="5xx"`: suma > 3 w 5 min (liczba, nie procent) |
 | `myhelper-scheduler-errors-alert` | log: `resource.type="cloud_scheduler_job" AND severity>=ERROR` (nieudane próby) |
 | `myhelper-runapp-health` + `myhelper-runapp-health-alert` | uptime `https://<run.app>/api/health` co 1 min, timeout 10 s, 3 regiony, treść zawiera `"status":"healthy"`; alert: co najmniej 2 regiony z błędem przez 1 min |
@@ -1201,7 +1211,9 @@ jakąkolwiek zmianą) i po `logging.sh --apply` (10b), **przed oknem**.
 Alerty z logów: limit powiadomień 10 min (seria błędów i ponowienia zadania
 Schedulera = jeden e-mail na 10 min), autoClose 30 min, **bez** `labelExtractors`.
 `/api/health` pinguje bazę, więc alert uptime odpala także przy awarii bazy
-(503), nie tylko usługi. Adres run.app skrypt czyta z usługi
+(503), nie tylko usługi. Nieobsłużony wyjątek wypisany przez Node zwykłym
+tekstem na stderr ma zwykle ważność `DEFAULT`, więc alert błędów go nie złapie;
+pokrywają go alert 5xx, uptime i powiadomienia Error Reporting. Adres run.app skrypt czyta z usługi
 (`run services describe myhelper --format=value(status.url)`) i przyjmuje tylko
 host `myhelper-….run.app`. Istniejący zasób zostaje bez zmian (`skip: … exists`);
 zmiana stałych = `--undo`, potem `--apply`.
@@ -1262,6 +1274,10 @@ testową oznaczyć jako rozwiązaną.
 stos), która może zawierać dane osobowe. Kanał wyłącznie na adres właściciela
 (z 10a); żadnych dodatkowych odbiorców, list ani integracji.
 
+**Do sprawdzenia przy teście:** Error Reporting jest usługą globalną i może
+przechowywać grupy błędów (komunikat, stos) poza `europe-central2`. Wynik
+i decyzję (przyjąć / wyłączyć) dopisać w notatce okna i tutaj.
+
 ### Uptime run.app: do kiedy
 
 Uptime `myhelper-runapp-health` obowiązuje **do T7**. Po K1 domenę pilnuje
@@ -1283,6 +1299,10 @@ ze zmianą ingress.
 
 `--undo` (najpierw dry-run, potem `--apply`) usuwa wyłącznie pięć zasobów tego
 skryptu; kanał `myhelper-lb-owner-email` zostaje (należy do `lb.sh`).
+
+Przy wycofaniu LB (10a) `monitoring.sh --undo --apply` idzie **przed**
+`lb.sh --teardown`: teardown usuwa kanał, a API nie usunie kanału, którego
+używają polityki tego skryptu.
 
 ## 11. Punkty otwarte
 

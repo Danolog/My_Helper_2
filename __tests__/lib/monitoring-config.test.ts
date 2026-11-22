@@ -8,7 +8,7 @@
  *  - kanał powiadomień wyłącznie z lb.sh (wyszukiwany po displayName); skrypt
  *    nie tworzy ani nie usuwa kanału; brak kanału przy --apply = kod 2 przed zmianą;
  *  - adres run.app z odczytu usługi (nie na sztywno), sprawdzany wzorcem;
- *  - dokładne filtry alertów, próg 5xx (> 3 w 300 s, liczba), limit powiadomień
+ *  - dokładne filtry alertów (błędy bez logu żądań Cloud Run), próg 5xx (> 3 w 300 s, liczba), limit powiadomień
  *    10 min i autoClose na alertach z logów, brak labelExtractors;
  *  - uptime check run.app: https, /api/health, timeout ≥ 10 s, ≥ 3 regiony,
  *    dopasowanie treści zgodne z odpowiedzią /api/health;
@@ -17,7 +17,7 @@
  *  - brak adresu e-mail w pliku.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -35,7 +35,8 @@ const RUN_URL = "https://myhelper-843777043748.europe-central2.run.app";
 const RUN_HOST = "myhelper-843777043748.europe-central2.run.app";
 const CHANNEL_ID = "projects/p/notificationChannels/111";
 
-const ERRORS_FILTER = 'resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR';
+const ERRORS_FILTER =
+  'resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR AND NOT log_id("run.googleapis.com/requests")';
 const SCHEDULER_FILTER = 'resource.type="cloud_scheduler_job" AND severity>=ERROR';
 const HTTP5XX_FILTER =
   'metric.type="run.googleapis.com/request_count" AND resource.type="cloud_run_revision" AND resource.label.service_name="myhelper" AND metric.label.response_code_class="5xx"';
@@ -63,6 +64,9 @@ for a in "$@"; do
   esac
 done
 case " $* " in
+  *" policies create "*)
+    [ -n "$FAKE_CREATE_ERROR" ] && { echo "ERROR: INVALID_ARGUMENT" >&2; exit 1; }
+    exit 0 ;;
   *" channels list "*)
     [ -n "$FAKE_LIST_ERROR" ] && { echo "ERROR: PERMISSION_DENIED" >&2; exit 1; }
     [ -n "$FAKE_NO_CHANNEL" ] || echo "${CHANNEL_ID}"
@@ -87,29 +91,42 @@ interface Run {
   stderr: string;
   calls: string[];
   files: string;
+  /** Pliki pozostawione przez skrypt w jego TMPDIR po przebiegu. */
+  leftovers: string[];
 }
 
 let n = 0;
 function mon(
   args: string[],
-  opts: { exists?: boolean; noChannel?: boolean; listError?: boolean; urlError?: boolean; runUrl?: string } = {},
+  opts: {
+    exists?: boolean;
+    noChannel?: boolean;
+    listError?: boolean;
+    urlError?: boolean;
+    createError?: boolean;
+    runUrl?: string;
+  } = {},
 ): Run {
   const id = n++;
   const log = join(DIR, `log-${id}`);
   const files = join(DIR, `files-${id}`);
+  // Osobny TMPDIR na przebieg: pozwala sprawdzić, że mktemp nic nie zostawia.
+  const tmp = join(DIR, `tmp-${id}`);
+  mkdirSync(tmp);
   for (const f of [log, files]) writeFileSync(f, "");
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
     env: {
       NODE_ENV: "test",
       PATH: `${FAKE}:${process.env.PATH}`,
-      TMPDIR: DIR,
+      TMPDIR: tmp,
       FAKE_LOG: log,
       FAKE_FILES: files,
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
       ...(opts.noChannel ? { FAKE_NO_CHANNEL: "1" } : {}),
       ...(opts.listError ? { FAKE_LIST_ERROR: "1" } : {}),
       ...(opts.urlError ? { FAKE_URL_ERROR: "1" } : {}),
+      ...(opts.createError ? { FAKE_CREATE_ERROR: "1" } : {}),
       ...(opts.runUrl !== undefined ? { FAKE_RUN_URL: opts.runUrl } : {}),
     },
   });
@@ -119,6 +136,7 @@ function mon(
     stderr: r.stderr,
     calls: readFileSync(log, "utf8").split("\n").filter(Boolean),
     files: readFileSync(files, "utf8"),
+    leftovers: readdirSync(tmp),
   };
 }
 
@@ -239,6 +257,13 @@ describe("monitoring: kod skryptu", () => {
     expect(SOURCE).toContain(`ERRORS_FILTER='${ERRORS_FILTER}'\n`);
     expect(SOURCE).toContain(`SCHEDULER_FILTER='${SCHEDULER_FILTER}'\n`);
     expect(SOURCE).toContain(`HTTP5XX_FILTER='${HTTP5XX_FILTER}'\n`);
+  });
+
+  it("filtr błędów wyklucza log żądań Cloud Run (5xx pilnuje alert metryki)", () => {
+    const p = policies(mon(APPLY).files)[NAMES.errors]!;
+    const filter = p.conditions[0]!.conditionMatchedLog!.filter;
+    expect(filter).toMatch(/ AND NOT log_id\("run\.googleapis\.com\/requests"\)$/);
+    expect(filter).toContain("severity>=ERROR");
   });
 
   it("bez tworzenia i usuwania kanału, bez labelExtractors, bez wiązań IAM", () => {
@@ -398,6 +423,24 @@ describe("monitoring --apply: błędy (stop przed zmianą)", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain(msg);
     expect(mutating(r)).toEqual([]);
+  });
+
+  it("pliki tymczasowe polityk usunięte po udanym --apply i w dry-run", () => {
+    for (const args of [APPLY, P]) {
+      const r = mon(args);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.leftovers, args.join(" ")).toEqual([]);
+    }
+  });
+
+  it("błąd policies create → przebieg przerwany, plik tymczasowy usunięty", () => {
+    const r = mon(APPLY, { createError: true });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("INVALID_ARGUMENT");
+    // Przerwanie na pierwszej polityce: dalszych zmian brak.
+    expect(mutating(r)).toHaveLength(1);
+    expect(r.stdout).not.toContain("monitoring create: done");
+    expect(r.leftovers).toEqual([]);
   });
 
   it("adres w starym formacie run.app (z hashem) jest przyjęty", () => {

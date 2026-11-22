@@ -16,7 +16,8 @@
 # (kod 2) przed jakąkolwiek zmianą — najpierw infra/gcp/lb.sh --apply.
 #
 # Zasoby (stałe nazwy niżej), w tej kolejności:
-#   (1) alert na logach: wpisy severity>=ERROR usługi myhelper
+#   (1) alert na logach: wpisy severity>=ERROR usługi myhelper, bez logu
+#       żądań (5xx pilnuje (2))
 #   (2) alert na metryce: więcej niż 3 odpowiedzi 5xx w oknie 5 min (liczba,
 #       nie procent — przy małym ruchu procent skacze od pojedynczych żądań)
 #   (3) alert na logach: wpisy severity>=ERROR zadań Cloud Scheduler
@@ -83,7 +84,9 @@ UPTIME_TIMEOUT_S=10
 UPTIME_REGIONS="europe,usa-oregon,asia-pacific"
 
 # Filtry (język zapytań Logging / Monitoring).
-ERRORS_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR'
+# Log żądań Cloud Run ma severity=ERROR przy każdej odpowiedzi 5xx — bez
+# wykluczenia (1) odpalałby od pojedynczej 5xx i dublował (2).
+ERRORS_FILTER='resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity>=ERROR AND NOT log_id("run.googleapis.com/requests")'
 SCHEDULER_FILTER='resource.type="cloud_scheduler_job" AND severity>=ERROR'
 HTTP5XX_FILTER='metric.type="run.googleapis.com/request_count" AND resource.type="cloud_run_revision" AND resource.label.service_name="myhelper" AND metric.label.response_code_class="5xx"'
 
@@ -232,8 +235,12 @@ create_policy() {
   file="$(mktemp)"
   printf '%s\n' "$body" >"$file"
   echo "  policy: $(tr -d '\n' <"$file" | tr -s ' ')"
-  run alpha monitoring policies create --policy-from-file="$file"
+  # Plik usuwany także przy błędzie gcloud; kod błędu przechodzi dalej
+  # (set -e przerywa przebieg jak wcześniej).
+  local rc=0
+  run alpha monitoring policies create --policy-from-file="$file" || rc=$?
   rm -f "$file"
+  return "$rc"
 }
 
 create_all() {
