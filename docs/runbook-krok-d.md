@@ -211,7 +211,7 @@ jest traktowane jak „brak wersji” (Ethan, #134). Po utworzeniu instancji skr
 sprawdza `state`; baza, loginy i wiązania powstają tylko przy `RUNNABLE`, inaczej
 stop — powtórzyć etap później.
 
-Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005;
+Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005 (na nowej instancji `postgres`, niżej);
 `myhelper_svc` jest jej członkiem (`GRANT myhelper_app TO myhelper_svc`,
 wykonuje `postgres`), bo `forSalon` przełącza się na nią `SET LOCAL ROLE`.
 
