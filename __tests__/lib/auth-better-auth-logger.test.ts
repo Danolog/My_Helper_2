@@ -4,7 +4,8 @@
  * (src/lib/auth-log.ts). Anonimowe `/sign-in/social` z niezarejestrowanym
  * dostawcą daje wpis `warn` w naszym loggerze, a nie tekstowy
  * `console.error` biblioteki (który Cloud Run mógłby uznać za ERROR).
- * Tak samo odrzucenie żądania z obcym `Origin` przez `auth.handler`.
+ * Tak samo odrzucenie żądania z obcym `Origin` albo niedozwolonym
+ * `Content-Type` przez `auth.handler`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -83,6 +84,40 @@ describe("auth.ts: logger Better Auth", () => {
     // 403 (INVALID_ORIGIN), a nie 404 nieznanego dostawcy: odrzucenie przed endpointem.
     expect(response.status).toBe(403);
     expect(warn).toHaveBeenCalledWith("Invalid origin", { origin: "https://evil.example.com" });
+    expect(error).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * better-call odrzuca ciało z typem spoza `application/json` (415), a treść
+   * błędu zawiera wartość nagłówka. Handler błędów better-auth zapisuje ją
+   * jako `error`, gdy zawiera m.in. „table” — wywoła to każdy anonimowy klient.
+   */
+  it("POST z Content-Type text/table → 415 i warn w naszym loggerze, bez error i console.error", async () => {
+    vi.resetModules();
+    const { betterAuth } = await import("better-auth");
+    const { betterAuthLoggerOptions } = await import("@/lib/auth-log");
+    const { logger } = await import("@/lib/logger");
+
+    const baseURL = "http://localhost:3000";
+    const auth = betterAuth({ baseURL, logger: betterAuthLoggerOptions, trustedOrigins: [baseURL] });
+    await auth.$context;
+
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await auth.handler(
+      new Request(`${baseURL}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: { "content-type": "text/table" },
+        body: "provider=github",
+      }),
+    );
+
+    expect(response.status).toBe(415);
+    expect(warn).toHaveBeenCalledWith("Content-Type is not allowed", undefined);
     expect(error).not.toHaveBeenCalled();
     expect(consoleError).not.toHaveBeenCalled();
   });

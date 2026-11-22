@@ -73,6 +73,31 @@ const KNOWN_ANONYMOUS_ERRORS: { message: string; args: unknown[]; expected: { me
     args: [{ secFetchSite: "cross-site", secFetchMode: "navigate", secFetchDest: "document" }],
     expected: { message: "Blocked cross-site navigation login attempt (CSRF protection)" },
   },
+  {
+    message: 'Content-Type "text/table; x=jan.kowalski@example.com" is not allowed. Allowed types: application/json',
+    args: [],
+    expected: { message: "Content-Type is not allowed" },
+  },
+  {
+    message: "Content-Type is required. Allowed types: application/json",
+    args: [],
+    expected: { message: "Content-Type is required" },
+  },
+];
+
+/** Wpisy `info` z danymi z żądania w treści: stały tekst, poziom bez zmian. */
+const KNOWN_KEPT_LEVEL: { message: string; args: unknown[]; expected: { message: string; context?: unknown } }[] = [
+  {
+    message: "Sign-up attempt for existing email: jan.kowalski@example.com",
+    args: [],
+    expected: { message: "Sign-up attempt for existing email" },
+  },
+  {
+    message:
+      "If it's a valid URL, please add https://evil.example.com/p?token=abc to trustedOrigins in your auth config\n",
+    args: ["Current list of trustedOrigins: http://localhost:3000"],
+    expected: { message: "Untrusted URL, add to trustedOrigins if valid", context: { origin: "https://evil.example.com" } },
+  },
 ];
 
 describe("mapBetterAuthLog: znane komunikaty anonimowe", () => {
@@ -80,9 +105,40 @@ describe("mapBetterAuthLog: znane komunikaty anonimowe", () => {
     expect(mapBetterAuthLog("error", message, args)).toEqual({ level: "warn", ...expected });
   });
 
+  it.each(KNOWN_KEPT_LEVEL)("info $message → info, stały tekst, bezpieczny kontekst", ({ message, args, expected }) => {
+    expect(mapBetterAuthLog("info", message, args)).toEqual({ level: "info", ...expected });
+  });
+
+  it.each(["debug", "warn", "error"] as const)("reguła keepLevel na poziomie %s → ten sam poziom", (level) => {
+    const { message, args, expected } = KNOWN_KEPT_LEVEL[0]!;
+    expect(mapBetterAuthLog(level, message, args)).toEqual({ level, ...expected });
+  });
+
+  it("odrzucony adres bez dalszego ciągu → origin z reszty treści", () => {
+    expect(mapBetterAuthLog("info", "If it's a valid URL, please add https://evil.example.com/x", [])).toEqual({
+      level: "info",
+      message: "Untrusted URL, add to trustedOrigins if valid",
+      context: { origin: "https://evil.example.com" },
+    });
+  });
+
+  it("odrzucony adres z tym samym dalszym ciągiem w zapytaniu → origin, bez reszty adresu", () => {
+    const mapped = mapBetterAuthLog(
+      "info",
+      "If it's a valid URL, please add https://evil.example.com/?q= to trustedOrigins to trustedOrigins in your auth config\n",
+      [],
+    );
+    expect(mapped.context).toEqual({ origin: "https://evil.example.com" });
+  });
+
+  it("odrzucony adres niebędący adresem http(s) → znacznik", () => {
+    const mapped = mapBetterAuthLog("info", "If it's a valid URL, please add null to trustedOrigins in your auth config\n", []);
+    expect(mapped.context).toEqual({ origin: AUTH_LOG_UNPARSEABLE });
+  });
+
   it("lista reguł = lista przypadków testu (nowa reguła wymaga przypadku)", () => {
     const covered = ANONYMOUS_AUTH_LOG_RULES.filter((rule) =>
-      KNOWN_ANONYMOUS_ERRORS.some((c) => c.message.startsWith(rule.prefix)),
+      [...KNOWN_ANONYMOUS_ERRORS, ...KNOWN_KEPT_LEVEL].some((c) => c.message.startsWith(rule.prefix)),
     );
     expect(covered).toHaveLength(ANONYMOUS_AUTH_LOG_RULES.length);
     expect(ANONYMOUS_AUTH_LOG_RULES.map((r) => r.prefix)).toEqual([
@@ -97,11 +153,19 @@ describe("mapBetterAuthLog: znane komunikaty anonimowe", () => {
       "Invalid errorCallbackURL: ",
       "Invalid newUserCallbackURL: ",
       "Blocked cross-site navigation login attempt",
+      'Content-Type "',
+      "Content-Type is required",
+      "Sign-up attempt for existing email",
+      "If it's a valid URL, please add ",
     ]);
   });
 
-  it("znany komunikat na poziomie warn/info nie jest przerabiany przez reguły", () => {
+  it("komunikat reguły bez keepLevel na poziomie warn/info nie jest przerabiany", () => {
     expect(mapBetterAuthLog("warn", "State not found", [])).toEqual({ level: "warn", message: "State not found" });
+    expect(mapBetterAuthLog("info", "Content-Type is required", [])).toEqual({
+      level: "info",
+      message: "Content-Type is required",
+    });
   });
 
   it("identyfikator dostawcy z obcymi znakami → tylko znaki identyfikatora, ograniczona długość", () => {
@@ -159,10 +223,10 @@ describe("mapBetterAuthLog: pozostałe wpisy", () => {
   });
 
   it("info i debug zostają na swoim poziomie", () => {
-    expect(mapBetterAuthLog("info", "If it's a valid URL, please add x", ["Current list"])).toEqual({
+    expect(mapBetterAuthLog("info", "Some info entry", ["detail"])).toEqual({
       level: "info",
-      message: "If it's a valid URL, please add x",
-      context: { args: ["Current list"] },
+      message: "Some info entry",
+      context: { args: ["detail"] },
     });
     expect(mapBetterAuthLog("debug", "debug entry", [])).toEqual({ level: "debug", message: "debug entry" });
   });
@@ -207,14 +271,14 @@ describe("betterAuthLoggerOptions.log: redakcja przez logger", () => {
 
     betterAuthLoggerOptions.log("error", "Some library failure", {
       email: "jan.kowalski@example.com",
-      phone: "+48500600700",
+      phone: "+48123456789",
       userId: "u1",
     });
 
     expect(consoleError).toHaveBeenCalledTimes(1);
     const serialized = JSON.stringify(consoleError.mock.calls[0]);
     expect(serialized).not.toContain("jan.kowalski@example.com");
-    expect(serialized).not.toContain("+48500600700");
+    expect(serialized).not.toContain("+48123456789");
     expect(serialized).toContain(REDACTED);
     expect(serialized).toContain("u1");
   });

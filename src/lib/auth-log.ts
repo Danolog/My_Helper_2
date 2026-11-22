@@ -98,11 +98,17 @@ function firstArgField(args: readonly unknown[], key: string): unknown {
  * żądania wklejonych do komunikatu); `context` buduje kontekst wyłącznie
  * z bezpiecznych pól, a `null` oznacza „to nie ten przypadek” (wpis idzie
  * ścieżką ogólną).
+ *
+ * Domyślnie reguła działa tylko na wpis `error` i obniża go do `warn`.
+ * `keepLevel: true` — reguła działa na każdym poziomie wejściowym i go nie
+ * zmienia; służy wpisom niższego poziomu z danymi z żądania w treści, które
+ * dziś chroni przed zapisem tylko domyślny próg `warn` biblioteki.
  */
 interface AnonymousAuthLogRule {
   prefix: string;
   message: string;
   context: (message: string, args: readonly unknown[]) => LogContext | undefined | null;
+  keepLevel?: true;
 }
 
 const noContext = (): undefined => undefined;
@@ -121,16 +127,39 @@ function invalidUrlRule(label: string): AnonymousAuthLogRule {
   return { prefix, message: `Invalid ${label}`, context: urlOriginContext(prefix) };
 }
 
+const UNTRUSTED_URL_PREFIX = "If it's a valid URL, please add ";
+const UNTRUSTED_URL_SUFFIX = " to trustedOrigins";
+
 /**
- * Jedyna lista komunikatów obniżanych z `error` do `warn` (przypięta testami
- * `__tests__/lib/auth-log.test.ts` oraz `__tests__/lib/auth-log-dist-source.test.ts`,
- * który sprawdza, że każdy prefiks nadal występuje w `logger.error(` w dist
- * biblioteki). Źródła w better-auth 1.7.25 (dist):
+ * Komunikat `If it's a valid URL, please add <adres> to trustedOrigins …` →
+ * sam origin adresu. Adres kończy ostatnie wystąpienie stałego dalszego ciągu
+ * (adres z żądania może sam zawierać ten tekst); bez niego — reszta treści.
+ */
+const untrustedUrlContext = (message: string): LogContext => {
+  const rest = message.slice(UNTRUSTED_URL_PREFIX.length);
+  const end = rest.lastIndexOf(UNTRUSTED_URL_SUFFIX);
+  return { origin: safeOriginForLog(end === -1 ? rest : rest.slice(0, end)) };
+};
+
+/**
+ * Jedyna lista komunikatów anonimowych przerabianych przed zapisem (przypięta
+ * testami `__tests__/lib/auth-log.test.ts` oraz
+ * `__tests__/lib/auth-log-dist-source.test.ts`, który sprawdza, że każdy
+ * prefiks nadal występuje w źródle w dist biblioteki). Źródła w better-auth
+ * 1.7.25 (dist), wpisy `error` → `warn`:
  * - api/routes/sign-in.mjs — nieznany dostawca, dostawca bez id tokenu;
  * - api/routes/callback.mjs — zły kształt callbacku, brak `state`;
  * - oauth2/state.mjs — `state` nieznany, fałszywy albo przeterminowany;
  * - api/middlewares/origin-check.mjs — zły origin / callbackURL / redirectURL /
- *   errorCallbackURL / newUserCallbackURL, blokada CSRF nawigacji cross-site.
+ *   errorCallbackURL / newUserCallbackURL, blokada CSRF nawigacji cross-site;
+ * - better-call 1.4.5 dist/utils.mjs — APIError 415 z nagłówkiem Content-Type
+ *   w treści. Handler błędów API (api/index.mjs, `onError`) zapisuje treść
+ *   błędu jako `error`, gdy zawiera m.in. „table” albo „column”, a treść
+ *   składa wartość nagłówka od klienta (np. `Content-Type: text/table`).
+ *
+ * Wpisy `info` z danymi z żądania w treści (`keepLevel`, poziom bez zmian):
+ * - api/routes/sign-up.mjs — e-mail istniejącego konta;
+ * - api/middlewares/origin-check.mjs — pełny odrzucony adres.
  *
  * Celowo poza listą: „Failed to validate authorization code”
  * (oauth2/callback.mjs). Da się go wywołać anonimowo (`state` z
@@ -173,28 +202,48 @@ export const ANONYMOUS_AUTH_LOG_RULES: readonly AnonymousAuthLogRule[] = [
     message: "Blocked cross-site navigation login attempt (CSRF protection)",
     context: noContext,
   },
+  // Treść niesie wartość nagłówka Content-Type od klienta.
+  { prefix: 'Content-Type "', message: "Content-Type is not allowed", context: noContext },
+  { prefix: "Content-Type is required", message: "Content-Type is required", context: noContext },
+  // Treść niesie e-mail z żądania rejestracji.
+  {
+    prefix: "Sign-up attempt for existing email",
+    message: "Sign-up attempt for existing email",
+    context: noContext,
+    keepLevel: true,
+  },
+  // Treść niesie pełny odrzucony adres (ścieżka i zapytanie), argument — listę trustedOrigins.
+  {
+    prefix: UNTRUSTED_URL_PREFIX,
+    message: "Untrusted URL, add to trustedOrigins if valid",
+    context: untrustedUrlContext,
+    keepLevel: true,
+  },
 ];
 
 /**
  * Wpis Better Auth → poziom, komunikat i kontekst naszego loggera. Znane
- * komunikaty anonimowe (`ANONYMOUS_AUTH_LOG_RULES`) na poziomie `error` →
- * `warn` ze stałym tekstem i bezpiecznym kontekstem. Pozostałe wpisy zostają
- * na swoim poziomie; treść przechodzi przez redakcję napisów
- * (`redactMessageText`), a argumenty trafiają do kontekstu `args`, który
- * logger redaguje (`redactLogContext`).
+ * komunikaty anonimowe (`ANONYMOUS_AUTH_LOG_RULES`) dostają stały tekst
+ * i bezpieczny kontekst: wpis `error` → `warn`, a reguła `keepLevel` działa
+ * na każdym poziomie i go zachowuje. Pozostałe wpisy zostają na swoim
+ * poziomie; treść przechodzi przez redakcję napisów (`redactMessageText`),
+ * a argumenty trafiają do kontekstu `args`, który logger redaguje
+ * (`redactLogContext`).
  */
 export function mapBetterAuthLog(
   level: BetterAuthLogLevel,
   message: string,
   args: readonly unknown[],
 ): MappedAuthLog {
-  if (level === "error") {
-    for (const rule of ANONYMOUS_AUTH_LOG_RULES) {
-      if (!message.startsWith(rule.prefix)) continue;
-      const context = rule.context(message, args);
-      if (context === null) break;
-      return context ? { level: "warn", message: rule.message, context } : { level: "warn", message: rule.message };
-    }
+  for (const rule of ANONYMOUS_AUTH_LOG_RULES) {
+    if (!rule.keepLevel && level !== "error") continue;
+    if (!message.startsWith(rule.prefix)) continue;
+    const context = rule.context(message, args);
+    if (context === null) break;
+    const outputLevel: BetterAuthLogLevel = rule.keepLevel ? level : "warn";
+    return context
+      ? { level: outputLevel, message: rule.message, context }
+      : { level: outputLevel, message: rule.message };
   }
   const safeMessage = redactMessageText(message);
   return args.length > 0
@@ -207,9 +256,11 @@ export function mapBetterAuthLog(
  * wtedy `warn`, więc wpisy `info`/`debug` (m.in. „If it's a valid URL, please
  * add … Current list of trustedOrigins”) nie trafiają do logu. Jawne `level`
  * (`warn`, `error`, `debug`) włącza w handlerze błędów API (better-auth
- * dist/api/index.mjs, `onError`) dodatkowy wpis `error` z komunikatem każdego
- * błędu API (401, 403, 404…), wypisywany domyślnym loggerem biblioteki przez
- * `console.error`, z pominięciem tej opcji.
+ * dist/api/index.mjs, `onError`) dodatkowy wpis `error` z komunikatem
+ * każdego błędu API zgłoszonego przed endpointem (sprawdzenie origin i CSRF,
+ * parsowanie ciała: 400/403/415), wypisywany domyślnym loggerem biblioteki
+ * przez `console.error`, z pominięciem tej opcji; błędy z samych endpointów
+ * handler zamienia w odpowiedź bez tego wpisu.
  */
 export const betterAuthLoggerOptions: { log: (level: BetterAuthLogLevel, message: string, ...args: unknown[]) => void } = {
   log: (level: BetterAuthLogLevel, message: string, ...args: unknown[]): void => {
