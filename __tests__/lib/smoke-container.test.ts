@@ -191,7 +191,7 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(lines[1]).toMatch(/^ok: rate-limit store: invalid AUTH_RATE_LIMIT_STORE → exit 1/);
     expect(lines[2]).toMatch(/^ok: W1 control: .* 200/);
     expect(lines[3]).toMatch(/^ok: \/api\/health -> 503/);
-    expect(lines[4]).toMatch(/^ok: next\/image -> 200 image\//);
+    expect(lines[4]).toMatch(/^ok: next\/image -> 200 image\/webp/);
     const guardRun = r.calls.findIndex((c) => c.startsWith("run ") && c.includes("mh-smoke-guard-"));
     const guardExit = r.calls.findIndex((c) => c.startsWith("inspect -f {{.State.ExitCode}} mh-smoke-guard-"));
     const guardLogs = r.calls.findIndex((c) => c.startsWith("logs mh-smoke-guard-"));
@@ -329,6 +329,7 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     ["500", "500 text/html; charset=utf-8", /next\/image: .*returned code '500', content-type 'text\/html; charset=utf-8'/],
     ["200, ale text/html", "200 text/html; charset=utf-8", /next\/image: .*returned code '200', content-type 'text\/html; charset=utf-8'/],
     ["200 bez content-type", "200 ", /next\/image: .*returned code '200', content-type ''/],
+    ["200, ale oryginał jpg (bez sharp)", "200 image/jpeg", /next\/image: .*returned code '200', content-type 'image\/jpeg'/],
     ["brak połączenia", "000 ", /next\/image: .*returned code '000'/],
   ])("next/image: %s → kod 1 z komunikatem next/image", (_l, out, msg) => {
     const r = smoke({ FAKE_IMAGE: out });

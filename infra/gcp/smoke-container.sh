@@ -22,9 +22,9 @@
 #    503 (baza niedostępna) — nie paść przy starcie. Port inny niż 8080
 #    sprawdza, że serwer czyta PORT (Cloud Run go wstrzykuje). Na tym samym
 #    serwerze sonda z hosta GET /_next/image (plik z public/, Accept:
-#    image/webp) MUSI dać 200 i content-type image/*. To dowód, że `sharp`
-#    działa w obrazie standalone: bez niego `next/image` zwraca 500, a budowa
-#    przechodzi bez błędu.
+#    image/webp) MUSI dać 200 i content-type image/webp. Źródło to jpg, więc webp
+#    powstaje tylko w sharp: bez niego `next/image` oddaje oryginalny jpg
+#    albo błąd, a budowa przechodzi bez błędu.
 #
 # Wartość testowa W1 stoi niżej jako literał przypisania (tablica w1_env), więc
 # strażnik G-K1 (__tests__/lib/secret-guard.test.ts) wymaga jej skrótu na
@@ -208,9 +208,9 @@ img_out="$(curl -s -o /dev/null --max-time 30 -H 'Accept: image/webp' \
 img_code="${img_out%% *}"
 img_type=""
 [[ "$img_out" == *" "* ]] && img_type="${img_out#* }"
-if [[ "$img_code" != "200" || "$img_type" != image/* ]]; then
+if [[ "$img_code" != "200" || "$img_type" != "image/webp" ]]; then
   docker logs "$name" 2>&1 | tail -30 >&2
-  echo "FAIL: next/image: ${img_path} returned code '$img_code', content-type '$img_type' (expected 200 and image/*; sharp missing or broken in the image?)" >&2
+  echo "FAIL: next/image: ${img_path} returned code '$img_code', content-type '$img_type' (expected 200 and image/webp; sharp missing or broken in the image?)" >&2
   exit 1
 fi
 echo "ok: next/image -> 200 $img_type (sharp works in the standalone image)"
