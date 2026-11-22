@@ -1180,12 +1180,53 @@ przy T1.
 
 ## 11. Punkty otwarte
 
-- `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
+- ~~`wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
   `guard-deploy-subagent` podpisany i zainstalowany z próbą kontrolną albo konto
-  maszynowe).
-- K-1 (#144): musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
+  maszynowe).~~ Zamknięte: etap wykonany, workflow wdrożenia przechodzi
+  logowanie przez WIF (przebiegi 44817913061 i 44821507855 opisane
+  w `__tests__/lib/workflows.test.ts`; workflow nie ma kluczy JSON).
+- ~~K-1 (#144): musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
   sekrety tylko z wersją, bez `--allow-unauthenticated`, `GCS_PUBLIC_BASE_URL`
-  z jednego źródła.
-- K-2 (#135): zawężenie allowlisty e2e do naszej usługi. K-3 (#137): harmonogram wstrzymany.
-- Logowanie Google bez sekretu nie wyłącza się samo (P3 po K-1).
+  z jednego źródła.~~ Zamknięte: wszystkie cztery punkty na `main`
+  (`infra/gcp/run-deploy.sh`, `run-migrate.sh`, `Dockerfile`; strażniki K-1
+  w `__tests__/lib/workflows.test.ts`).
+- ~~K-2 (#135): zawężenie allowlisty e2e do naszej usługi.~~ Zamknięte:
+  allowlista przyjmuje tylko adres taga usługi `myhelper` w naszym projekcie
+  i regionie (`.github/workflows/e2e-production.yml`, krok „Cloud Run mode must
+  target our tagged Cloud Run URL”; testy allowlisty w
+  `__tests__/lib/workflows.test.ts`).
+- ~~K-3 (#137): harmonogram wstrzymany.~~ Zamknięte: `infra/gcp/scheduler.sh`
+  tworzy zadania wstrzymane i odczytuje stan (sekcja 8; strażnik
+  `__tests__/lib/scheduler-paused.test.ts`).
+- Logowanie Google: na betę wyłączone (plan 1.4, `production-gcp` bez
+  `GOOGLE_CLIENT_ID`). Przycisk Google wyświetla się mimo to i po kliknięciu
+  pokazuje błąd (`src/components/auth/sign-in-button.tsx:168-206`). Ukrycie
+  przycisku bez `GOOGLE_CLIENT_ID` to osobna zmiana przed przełączeniem
+  (warunek P10 w `docs/runbook-zatrzymanie-zapisow.md`).
 - Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
+- Pomiar TTFB (plan 0.6): otwarty do pomiaru na domenie po K1 (sekcja 12).
+
+## 12. Pomiar TTFB (plan 0.6)
+
+Odniesienie z Vercela: strony panelu 2,5–3,5 s, pojedyncze API 1,4–3 s,
+strony publiczne 250 ms (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, B3 i 0.6).
+
+Zasady:
+
+- przed oknem mierzymy `/api/health` i stronę publiczną;
+- strony panelu mierzymy po pierwszym salonie na GCP (na pustej bazie nic nie
+  pokażą);
+- pomiar na domenie po K1 zamyka 0.6.
+
+Polecenie: trzy próby, wynik to mediana (środkowa z trzech wartości).
+`<adres>` to adres z kolumny „Adres” razem ze ścieżką. Hostów spoza tego
+runbooka nie wpisujemy do repo.
+
+```bash
+for i in 1 2 3; do curl -s -o /dev/null -w '%{time_starttransfer}\n' "<adres>"; done | sort -n | sed -n 2p
+```
+
+| Data | Adres | Ścieżka | Mediana z 3 | Uwagi |
+|---|---|---|---|---|
+| 2026-11-22 | Vercel produkcja | `/api/health` | 0,91 s | pomiar z Polski |
+| 2026-11-22 | Cloud Run `run.app` | `/api/health` | 0,12 s | pomiar z Polski; rewizja bez ruchu, ciepła |

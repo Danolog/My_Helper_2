@@ -213,8 +213,10 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/e2e-production.yml
-    # URL Cloud Run (tag nowej rewizji, po promocji kieruje na nią), NIE
-    # domena aplikacji — do przełączenia DNS ta wskazuje Vercela. Bez
-    # `secrets: inherit`: w trybie workflow_call e2e nie używa żadnego sekretu.
+    # Adres taga nowej rewizji Cloud Run, nie domena aplikacji. Do okna
+    # przełączenia domena nie istnieje (brak rekordu `app`), a po oknie
+    # kieruje na LB, który obsługuje tylko ruch po promocji. Test ma sprawdzić
+    # konkretną rewizję z tego przebiegu. Bez `secrets: inherit`: w trybie
+    # workflow_call e2e nie używa żadnego sekretu.
     with:
       base_url: ${{ needs.deploy.outputs.tag_url }}
