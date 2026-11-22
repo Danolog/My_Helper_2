@@ -95,18 +95,21 @@ Skutki:
   W wariancie bez kopii (plan 1.4) przebieg jest możliwy (ingress zostaje
   `all`). Chronią P14 (tylko `workflow_dispatch`) i odczyt rewizji w W4 na
   końcu okna.
-- po P4 przeglądarka może logować się, rejestrować i zapisywać dane w panelu
-  tylko z originu `https://app.nordsignal.cc` (`trustedOrigins` w
-  `src/lib/auth.ts`). Z innego originu, także z adresów `run.app` (głównego
-  i tagów), Better Auth zwraca 403 `INVALID_ORIGIN`. To reguła użytkowania,
-  nie zabezpieczenie: klient bez nagłówków `Origin`, `Referer`, `Sec-Fetch-*`
-  i bez ciasteczka (np. `curl`) przechodzi bez sprawdzenia. Adresy `run.app`
-  służą po P4 wyłącznie do odczytów: smoke `/api/health` i e2e `@production`
+- po P4 przeglądarka może logować się i rejestrować tylko z originu
+  `https://app.nordsignal.cc` (`trustedOrigins` w `src/lib/auth.ts`). Przy
+  logowaniu i rejestracji z innego originu, także z adresów `run.app`
+  (głównego i tagów), Better Auth zwraca 403 `INVALID_ORIGIN`. To reguła
+  użytkowania, nie zabezpieczenie: klient bez nagłówków `Origin`, `Referer`,
+  `Sec-Fetch-*` i bez ciasteczka (np. `curl`) przechodzi bez sprawdzenia
+  originu. Ręcznie i z przeglądarki adresy `run.app` służą po P4 wyłącznie do
+  odczytów: smoke `/api/health` i e2e `@production`
   (`tests/production/health.spec.ts`, same wejścia na strony, bez
-  logowania). Salon testowy (2.8), test SMS i inne próby z logowaniem idą
-  przez LB: przed T5 z mapowaniem `app.nordsignal.cc` na `<LB_IP>` (`curl
-  --resolve` jak w P6, w przeglądarce wpis w pliku hosts), po T5 wprost na
-  domenę. Linki z e-maili (weryfikacja, reset hasła) prowadzą na domenę, więc
+  logowania). Cloud Scheduler (R5) woła `run.app` z `CRON_SECRET`, poza tą
+  regułą. Salon testowy (2.8), test SMS i inne próby z logowaniem idą przez
+  LB: przed T5 z mapowaniem `app.nordsignal.cc` na `<LB_IP>` (`curl
+  --resolve` jak w P6, w przeglądarce wpis w pliku hosts, usunięty zaraz po
+  T5), po T5 wprost na domenę, gdy lokalny resolver zna już rekord (jak w
+  T6). Linki z e-maili (weryfikacja, reset hasła) prowadzą na domenę, więc
   przed T5 też otwierają się tylko z tym mapowaniem. Adresów `run.app` do
   `trustedOrigins` nie dopisujemy.
 

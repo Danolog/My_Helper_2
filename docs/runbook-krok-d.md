@@ -569,8 +569,8 @@ klasy `var` z `infra/gcp/env-manifest.json` — analogicznie.
   #132 na `main`. Na Vercelu obie zmienne nadal **nieustawione**.
 - `GOOGLE_CLIENT_ID` — **nie ustawiać** na Cloud Run, dopóki
   `google-client-secret` nie ma wersji. Przycisk logowania Google pokazuje
-  się tylko przy obu wartościach (`src/lib/google-auth.ts`); bez nich jest
-  ukryty, a dostawca niezarejestrowany.
+  się tylko przy obu wartościach (`src/lib/google-auth.ts`); bez którejkolwiek
+  jest ukryty, a dostawca niezarejestrowany.
 - `MYHELPER_APP_DB_ROLE` — puste = domyślnie `myhelper_app`.
 
 ## 7. D-7 — pierwszy przebieg (sesja główna)
