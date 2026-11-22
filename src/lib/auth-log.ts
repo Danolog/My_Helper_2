@@ -10,6 +10,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { toSafeErrorMeta } from "@/lib/safe-error";
 
 /** Poziom wpisu w opcji `logger` Better Auth (bez `success`, który biblioteka mapuje na `info`). */
 export type BetterAuthLogLevel = "debug" | "info" | "warn" | "error";
@@ -64,10 +65,25 @@ export function safeOriginForLog(raw: unknown): string {
   return printable.slice(0, AUTH_LOG_ORIGIN_MAX_LENGTH);
 }
 
-/** Identyfikator dostawcy z żądania: tylko znaki identyfikatora, ograniczona długość. */
+/**
+ * Identyfikator dostawcy z żądania: tylko znaki identyfikatora, ograniczona
+ * długość. Nic nie zostało po oczyszczeniu → znacznik, nie pusty napis
+ * (pusty `provider` w logu wygląda jak brak pola, a nie jak śmieciowe wejście).
+ */
 function safeProviderId(raw: unknown): string {
   if (typeof raw !== "string") return AUTH_LOG_UNPARSEABLE;
-  return raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, PROVIDER_ID_MAX_LENGTH);
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, PROVIDER_ID_MAX_LENGTH);
+  return cleaned === "" ? AUTH_LOG_UNPARSEABLE : cleaned;
+}
+
+/**
+ * Treść wpisu spoza `ANONYMOUS_AUTH_LOG_RULES` — ta sama redakcja napisów co
+ * argumenty w kontekście (`toSafeErrorMeta`: parametry zapytania, wycinek
+ * wejścia JSON). Logger redaguje tylko kontekst, a treść zapisuje dosłownie.
+ */
+function redactMessageText(message: string): string {
+  const redacted = toSafeErrorMeta(message);
+  return typeof redacted === "string" ? redacted : AUTH_LOG_UNPARSEABLE;
 }
 
 /** Wartość pola `key` z pierwszego argumentu-obiektu, np. `{ provider: "x" }`. */
@@ -106,13 +122,22 @@ function invalidUrlRule(label: string): AnonymousAuthLogRule {
 }
 
 /**
- * Jedyna lista komunikatów obniżanych z `error` do `warn` (przypięta testem
- * `__tests__/lib/auth-log.test.ts`). Źródła w better-auth 1.7.25 (dist):
+ * Jedyna lista komunikatów obniżanych z `error` do `warn` (przypięta testami
+ * `__tests__/lib/auth-log.test.ts` oraz `__tests__/lib/auth-log-dist-source.test.ts`,
+ * który sprawdza, że każdy prefiks nadal występuje w `logger.error(` w dist
+ * biblioteki). Źródła w better-auth 1.7.25 (dist):
  * - api/routes/sign-in.mjs — nieznany dostawca, dostawca bez id tokenu;
  * - api/routes/callback.mjs — zły kształt callbacku, brak `state`;
  * - oauth2/state.mjs — `state` nieznany, fałszywy albo przeterminowany;
  * - api/middlewares/origin-check.mjs — zły origin / callbackURL / redirectURL /
  *   errorCallbackURL / newUserCallbackURL, blokada CSRF nawigacji cross-site.
+ *
+ * Celowo poza listą: „Failed to validate authorization code”
+ * (oauth2/callback.mjs). Da się go wywołać anonimowo (`state` z
+ * `/sign-in/social` i dowolny `code`), ale tylko dla zarejestrowanego dostawcy.
+ * Bez skonfigurowanego Google dostawca nie istnieje, więc ścieżka jest
+ * nieosiągalna; po włączeniu Google ten wpis oznacza awarię logowania Google
+ * (np. zły sekret klienta) i ma zostać `error`, żeby budził alert.
  */
 export const ANONYMOUS_AUTH_LOG_RULES: readonly AnonymousAuthLogRule[] = [
   {
@@ -154,8 +179,9 @@ export const ANONYMOUS_AUTH_LOG_RULES: readonly AnonymousAuthLogRule[] = [
  * Wpis Better Auth → poziom, komunikat i kontekst naszego loggera. Znane
  * komunikaty anonimowe (`ANONYMOUS_AUTH_LOG_RULES`) na poziomie `error` →
  * `warn` ze stałym tekstem i bezpiecznym kontekstem. Pozostałe wpisy zostają
- * na swoim poziomie; argumenty trafiają do kontekstu `args`, który logger
- * redaguje (`redactLogContext`).
+ * na swoim poziomie; treść przechodzi przez redakcję napisów
+ * (`redactMessageText`), a argumenty trafiają do kontekstu `args`, który
+ * logger redaguje (`redactLogContext`).
  */
 export function mapBetterAuthLog(
   level: BetterAuthLogLevel,
@@ -170,17 +196,22 @@ export function mapBetterAuthLog(
       return context ? { level: "warn", message: rule.message, context } : { level: "warn", message: rule.message };
     }
   }
-  return args.length > 0 ? { level, message, context: { args: [...args] } } : { level, message };
+  const safeMessage = redactMessageText(message);
+  return args.length > 0
+    ? { level, message: safeMessage, context: { args: [...args] } }
+    : { level, message: safeMessage };
 }
 
 /**
- * Opcja `logger` dla `betterAuth`. Poziom `warn` (domyślny w bibliotece)
- * ustawiony jawnie: wpisy `info`/`debug` (m.in. „If it's a valid URL, please
- * add … Current list of trustedOrigins”) nie trafiają do logu w żadnym
- * środowisku.
+ * Opcja `logger` dla `betterAuth`. Bez pola `level`: biblioteka przyjmuje
+ * wtedy `warn`, więc wpisy `info`/`debug` (m.in. „If it's a valid URL, please
+ * add … Current list of trustedOrigins”) nie trafiają do logu. Jawne `level`
+ * (`warn`, `error`, `debug`) włącza w handlerze błędów API (better-auth
+ * dist/api/index.mjs, `onError`) dodatkowy wpis `error` z komunikatem każdego
+ * błędu API (401, 403, 404…), wypisywany domyślnym loggerem biblioteki przez
+ * `console.error`, z pominięciem tej opcji.
  */
-export const betterAuthLoggerOptions = {
-  level: "warn" as const,
+export const betterAuthLoggerOptions: { log: (level: BetterAuthLogLevel, message: string, ...args: unknown[]) => void } = {
   log: (level: BetterAuthLogLevel, message: string, ...args: unknown[]): void => {
     const mapped = mapBetterAuthLog(level, typeof message === "string" ? message : String(message), args);
     logger[mapped.level](mapped.message, mapped.context);

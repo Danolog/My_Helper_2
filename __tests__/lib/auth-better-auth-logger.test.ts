@@ -4,6 +4,7 @@
  * (src/lib/auth-log.ts). Anonimowe `/sign-in/social` z niezarejestrowanym
  * dostawcą daje wpis `warn` w naszym loggerze, a nie tekstowy
  * `console.error` biblioteki (który Cloud Run mógłby uznać za ERROR).
+ * Tak samo odrzucenie żądania z obcym `Origin` przez `auth.handler`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +37,53 @@ describe("auth.ts: logger Better Auth", () => {
       call.some((arg) => typeof arg === "string" && arg.includes("[Better Auth]")),
     );
     expect(libraryConsoleErrors).toEqual([]);
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * W testach Better Auth domyślnie pomija sprawdzenie origin (`isTest()` →
+   * `skipOriginCheck`), więc instancja z auth.ts nie dojdzie do wpisu
+   * „Invalid origin”. Prawdziwy `betterAuth` z tą samą opcją `logger` i jawnie
+   * włączonym sprawdzeniem; bez bazy (adapter pamięciowy), bo origin jest
+   * sprawdzany przed endpointem.
+   */
+  it("POST z ciasteczkiem i obcym Origin → 403 i warn w naszym loggerze, bez console.error", async () => {
+    vi.resetModules();
+    const { betterAuth } = await import("better-auth");
+    const { betterAuthLoggerOptions } = await import("@/lib/auth-log");
+    const { logger } = await import("@/lib/logger");
+
+    const baseURL = "http://localhost:3000";
+    const auth = betterAuth({
+      baseURL,
+      logger: betterAuthLoggerOptions,
+      trustedOrigins: [baseURL],
+      advanced: { disableOriginCheck: false },
+    });
+    // Wpisy z inicjalizacji kontekstu nie mieszają się z wpisem żądania.
+    await auth.$context;
+
+    const warn = vi.spyOn(logger, "warn");
+    const error = vi.spyOn(logger, "error");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await auth.handler(
+      new Request(`${baseURL}/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "theme=light",
+          origin: "https://evil.example.com",
+        },
+        body: JSON.stringify({ provider: "github", callbackURL: "/" }),
+      }),
+    );
+
+    // 403 (INVALID_ORIGIN), a nie 404 nieznanego dostawcy: odrzucenie przed endpointem.
+    expect(response.status).toBe(403);
+    expect(warn).toHaveBeenCalledWith("Invalid origin", { origin: "https://evil.example.com" });
+    expect(error).not.toHaveBeenCalled();
     expect(consoleError).not.toHaveBeenCalled();
   });
 });

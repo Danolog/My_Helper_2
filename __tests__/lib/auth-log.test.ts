@@ -14,6 +14,7 @@ import {
   safeOriginForLog,
 } from "@/lib/auth-log";
 import { REDACTED } from "@/lib/logger";
+import { INVALID_JSON_MESSAGE } from "@/lib/safe-error";
 
 /** Komunikaty i argumenty w postaci, w jakiej woła je better-auth 1.7.25 (dist). */
 const KNOWN_ANONYMOUS_ERRORS: { message: string; args: unknown[]; expected: { message: string; context?: unknown } }[] = [
@@ -111,6 +112,14 @@ describe("mapBetterAuthLog: znane komunikaty anonimowe", () => {
     expect(provider).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(provider.length).toBeLessThanOrEqual(40);
   });
+
+  it.each(["", "<>\n", " ./ "])(
+    "identyfikator dostawcy pusty po oczyszczeniu (%j) → znacznik, nie pusty napis",
+    (provider) => {
+      const mapped = mapBetterAuthLog("error", KNOWN_ANONYMOUS_ERRORS[0]!.message, [{ provider }]);
+      expect(mapped).toEqual({ level: "warn", message: "Provider not found", context: { provider: AUTH_LOG_UNPARSEABLE } });
+    },
+  );
 });
 
 describe("mapBetterAuthLog: pozostałe wpisy", () => {
@@ -121,6 +130,26 @@ describe("mapBetterAuthLog: pozostałe wpisy", () => {
       message: "Failed to create session",
       context: { args: [err] },
     });
+  });
+
+  it("treść nieznanego wpisu z parametrami zapytania (e-mail) → zredagowana", () => {
+    const mapped = mapBetterAuthLog(
+      "error",
+      "Failed query: select * from \"user\" where email = $1\nparams: jan.kowalski@example.com",
+      [],
+    );
+    expect(mapped.level).toBe("error");
+    expect(mapped.message).not.toContain("jan.kowalski@example.com");
+    expect(mapped.message).toBe(`Failed query: select * from "user" where email = $1\nparams: ${REDACTED}`);
+  });
+
+  it("treść nieznanego wpisu z wycinkiem wejścia JSON (e-mail) → stała treść", () => {
+    const mapped = mapBetterAuthLog("warn", `Unexpected token 'j', "jan.kowalski@example.com" is not valid JSON`, []);
+    expect(mapped).toEqual({ level: "warn", message: INVALID_JSON_MESSAGE });
+  });
+
+  it("treść nieznanego wpisu bez danych do redakcji → bez zmian", () => {
+    expect(mapBetterAuthLog("error", "Failed to create session", []).message).toBe("Failed to create session");
   });
 
   it("Failed to parse state z błędem innym niż StateError klienta → error", () => {
@@ -138,8 +167,8 @@ describe("mapBetterAuthLog: pozostałe wpisy", () => {
     expect(mapBetterAuthLog("debug", "debug entry", [])).toEqual({ level: "debug", message: "debug entry" });
   });
 
-  it("opcja dla betterAuth: poziom warn (info/debug biblioteki nie są publikowane)", () => {
-    expect(betterAuthLoggerOptions.level).toBe("warn");
+  it("opcja dla betterAuth bez jawnego level (jawny włącza wpis error dla każdego błędu API)", () => {
+    expect(Object.keys(betterAuthLoggerOptions)).toEqual(["log"]);
   });
 });
 
