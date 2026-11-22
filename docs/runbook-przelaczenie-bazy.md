@@ -387,7 +387,7 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   psql_csql_admin <<'SQL'
+   : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && psql_csql_admin <<'SQL'
    CREATE SCHEMA drill_marker;
    CREATE TABLE drill_marker.marker (id int PRIMARY KEY);
    INSERT INTO drill_marker.marker VALUES (1);
@@ -417,7 +417,7 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   psql_csql_admin <<'SQL'
+   : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && psql_csql_admin <<'SQL'
    DELETE FROM drill_marker.marker;
    SELECT count(*) FROM drill_marker.marker;
    SQL
@@ -536,6 +536,7 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 |---|---|
 | przed próbą generalną, na instancji produkcyjnej Cloud SQL: kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis) | 1.0 pkt 2 |
 | przywrócenie z kopii `pre-migrate` po czerwonym jobie | 1.0 pkt 2 |
+| próba odtworzenia kopii na instancji próbnej: klon instancji produkcyjnej, znacznik w schemacie `drill_marker`, kopia na żądanie `drill-restore`, przywrócenie z niej, usunięcie kopii i klonu | 1.1 „Instancja próbna”, pkt 4 i usunięcie po próbie |
 | próba generalna na produkcji (procedura zatrzymania zapisów, L8): ingress Cloud Run `internal` i z powrotem `all`, pauza i wznowienie zadań Scheduler, przełącznik cronów Vercela wyłącz/włącz, reguła zapory Vercela na adresie jednego starszego wdrożenia (utworzenie, sprawdzenie, usunięcie) | 1.1; procedura zatrzymania zapisów L8 |
 | w próbie generalnej, zmiana konfiguracji konta Stripe w **trybie testowym**: zmiana adresu endpointu webhooka i ponowienie zdarzeń (bez trybu live) | procedura zatrzymania zapisów 0.3 |
 | przed oknem, poza repo, bez wpływu na ruch: ochrona wdrożeń Vercela „Standard Protection”, usunięcie `POSTGRES_URL` z zakresu Preview, utworzenie **wyłączonej** reguły zapory Vercela (`Deny`, cały projekt), dopisanie adresu przekierowania i originu `app.nordsignal.cc` do klienta Google OAuth, wersja `stripe-webhook-secret` = sekret endpointu Stripe. Każda pozycja potwierdzana osobno | procedura zatrzymania zapisów L1, L3, L5, L6 |
@@ -544,9 +545,10 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 | nie obowiązuje w wariancie bez kopii (plan 1.4): kopia na żądanie Cloud SQL „przed importem” i — w razie potrzeby — przywrócenie z niej | 2.4; wycofanie (sekcja 2) |
 | przełączenie ruchu aplikacji na GCP: ingress Cloud Run z powrotem `all`, utworzenie rekordu `A app` → LB (DNS only), włączenie polityki alertu `myhelper-app-health-alert`, zmiana adresu endpointu webhooka Stripe; przy wycofaniu (droga B): usunięcie rekordu `app`, przywrócenie adresu endpointu, wyłączenie polityki alertu, ingress Cloud Run `internal` (zapora i dalsze wznowienie: wiersz „start okna”, droga A pkt 3) | 2.9; wycofanie (sekcja 2), droga B |
 | nie obowiązuje w wariancie bez kopii (plan 1.4): odmrożenie Cloud SQL (początek zapisów na GCP) | 2.10 |
-| po 2.10 z kodem 0 albo po drodze C (w wariancie bez kopii: po 2.9), przy warunkach przed K1.1 (W4 = `<sha okna>`; T5 z serwera autorytatywnego, a resolvery publiczne z `<LB_IP>` albo upłynęło minimum SOA od T4; T6 o oczekiwanym wyniku): scalenie K1 (przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`, wdrożenie Vercel Production) i zawężenie reguły zapory Vercela do metod innych niż `GET`/`HEAD` | procedura zatrzymania zapisów L4 (K1, warunki przed K1.1); wycofanie, droga C |
-| po oknie albo przy wycofaniu (droga A pkt 3): wznowienie zadań Cloud Scheduler, wyłącznie tych, które w W0 miały `ENABLED` (lista z notatki okna) | 2.10; wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R5) |
+| po 2.10 z kodem 0 albo po drodze C (w wariancie bez kopii: po 2.9 i po 2.8 z kodem 0), przy warunkach przed K1.1 (W4 = `<sha okna>`; T5 z serwera autorytatywnego, a resolvery publiczne z `<LB_IP>` albo upłynęło minimum SOA od T4; T6 o oczekiwanym wyniku): scalenie K1 (przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`, wdrożenie Vercel Production) i zawężenie reguły zapory Vercela do metod innych niż `GET`/`HEAD` | procedura zatrzymania zapisów L4 (K1, warunki przed K1.1); wycofanie, droga C |
+| po oknie (w wariancie bez kopii: po 2.8 z kodem 0) albo przy wycofaniu (droga A pkt 3): wznowienie zadań Cloud Scheduler, wyłącznie tych, które w W0 miały `ENABLED` (lista z notatki okna) | 2.10 (w wariancie bez kopii: 2.8, akapit wariantu w 2.9); wycofanie, droga A pkt 3; procedura zatrzymania zapisów, sekcja 5 (R5) |
 | nie obowiązuje w wariancie bez kopii (plan 1.4): okno powrotu (osobne okno, osobna zgoda) z gałęzią Neona „przed powrotem” i kopią Cloud SQL | sekcja 3 |
+
 ### 1.3 Zatrzymanie zapisów PRZED zamrożeniem
 
 Zamrożenie to **ustawienie domyślne bazy** (`ALTER DATABASE … SET
@@ -590,7 +592,8 @@ Dlatego przed `freeze-neon.sh`:
    SQL
    ```
 
-   Oczekiwane: `f|f` dwa razy. Inaczej stop.
+   Oczekiwane: `f|f` dwa razy. Inaczej stop. W wariancie bez kopii tylko
+   wiersz Cloud SQL (`psql_csql_app`): oczekiwane `f|f` raz.
 3. Rola zamrażająca (adres `PG*` zamrożenia) ma oba uprawnienia potrzebne do
    zamrożenia (widoczność sesji i zrywanie, `freeze-neon.sh:33-44`) — na
    Neonie rola właściciela Neona (`psql_neon_owner`), na Cloud SQL `postgres`
@@ -744,6 +747,8 @@ Oczekiwane: `neon_owner_pw_set=yes`, `neon_app_pw_set=yes`, `admin_pw_set=yes`,
 `owner_pw_format=yes` (hasło loginu ma postać `[A-Za-z0-9]{32}`,
 `docs/runbook-krok-d.md:169-170`; inna wartość = `sed` nie wyciął hasła z URL,
 np. URL ma inny login niż `myhelper_svc`).
+W wariancie bez kopii haseł Neona nie wpisujemy (blok `read -rs` pomijamy):
+oczekiwane tylko `admin_pw_set=yes` i `owner_pw_format=yes`.
 Kontrola wypisuje tylko `yes`/`no`, nigdy wartości. Wynik `no` = stop,
 `unset` (niżej) i wyjaśnienie przed oknem. W próbie instancja próbna jest
 klonem, więc ma te same hasła — potwierdzone kontrolą połączenia niżej.
@@ -774,7 +779,8 @@ SQL
 ```
 
 Oczekiwane: `1` cztery razy. Błąd połączenia = stop przed oknem (tunel 1.5,
-CA 1.4, hasła wyżej).
+CA 1.4, hasła wyżej). W wariancie bez kopii tylko wiersze Cloud SQL
+(`psql_csql_admin`, `psql_csql_app`): oczekiwane `1` dwa razy.
 
 | Funkcja | Adres | Rola i hasło |
 |---|---|---|
@@ -855,6 +861,7 @@ SQL
 ```
 
 Oczekiwane: liczba; jej pierwsze dwie cyfry ≤ wersji głównej `pg_dump`.
+W wariancie bez kopii ten blok pomijamy: haseł Neona nie wpisujemy (1.6).
 
 ## 2. Okno w przód
 
@@ -867,6 +874,11 @@ kopia danych (`copy-neon-to-cloudsql.sh:229-232`).
 **Neon zostaje zamrożony** do decyzji o zakończeniu okresu powrotu.
 
 ### Wycofanie okna w przód
+
+W wariancie bez kopii (plan 1.4) z drogi A obowiązują tylko pkt 3 i 4;
+pkt 1 i 2 oraz drogi B i C nie obowiązują (Neon nie jest zamrożony, kopii
+„przed importem” nie ma). Stop po 2.9 = powrót bez danych (blok na górze
+pliku).
 
 Każde „stop okna” w sekcji 2 wskazuje jedną z trzech dróg. O drodze decyduje
 to, czy ruch jest już na GCP (2.9) i czy Cloud SQL może być odmrożony (2.10).
@@ -1171,9 +1183,11 @@ wiersz spoza wzorca, stop, log lokalnie (`:71-72`); 6 → schemat różny;
 
 ### 2.8 Izolacja salonów — `rls-check.sh` (Cloud SQL)
 
-**Kiedy.** W wariancie bez kopii (plan 1.4): po pierwszym salonie testowym
-na GCP z co najmniej jednym klientem i jedną wizytą, **przed** pierwszym
-prawdziwym salonem. W wariancie z kopią: po 2.7 z `count_salons` > 0. Na
+**Kiedy.** W wariancie bez kopii (plan 1.4): salon testowy z co najmniej
+jednym klientem i jedną wizytą powstaje po 2.9 (albo wcześniej, na adresie
+taga rewizji); 2.8 idzie zaraz po nim, **przed** pierwszym prawdziwym
+salonem. Wiersz „0 → 2.9” w tabeli niżej w tym wariancie nie dotyczy:
+kod 0 = koniec okna (akapit wariantu w 2.9). W wariancie z kopią: po 2.7 z `count_salons` > 0. Na
 pustej bazie wynik 0/0/0 nic nie dowodzi. Jedna transakcja tylko do odczytu
 (`rls-check.sh:18-31`, `:111`). `infra/db/cutover/rls-check.sh` zostaje
 także po porządkach w kodzie po oknie: to jedyna kontrola RLS na produkcji.
@@ -1197,8 +1211,10 @@ COMMIT;
 SQL
 ```
 
-Oczekiwane: `BEGIN`, `SET`, `SET`, `t`, potem trzy liczby, każda ≥ 1
-(klienci, wizyty, salony), `COMMIT`. Liczby do notatki obok wyniku
+Oczekiwane: `BEGIN`, `SET`, `SET`, `t`, potem trzy liczby: klienci ≥ 1,
+wizyty ≥ 1, salony dokładnie `1` (polityka `tenant_self` pokazuje tylko
+salon z kontekstu), `COMMIT`. Salony > 1 = filtr nie działa → stop, jak
+kod 7 niżej. Liczby do notatki obok wyniku
 `rls-check.sh`. Liczba 0 = brak danych testowych albo zły kontekst — najpierw
 dane w salonie testowym, potem powtórzyć; bez tego wynik `rls-check.sh` nie
 jest dowodem.
@@ -1243,7 +1259,9 @@ droga A), `off` → droga C.
 W wariancie bez kopii (plan 1.4) Cloud SQL nie jest zamrożony: zapisy na GCP
 działają od razu po przełączeniu, a zdania wyżej o zamrożeniu, 2.10 i drogach
 B i C nie dotyczą. Stop po przełączeniu = powrót bez danych (blok na górze
-pliku).
+pliku). Koniec okna w tym wariancie: po 2.8 z kodem 0 (2.8 „Kiedy”)
+wznowienie zadań Scheduler według decyzji właściciela (procedura
+zatrzymania zapisów R5, 1.2), potem koniec tunelu i haseł (1.5, 1.6).
 
 ### 2.10 Odmrożenie Cloud SQL — `unfreeze-neon.sh` przez tunel — nie obowiązuje w wariancie bez kopii (plan 1.4)
 
