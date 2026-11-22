@@ -301,6 +301,15 @@ describe("G-C6: skrypty wdrożenia", () => {
 });
 
 describe("G-C6: e2e-production.yml", () => {
+  it("akcje zewnętrzne przypięte do pełnego sha", () => {
+    const uses = [...code(E2E).matchAll(/uses:\s*([^\s#]+)/g)].map((m) => m[1]!);
+    expect(uses.length).toBeGreaterThanOrEqual(4);
+    for (const u of uses) {
+      if (u.startsWith("./")) continue;
+      expect(u, u).toMatch(/@[0-9a-f]{40}$/);
+    }
+  });
+
   it("deployment_status (Vercel, do C4) + workflow_call", () => {
     expect(triggers(E2E)).toEqual(["deployment_status", "workflow_call"]);
   });
