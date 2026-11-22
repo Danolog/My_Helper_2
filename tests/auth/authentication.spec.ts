@@ -152,11 +152,14 @@ test.describe('Flow 1: Authentication', () => {
       await expect(page).toHaveURL(/\/dashboard/, { timeout: 30000 });
     });
 
-    test('should display Google sign-in button', { tag: '@full' }, async ({ page }) => {
+    // CI nie ustawia GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET, więc dostawca Google
+    // nie jest zarejestrowany i formularz nie może pokazywać martwego przycisku.
+    test('should hide Google sign-in button when Google OAuth is not configured', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       await expect(
         page.getByRole('button', { name: /google/i })
-      ).toBeVisible();
+      ).toHaveCount(0);
     });
 
     test('should navigate to forgot password page', { tag: '@full' }, async ({ page }) => {
