@@ -2,7 +2,8 @@
  * logger — strukturalne logowanie serwerowe.
  * Kontrakt:
  *   - produkcja: jednoliniowy JSON (level, msg, timestamp, kontekst) kierowany
- *     do console.error/warn/log wg poziomu (log drain Vercela),
+ *     do console.error/warn/log wg poziomu (log drain Vercela), z polami
+ *     Google Cloud Logging / Error Reporting: severity, message, stack_trace,
  *   - development: czytelny format [LEVEL] + opcjonalny kontekst,
  *   - obiekty Error w kontekscie sa serializowane (message/name/stack).
  *
@@ -10,6 +11,7 @@
  * vi.resetModules() + vi.stubEnv przed dynamicznym importem.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { toSafeErrorMeta } from "@/lib/safe-error";
 
 async function importLoggerWithEnv(nodeEnv: string) {
   vi.resetModules();
@@ -134,6 +136,170 @@ describe("logger — produkcja (JSON structured)", () => {
     logger.error("Padlo", { error: err });
     const entry = JSON.parse(errorSpy.mock.calls[0]![0] as string);
     expect(entry.error).toEqual({ message: "boom", name: "Error", stack: err.stack });
+  });
+});
+
+describe("logger — pola Google Cloud Logging / Error Reporting (produkcja)", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  const lastEntry = (spy: ReturnType<typeof vi.spyOn>) =>
+    JSON.parse(spy.mock.calls[spy.mock.calls.length - 1]![0] as string);
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("severity dla czterech poziomów: DEBUG, INFO, WARNING, ERROR; message równe msg", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.debug("d");
+    expect(lastEntry(logSpy)).toMatchObject({ level: "debug", severity: "DEBUG", msg: "d", message: "d" });
+    logger.info("i");
+    expect(lastEntry(logSpy)).toMatchObject({ level: "info", severity: "INFO", msg: "i", message: "i" });
+    logger.warn("w");
+    expect(lastEntry(warnSpy)).toMatchObject({ level: "warn", severity: "WARNING", msg: "w", message: "w" });
+    logger.error("e");
+    expect(lastEntry(errorSpy)).toMatchObject({ level: "error", severity: "ERROR", msg: "e", message: "e" });
+  });
+
+  it("error z { error: toSafeErrorMeta(err) } → stack_trace na najwyższym poziomie, error.stack zostaje", async () => {
+    const logger = await importLoggerWithEnv("production");
+    const err = new Error("boom");
+    logger.error("Padlo", { error: toSafeErrorMeta(err) });
+
+    const entry = lastEntry(errorSpy);
+    expect(entry.stack_trace).toBe(err.stack);
+    expect(entry.error.stack).toBe(err.stack);
+  });
+
+  it("error z surowym Error w kontekście → stack_trace ze zredagowanego zapisu błędu", async () => {
+    const logger = await importLoggerWithEnv("production");
+    const err = new TypeError("zly typ");
+    logger.error("Padlo", { error: err });
+
+    const entry = lastEntry(errorSpy);
+    expect(typeof entry.stack_trace).toBe("string");
+    expect(entry.stack_trace).toBe(entry.error.stack);
+  });
+
+  it("stos z danymi osobowymi (parametry zapytania) → stack_trace zredagowany tak samo jak error.stack", async () => {
+    const { DrizzleQueryError } = await import("drizzle-orm");
+    const logger = await importLoggerWithEnv("production");
+    const err = new DrizzleQueryError("insert into x values ($1, $2)", ["anna@test.pl", "+48123456789"]);
+    expect(err.stack).toContain("anna@test.pl");
+    logger.error("Padlo", { error: err });
+
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("anna@test.pl");
+    expect(raw).not.toContain("123456789");
+    const entry = JSON.parse(raw);
+    expect(entry.stack_trace).toMatch(/params: \[redacted\]\n\s+at /);
+    expect(entry.stack_trace).toBe(entry.error.stack);
+  });
+
+  it("bez stosu w kontekście → brak stack_trace i brak @type", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.error("Padlo", { route: "/api/x", error: "tekst bledu", meta: { a: 1 } });
+    logger.error("Padlo bez kontekstu");
+
+    for (const call of errorSpy.mock.calls) {
+      const entry = JSON.parse(call[0] as string);
+      expect(entry).not.toHaveProperty("stack_trace");
+      expect(entry).not.toHaveProperty("@type");
+    }
+  });
+
+  it("Error bez stosu (stack usunięty) → brak stack_trace", async () => {
+    const logger = await importLoggerWithEnv("production");
+    const err = new Error("boom");
+    delete (err as { stack?: string }).stack;
+    logger.error("Padlo", { error: err });
+
+    expect(lastEntry(errorSpy)).not.toHaveProperty("stack_trace");
+  });
+
+  it("poziom warn (i info) ze stosem w kontekście → brak stack_trace", async () => {
+    const logger = await importLoggerWithEnv("production");
+    const err = new Error("boom");
+    logger.warn("Uwaga", { error: err });
+    logger.info("Info", { error: err });
+
+    expect(lastEntry(warnSpy)).not.toHaveProperty("stack_trace");
+    expect(lastEntry(logSpy)).not.toHaveProperty("stack_trace");
+    expect(typeof lastEntry(warnSpy).error.stack).toBe("string");
+  });
+
+  it("tylko pierwszy stos wg kolejności kluczy; stos niebędący napisem i stos głębiej niż pierwszy poziom pomijane", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.error("Padlo", { a: { stack: 5 }, first: { stack: "S1" }, error: { stack: "S2" } });
+    expect(lastEntry(errorSpy).stack_trace).toBe("S1");
+
+    logger.error("Padlo", { wrapper: { error: { stack: "GLEBOKO" } } });
+    expect(lastEntry(errorSpy)).not.toHaveProperty("stack_trace");
+  });
+
+  it("kontekst z kluczami severity/message/level/msg/timestamp/stack_trace nie nadpisuje pól wpisu", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("Prawdziwa", {
+      severity: "EMERGENCY",
+      message: "falszywa",
+      level: "error",
+      msg: "falszywa",
+      timestamp: "1970-01-01",
+      stack_trace: "falszywy stos",
+      route: "/api/x",
+    });
+
+    const entry = lastEntry(logSpy);
+    expect(entry).toMatchObject({
+      level: "info",
+      severity: "INFO",
+      msg: "Prawdziwa",
+      message: "Prawdziwa",
+      route: "/api/x",
+    });
+    expect(entry.timestamp).not.toBe("1970-01-01");
+    expect(entry).not.toHaveProperty("stack_trace");
+
+    const err = new Error("boom");
+    logger.error("Padlo", { stack_trace: "falszywy stos", error: err });
+    expect(lastEntry(errorSpy).stack_trace).toBe(err.stack);
+  });
+
+  it("wpis zastępczy: severity i message, kontekst ich nie nadpisuje, bez stack_trace", async () => {
+    class Wezel {
+      self: Wezel;
+      constructor() {
+        this.self = this;
+      }
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.error("Padlo", {
+      severity: "DEBUG",
+      message: "falszywa",
+      stack_trace: "falszywy stos",
+      error: new Error("boom"),
+      node: new Wezel(),
+    });
+    logger.debug("Debug", { node: new Wezel() });
+
+    const errorEntry = lastEntry(errorSpy);
+    expect(errorEntry).toMatchObject({
+      severity: "ERROR",
+      msg: "Padlo",
+      message: "Padlo",
+      contextError: "unserializable",
+    });
+    expect(errorEntry).not.toHaveProperty("stack_trace");
+    expect(lastEntry(logSpy)).toMatchObject({ severity: "DEBUG", message: "Debug", contextError: "unserializable" });
   });
 });
 
@@ -589,20 +755,26 @@ describe("logger — wartości nieserializowalne w kontekście (produkcja)", () 
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(JSON.parse(errorSpy.mock.calls[0]![0] as string)).toEqual({
       level: "error",
+      severity: "ERROR",
       msg: "Padlo",
+      message: "Padlo",
       timestamp: expect.any(String),
       route: "/api/x",
       contextError: "unserializable",
     });
     expect(JSON.parse(warnSpy.mock.calls[0]![0] as string)).toEqual({
       level: "warn",
+      severity: "WARNING",
       msg: "Uwaga",
+      message: "Uwaga",
       timestamp: expect.any(String),
       contextError: "unserializable",
     });
     expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toEqual({
       level: "info",
+      severity: "INFO",
       msg: "Info",
+      message: "Info",
       timestamp: expect.any(String),
       contextError: "unserializable",
     });
@@ -714,7 +886,9 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
 
     expect(JSON.parse(errorSpy.mock.calls[0]![0] as string)).toEqual({
       level: "error",
+      severity: "ERROR",
       msg: "Padlo",
+      message: "Padlo",
       timestamp: expect.any(String),
       route: "/api/x",
       attempt: 2,
@@ -756,7 +930,9 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     expect(raw).not.toContain("getter-tekst");
     expect(JSON.parse(raw)).toEqual({
       level: "error",
+      severity: "ERROR",
       msg: "Padlo",
+      message: "Padlo",
       timestamp: expect.any(String),
       contextError: "unserializable",
     });
@@ -804,7 +980,9 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     expect(raw).not.toContain("getter-tekst");
     expect(JSON.parse(raw)).toEqual({
       level: "error",
+      severity: "ERROR",
       msg: "Padlo",
+      message: "Padlo",
       timestamp: expect.any(String),
       contextError: "unserializable",
     });
@@ -820,7 +998,9 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     expect(raw).not.toContain("getter-tekst");
     expect(JSON.parse(raw)).toEqual({
       level: "error",
+      severity: "ERROR",
       msg: "[unserializable]",
+      message: "[unserializable]",
       timestamp: expect.any(String),
       contextError: "unserializable",
     });

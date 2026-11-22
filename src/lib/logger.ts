@@ -182,10 +182,40 @@ function logReplacer(this: unknown, key: string, value: unknown): unknown {
 }
 
 /**
+ * Ważność wpisu w Google Cloud Logging. Bez pola `severity` każdy wpis ma
+ * ważność DEFAULT, więc filtry i alerty `severity>=ERROR` go nie widzą.
+ */
+const CLOUD_LOGGING_SEVERITY: Record<LogLevel, string> = {
+  debug: "DEBUG",
+  info: "INFO",
+  warn: "WARNING",
+  error: "ERROR",
+};
+
+/**
+ * Pierwszy stos (pole `stack` będące napisem) w obiekcie na pierwszym
+ * poziomie ZREDAGOWANEGO kontekstu — typowo `{ error: toSafeErrorMeta(err) }`.
+ * Error Reporting czyta stos tylko z pól najwyższego poziomu wpisu, a
+ * zagnieżdżony `error.stack` pomija. Zwracana jest wartość po redakcji, nie
+ * surowy `err.stack`, więc maskowanie obejmuje ją tak samo jak kontekst.
+ */
+function findStackTrace(context: LogContext | undefined): string | undefined {
+  if (!context) return undefined;
+  for (const value of Object.values(context)) {
+    if (isPlainObject(value) && typeof value.stack === "string") return value.stack;
+  }
+  return undefined;
+}
+
+/**
  * Format and output a log entry.
  *
  * In production, emits a single-line JSON object so log aggregation services
  * can parse structured fields (level, msg, timestamp, and any extra context).
+ * Pola rozumiane przez Google Cloud Logging / Error Reporting: `severity`,
+ * `message` (ta sama treść co `msg`) i — przy poziomie `error` — `stack_trace`.
+ * Pola wpisu są wpisywane po rozwinięciu kontekstu, więc kontekst ich nie
+ * nadpisze; `stack_trace` z kontekstu nie trafia do wpisu (ustawia go tylko logger).
  *
  * In development, uses a human-readable format with a [LEVEL] prefix and
  * optional context printed as a plain object for readability in the terminal.
@@ -205,21 +235,27 @@ function formatLog(level: LogLevel, message: string, context?: LogContext) {
 
   if (isProduction) {
     const timestamp = new Date().toISOString();
+    const severity = CLOUD_LOGGING_SEVERITY[level];
 
     let json: string;
     try {
+      // `undefined` znika przy serializacji — bez stosu wpis nie ma `stack_trace`.
       const entry = {
-        level,
-        msg: message,
-        timestamp,
         ...normalizedContext,
+        level,
+        severity,
+        msg: message,
+        message,
+        timestamp,
+        stack_trace: level === "error" ? findStackTrace(normalizedContext) : undefined,
       };
       json = JSON.stringify(entry, logReplacer);
     } catch {
       // Kontekst nieserializowalny (np. cykl w obiekcie niebędącym zwykłym
       // obiektem): wpis zastępczy z polami prostymi pierwszego poziomu
       // kontekstu (napis, liczba, boolean), bez obiektów, tablic i treści
-      // wyjątku; level, msg i timestamp wpisu wygrywają z polami kontekstu.
+      // wyjątku; level, severity, msg, message i timestamp wpisu wygrywają
+      // z polami kontekstu, bez `stack_trace`.
       // Gdy i on rzuci (np. getter rzucający wyjątek w kontekście niebędącym
       // zwykłym obiektem) — wpis ostateczny z samych napisów, bez kontekstu.
       try {
@@ -229,13 +265,25 @@ function formatLog(level: LogLevel, message: string, context?: LogContext) {
           ),
         );
         json = JSON.stringify(
-          { ...simpleFields, level, msg: message, timestamp, contextError: "unserializable" },
+          {
+            ...simpleFields,
+            level,
+            severity,
+            msg: message,
+            message,
+            timestamp,
+            stack_trace: undefined,
+            contextError: "unserializable",
+          },
           logReplacer,
         );
       } catch {
+        const safeMessage = typeof message === "string" ? message : "[unserializable]";
         json = JSON.stringify({
           level,
-          msg: typeof message === "string" ? message : "[unserializable]",
+          severity,
+          msg: safeMessage,
+          message: safeMessage,
           timestamp,
           contextError: "unserializable",
         });
