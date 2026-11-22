@@ -24,9 +24,13 @@ import {
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { TRIAL_DAYS } from "@/lib/constants";
+import { isPlanPurchaseOpen } from "@/lib/features";
 import { SOLD_PLAN_SLUG } from "@/lib/plan-catalog";
 import { featuresFor } from "@/lib/plan-features";
-import { planPriceText } from "@/lib/plan-price";
+import { planGrossText, planPriceText } from "@/lib/plan-price";
+
+/** Adres, pod który zalogowany salon pisze w sprawie dalszego dostępu, gdy zakup jest zamknięty. */
+const CONTACT_EMAIL = "kontakt@nordsignal.cc";
 
 type Plan = {
   id: string;
@@ -110,6 +114,11 @@ export default function PricingPage() {
   );
 
   const soldPlan = plans.find((p) => p.slug === SOLD_PLAN_SLUG);
+  const purchaseOpen = isPlanPurchaseOpen();
+  const isLoggedIn = Boolean(session?.user);
+  // Niezalogowany zawsze widzi przycisk rejestracji (prowadzi do okresu próbnego);
+  // zalogowany widzi przycisk zakupu tylko przy otwartym zakupie.
+  const showCheckoutButton = !isLoggedIn || purchaseOpen;
 
   if (loading) {
     return (
@@ -150,7 +159,7 @@ export default function PricingPage() {
             Cennik
           </Badge>
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            Jeden plan. Wszystkie funkcje w cenie, bez ukrytych kosztów.
+            Jeden plan. Wszystko z listy poniżej w cenie, bez ukrytych kosztów.
           </h1>
         </div>
 
@@ -173,8 +182,10 @@ export default function PricingPage() {
                   </span>
                   <span className="text-lg text-muted-foreground"> / mies.</span>
                 </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Rozliczenie miesiecznie przez Stripe
+                <p className="text-sm text-muted-foreground mt-1" data-testid="plan-billing-note">
+                  {purchaseOpen
+                    ? `Płatność kartą co miesiąc, ${planGrossText(soldPlan.priceMonthly)}.`
+                    : "Zakup planu nie jest jeszcze dostępny. Nie pobieramy żadnych opłat."}
                 </p>
               </div>
 
@@ -188,25 +199,35 @@ export default function PricingPage() {
               </div>
 
               <div className="mt-8">
-                <Button
-                  className="w-full"
-                  size="lg"
-                  disabled={checkoutLoading !== null}
-                  onClick={() => handleCheckout(SOLD_PLAN_SLUG)}
-                >
-                  {checkoutLoading === SOLD_PLAN_SLUG ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Przetwarzanie...
-                    </>
-                  ) : (
-                    <>
-                      {session?.user ? "Wykup subskrypcje" : "Zacznij za darmo"}
-                      <ArrowRight className="h-4 w-4 ml-2" />
-                    </>
-                  )}
-                </Button>
-                {!session?.user && (
+                {showCheckoutButton ? (
+                  <Button
+                    className="w-full"
+                    size="lg"
+                    disabled={checkoutLoading !== null}
+                    onClick={() => handleCheckout(SOLD_PLAN_SLUG)}
+                  >
+                    {checkoutLoading === SOLD_PLAN_SLUG ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Przetwarzanie...
+                      </>
+                    ) : (
+                      <>
+                        {isLoggedIn ? "Wykup subskrypcję" : "Zacznij za darmo"}
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <p className="text-sm text-center text-muted-foreground" data-testid="plan-purchase-closed">
+                    W sprawie dalszego dostępu napisz na{" "}
+                    <a href={`mailto:${CONTACT_EMAIL}`} className="underline">
+                      {CONTACT_EMAIL}
+                    </a>
+                    .
+                  </p>
+                )}
+                {!isLoggedIn && (
                   <p className="text-xs text-center text-muted-foreground mt-2">
                     14 dni okresu probnego bez zobowiazan
                   </p>
@@ -241,21 +262,23 @@ export default function PricingPage() {
             Gotowy, zeby zaczac?
           </h2>
           <p className="text-muted-foreground max-w-lg mx-auto">
-            Dolacz do grona salonow korzystajacych z MyHelper. Zacznij z
-            {TRIAL_DAYS}-dniowym okresem probnym - bez zobowiazan.
+            Sprawdź MyHelper w swoim salonie. Zacznij z{" "}
+            {TRIAL_DAYS}-dniowym okresem próbnym — bez zobowiązań.
           </p>
-          <div className="flex items-center justify-center gap-4">
-            <Button
-              size="lg"
-              disabled={checkoutLoading !== null}
-              onClick={() => handleCheckout(SOLD_PLAN_SLUG)}
-            >
-              {checkoutLoading === SOLD_PLAN_SLUG ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : null}
-              {session?.user ? "Wykup subskrypcje" : `Zacznij ${TRIAL_DAYS} dni za darmo`}
-            </Button>
-          </div>
+          {showCheckoutButton && (
+            <div className="flex items-center justify-center gap-4">
+              <Button
+                size="lg"
+                disabled={checkoutLoading !== null}
+                onClick={() => handleCheckout(SOLD_PLAN_SLUG)}
+              >
+                {checkoutLoading === SOLD_PLAN_SLUG ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : null}
+                {isLoggedIn ? "Wykup subskrypcję" : `Zacznij ${TRIAL_DAYS} dni za darmo`}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

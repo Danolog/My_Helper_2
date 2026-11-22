@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { planPriceText } from "@/lib/plan-price";
 import type { Plan } from "../_hooks/use-registration";
 
 interface StepAccountDetailsProps {
@@ -100,7 +101,7 @@ export function StepAccountDetails({
               Plan {selectedPlanData.name}
             </span>
             <span className="text-xs text-muted-foreground">
-              {parseFloat(selectedPlanData.priceMonthly).toFixed(0)} PLN/mies.
+              {planPriceText(selectedPlanData.priceMonthly)} / mies.
             </span>
           </button>
         )}

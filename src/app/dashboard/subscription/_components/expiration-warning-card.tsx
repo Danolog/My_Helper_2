@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { planGrossText, planPriceText } from "@/lib/plan-price";
 import { formatDate } from "../_types";
 import type { SubscriptionData, ExpirationData } from "../_types";
 
@@ -101,7 +102,7 @@ export function ExpirationWarningCard({
             <span className="text-muted-foreground">Kwota odnowienia</span>
             <span className="font-medium">
               {expirationData.renewalAmount
-                ? `${parseFloat(expirationData.renewalAmount).toFixed(2)} PLN`
+                ? `${planGrossText(expirationData.renewalAmount)} (${planPriceText(expirationData.renewalAmount)})`
                 : "-"}
             </span>
           </div>
@@ -144,7 +145,7 @@ function NearExpiryBanner({ expirationData }: NearExpiryBannerProps) {
           przerwy w dostepie do uslug. Kwota odnowienia:{" "}
           <span className="font-semibold">
             {expirationData.renewalAmount
-              ? `${parseFloat(expirationData.renewalAmount).toFixed(2)} PLN`
+              ? planGrossText(expirationData.renewalAmount)
               : "-"}
           </span>
           .

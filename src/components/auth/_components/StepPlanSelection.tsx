@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { TRIAL_DAYS } from "@/lib/constants";
 import { PLAN_SUMMARY } from "@/lib/plan-features";
+import { planPriceText } from "@/lib/plan-price";
 import type { Plan } from "../_hooks/use-registration";
 
 interface StepPlanSelectionProps {
@@ -111,10 +112,10 @@ export function StepPlanSelection({
                     <div className="mb-4">
                       <div className="flex items-baseline gap-1">
                         <span className="text-3xl font-bold">
-                          {parseFloat(basicPlan.priceMonthly).toFixed(0)}
+                          {planPriceText(basicPlan.priceMonthly)}
                         </span>
                         <span className="text-muted-foreground">
-                          PLN / mies.
+                          / mies.
                         </span>
                       </div>
                     </div>

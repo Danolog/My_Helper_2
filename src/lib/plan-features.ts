@@ -79,7 +79,7 @@ export const PRO_INCLUDES_BASIC: string = PLAN_FEATURES.pro[0];
 
 /** Jednozdaniowe opisy planów (karty planów na stronie sprzedażowej i w cenniku). */
 export const PLAN_SUMMARY = {
-  basic: "Pełne zarządzanie salonem bez narzędzi AI. Idealny na start.",
+  basic: "Pełne zarządzanie salonem w jednym planie.",
   pro: "Wszystko z planu Basic oraz asystent AI: analiza danych salonu, rekomendacje i opisy usług.",
 } as const satisfies Record<PlanSlug, string>;
 

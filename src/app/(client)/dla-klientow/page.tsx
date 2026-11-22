@@ -173,7 +173,7 @@ export default function DlaKlientowPage() {
                 Popularne salony
               </h2>
               <p className="text-muted-foreground text-lg font-light">
-                Odkryj najlepsze salony w Twojej okolicy.
+                Zobacz salony dostępne w MyHelper.
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">

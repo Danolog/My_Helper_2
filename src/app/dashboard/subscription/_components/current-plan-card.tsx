@@ -39,6 +39,7 @@ import {
   statusColor,
   statusLabel,
 } from "../_types";
+import { planPriceText } from "@/lib/plan-price";
 import { PlanActions } from "./plan-actions";
 import { TrialNotice } from "./trial-notice";
 import type {
@@ -100,7 +101,7 @@ export function CurrentPlanCard({
             <div>
               <CardTitle className="text-xl">Plan {plan.name}</CardTitle>
               <CardDescription>
-                {parseFloat(plan.priceMonthly).toFixed(0)} PLN / miesiac
+                {planPriceText(plan.priceMonthly)} / miesiąc
               </CardDescription>
             </div>
           </div>
@@ -144,7 +145,7 @@ export function CurrentPlanCard({
                   : "Kwota"}
               </p>
               <p className="text-sm text-muted-foreground">
-                {parseFloat(plan.priceMonthly).toFixed(2)} PLN / mies.
+                {planPriceText(plan.priceMonthly)} / mies.
               </p>
             </div>
           </div>

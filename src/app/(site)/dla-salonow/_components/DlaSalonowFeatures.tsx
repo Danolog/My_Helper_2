@@ -5,7 +5,6 @@ import {
   Calendar,
   Users,
   BarChart3,
-  Bot,
   Shield,
   Heart,
   Sparkles,
@@ -22,7 +21,7 @@ import { cn } from "@/lib/utils";
 const FEATURES = [
   {
     icon: Calendar,
-    title: "Inteligentny kalendarz",
+    title: "Kalendarz i grafiki",
     description: "Zarzadzaj wizytami, grafikami pracownikow i dostepnoscia w jednym miejscu.",
     color: "rose" as const,
   },
@@ -35,14 +34,8 @@ const FEATURES = [
   {
     icon: BarChart3,
     title: "Raporty i analityka",
-    description: "Sledzenie przychodow, popularnosci uslug i efektywnosci pracownikow.",
+    description: "Śledzenie przychodów, popularności usług i popularności pracowników.",
     color: "gold" as const,
-  },
-  {
-    icon: Bot,
-    title: "Asystent AI",
-    description: "Inteligentne rekomendacje, analiza biznesowa i opisy usług pisane przez AI.",
-    color: "rose" as const,
   },
   {
     icon: Shield,
@@ -82,14 +75,13 @@ export function DlaSalonowFeatures() {
         >
           <Badge variant="outline" className="text-sm px-5 py-2 mb-6 border-primary/20 text-primary">
             <Sparkles className="h-4 w-4 mr-2" />
-            Ekskluzywne Funkcje
+            Funkcje
           </Badge>
           <h2 id="features-heading" className="font-[family-name:var(--font-playfair)] text-4xl md:text-6xl font-bold tracking-tight mb-6">
             Wszystko czego potrzebujesz
           </h2>
           <p className="text-muted-foreground max-w-2xl mx-auto text-xl font-light">
-            Kompleksowe narzędzie do zarządzania luksusowym salonem —
-            od intuicyjnych rezerwacji po zaawansowaną analitykę i AI.
+            Narzędzie do prowadzenia salonu — od rezerwacji online po raporty przychodu.
           </p>
         </motion.div>
       </div>

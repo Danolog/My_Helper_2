@@ -17,6 +17,14 @@ import type {
   SubscriptionData,
 } from "@/app/dashboard/subscription/_types";
 
+// Testy ponownego zakupu zakładają otwarty zakup planu; stan zamknięty sprawdza osobny test niżej.
+const purchase = vi.hoisted(() => ({ open: true }));
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return { ...actual, isPlanPurchaseOpen: () => purchase.open };
+});
+
 vi.mock("next/link", () => ({
   default: ({
     children,
@@ -115,6 +123,7 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  purchase.open = true;
   // Only Date is faked, so user-event timers keep working.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
@@ -148,6 +157,13 @@ describe("karta planu: ponowny zakup a stan dostępu", () => {
         "Anulowano: 10 listopada 2026. Dostep do funkcji planu jest aktywny do 19 grudnia 2026. Mozesz w kazdej chwili ponownie aktywowac plan.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("zakup planu zamknięty: canceled z pełnym dostępem bez terminu odmowy nie dostaje linku „Aktywuj ponownie”", () => {
+    purchase.open = false;
+    renderCard(subscription({ stripeSubscriptionId: null }), access({}), null);
+
+    expect(reactivateLink()).toBeNull();
   });
 
   it("canceled po terminie (tylko odczyt) z prawdziwą subskrypcją Stripe, bez terminu odmowy z serwera: link „Aktywuj ponownie” jest", () => {

@@ -94,7 +94,7 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
       await expect(page.getByText('Aktywna', { exact: true })).toBeVisible();
       await expect(page.getByText(/Okres probny/)).toHaveCount(0);
       await expect(page.getByText('Koniec okresu probnego', { exact: true })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Wykup subskrypcje', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Wykup subskrypcję', exact: true })).toHaveCount(0);
     });
 
     test('should show next payment label without a date when period has no dates', { tag: '@full' }, async ({ page }) => {
@@ -137,7 +137,7 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
       await expect(page.getByText('Brak aktywnej subskrypcji', { exact: true })).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'Wybierz plan', exact: true })).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'Aktywuj ponownie', exact: true })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Wykup subskrypcje', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Wykup subskrypcję', exact: true })).toHaveCount(0);
       await expect(page.locator('body')).not.toContainText(/Internal Server Error|unexpected/i);
     });
   });

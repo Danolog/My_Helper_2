@@ -20,9 +20,9 @@ export default async function ClientRegistrationPage() {
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle>Create a client account</CardTitle>
+          <CardTitle>Załóż konto klienta</CardTitle>
           <CardDescription>
-            Register to book appointments, browse salons, and manage your visits
+            Rezerwuj wizyty, przeglądaj salony i zarządzaj swoimi wizytami.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center">

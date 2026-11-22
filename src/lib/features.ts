@@ -217,6 +217,25 @@ export function isBlikDepositFlow(): boolean {
 }
 
 /**
+ * Czy salon może kupić plan. Zakup planu jest zamknięty do uruchomienia
+ * płatności: dopóki funkcja zwraca false, cennik i panel subskrypcji nie
+ * pokazują przycisku zakupu i mówią wprost, że zakupu jeszcze nie ma.
+ * Przełącza tylko interfejs; trasa zakupu zostaje bez zmian.
+ */
+export function isPlanPurchaseOpen(): boolean {
+  return false;
+}
+
+/**
+ * Czy dokumenty prawne (polityka prywatności, regulamin, kontakt) są
+ * opublikowane. Jedna flaga dla wszystkich tych stron i odnośników do nich:
+ * dopóki zwraca false, stopka nie linkuje do stron, których jeszcze nie ma.
+ */
+export function areLegalDocsPublished(): boolean {
+  return false;
+}
+
+/**
  * Informacja w Ustawienia → Moduły o funkcjach, których salon mógł używać
  * przed zamrożeniem, i o tym, co dzieje się z jego danymi. Żeby ją zdjąć,
  * wystarczy ustawić `null` — strona jej wtedy nie pokazuje.
