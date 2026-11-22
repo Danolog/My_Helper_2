@@ -1191,7 +1191,9 @@ wiersz spoza wzorca, stop, log lokalnie (`:71-72`); 6 → schemat różny;
 **Kiedy.** W wariancie bez kopii (plan 1.4): salon testowy z co najmniej
 jednym klientem i jedną wizytą powstaje po 2.9 (albo wcześniej, przez LB pod `app.nordsignal.cc` z
 mapowaniem na `<LB_IP>` — nie na adresie `run.app`, zob.
-`runbook-zatrzymanie-zapisow.md`, skutki `BETTER_AUTH_URL`); 2.8 idzie zaraz po nim, **przed** pierwszym prawdziwym
+`runbook-zatrzymanie-zapisow.md`, skutki `BETTER_AUTH_URL`; przy pierwszym
+logowaniu na ten salon kontrola originu: tamże, sekcja 3, „Kontrola originu
+logowania”); 2.8 idzie zaraz po nim, **przed** pierwszym prawdziwym
 salonem. Wiersz „0 → 2.9” w tabeli niżej w tym wariancie nie dotyczy:
 kod 0 = koniec okna (akapit wariantu w 2.9). W wariancie z kopią: po 2.7 z `count_salons` > 0. Na
 pustej bazie wynik 0/0/0 nic nie dowodzi. Jedna transakcja tylko do odczytu
