@@ -404,3 +404,60 @@ rozstrzygnięcia przy przepisaniu: kolejność cofnięcia K1 względem usunięci
 rekordu `app` (użytkownicy na `app.nordsignal.cc` po usunięciu dostają błąd
 nazwy), zakaz scaleń na czas okna powrotu i wiersz 1.2 „okno powrotu” dla
 wdrożenia cofającego K1.
+
+## 7. Po oknie — porządki w kodzie
+
+Zmiany w kodzie, które czekają na okno, okres powrotu albo odłączenie
+Vercela. **Żadna nie wchodzi w dniu okna** (L7: zakaz scaleń; P14: jedyny
+wyzwalacz wdrożenia to `workflow_dispatch`). Każde scalenie po próbie
+generalnej zmienia sha z 1.7 (nowa próba albo decyzja przed oknem), a po
+przebiegu P5 wymaga też P5 od nowa.
+
+„Koniec okresu powrotu” = decyzja o jego zakończeniu (runbook przełączenia
+bazy, 3.1), najwcześniej D+14, razem z usunięciem kopii `pre-import`. 0.13
+(odłączenie Vercela, wyłączenie Neona) nie następuje przed tym zdarzeniem:
+wcześniej znika cel powrotu.
+
+Kolejność:
+
+1. **Po K1:** e2e po wdrożeniu bez Vercela. Od K1 do scalenia tej zmiany
+   każde scalenie wdraża Vercel Production, a `e2e-production.yml` (gałąź
+   `deployment_status`) biegnie na adresie z przekierowaniem i zaporą. Wynik
+   tego przebiegu nie jest bramką okna. Powrót na Vercela (sekcja 6) =
+   cofnięcie tej zmiany; sekret `BETTER_AUTH_BASE_URL_PROD` zostaje do 0.13.
+2. **Po końcu okresu powrotu:**
+   - usunięcie klucza `crons` z `vercel.json` (L2: osobny krok porządkowy po
+     oknie). Powrót na Vercela (sekcja 6) wymaga cronów Vercela, więc nie
+     wcześniej. Plik zostaje: bez niego Vercel wdraża każdą gałąź i buduje z
+     migracjami. Zachować `redirects` z K1;
+   - pliki z Vercel Blob nie są przenoszone. Przesłanka: F8 = „nie” w notatce
+     okna (na produkcji tylko konta testowe); F8 = „tak” otwiera tę decyzję
+     ponownie. Bramka: odczyt w Cloud SQL wszystkich kolumn tekstowych i
+     `jsonb` schematu `public` pod kątem `.public.blob.vercel-storage.com`,
+     zapytaniem generowanym z katalogu (nie z ręcznej listy kolumn). Wynik
+     > 0 = zapis na produkcji pod bramką (j) z 0.5 razem z usuwaniem danych
+     testowych: wyzerowanie pól, a przy kolumnach NOT NULL usunięcie wierszy.
+     Wykonuje recenzent techniczny bazy;
+   - po bramce: usunięcie źródła Vercel Blob w 2–3 PR-ach — pakiet
+     `@vercel/blob` (`src/lib/storage.ts`), źródło w `src/lib/upload-url.ts`,
+     wpis w `images.remotePatterns` (`next.config.ts`), `BLOB_STORE_ID` w
+     `infra/gcp/env-manifest.json` i `.github/workflows/deploy-cloud-run.yml`.
+     Wpis w `next.config.ts` nie wcześniej niż bramka, inaczej stare obrazy
+     przestaną się ładować.
+3. **Po końcu okresu powrotu, przed 0.13:** decyzja właściciela o wdrożeniu
+   automatycznym po zielonym quality-gate. Wymaga zmiany warunku tożsamości
+   wdrożeniowej (`infra/gcp/bootstrap.sh`: `event_name == 'workflow_dispatch'`
+   i `actor_id` właściciela) oraz wymaganego recenzenta środowiska
+   `production-gcp`. Migracje zostają ręczne.
+4. **W 0.13, po odłączeniu projektu Vercel od repo:** `output: 'standalone'`
+   bez warunku `BUILD_STANDALONE` w `next.config.ts` (warunek służy też CI:
+   serwer E2E startuje przez `pnpm start`) — razem ze strażnikiem G-C1 i
+   sprawdzeniem startu serwera E2E; usunięcie `vercel.json`; usunięcie sekretu
+   `BETTER_AUTH_BASE_URL_PROD` (właściciel).
+5. **Po `--resume` Schedulera:** `CRON_SECRET` jako wymagany we wdrożeniu,
+   osobny PR w pełnym procesie, razem z alertem na nieudane przebiegi zadań
+   Schedulera. Nie zastępuje odczytu wyników zadań w procedurze okna.
+
+Dług bez terminu okna: numer projektu GCP wpisany na sztywno
+(`infra/gcp/scheduler.sh`, `e2e-production.yml`) — do przeniesienia przy
+zmianie projektu GCP.

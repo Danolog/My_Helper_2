@@ -319,8 +319,8 @@ Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To sz
 | 0.4 | Cloud SQL Postgres 18 w `europe-central2` (pgvector, kopie automatyczne, PITR, połączenie przez Cloud SQL connector), osobna baza produkcyjna; lokalnie Docker | M | Darek + agent |
 | 0.5 | Przeniesienie danych Neon → Cloud SQL (zrzut i odtworzenie, role RLS/BYPASSRLS, weryfikacja liczby wierszy), usunięcie danych testowych z produkcji. Działanie nieodwracalne na danych produkcyjnych — wykonuje Ethan (delegacja v1.26) pod bramką (j): zrzut Neon zachowany, zgodna liczba wierszy we wszystkich tabelach, role RLS/BYPASSRLS odtworzone, próbne odtworzenie kopii Cloud SQL — dopiero potem przełączenie ruchu | M | Ethan |
 | 0.6 | Cloud Run w `europe-central2`, pomiar TTFB przed i po (punkt odniesienia: 2,5–3,5 s na Vercelu) | S | agent |
-| 0.7 | Cloud Scheduler dla 6 cronów z `src/app/api/cron/` z `CRON_SECRET`; usunięcie `vercel.json` i `cron-scheduler.yml` | S | agent |
-| 0.8 | `@vercel/blob` → Cloud Storage w `src/lib/storage.ts`, przeniesienie istniejących plików; usunięcie `@vercel/analytics` | S | agent |
+| 0.7 | Cloud Scheduler dla 5 tras z `src/app/api/cron/` z `CRON_SECRET`; usunięcie `cron-scheduler.yml`; usunięcie klucza `crons` z `vercel.json` po okresie powrotu, cały plik w 0.13 (`docs/runbook-zatrzymanie-zapisow.md`, sekcja 7) | S | agent |
+| 0.8 | `@vercel/blob` → Cloud Storage w `src/lib/storage.ts`, bez przenoszenia istniejących plików (tylko konta testowe; bramka w `docs/runbook-zatrzymanie-zapisow.md`, sekcja 7); usunięcie `@vercel/analytics` | S | agent |
 | 0.9 | CI/CD: odblokowanie GitHub Actions (limit wydatków), wdrożenie na Cloud Run z `main` (Workload Identity Federation, bez kluczy JSON), `e2e-production.yml` przepięty z wdrożenia Vercela | M | Darek + agent |
 | 0.10 | Domena i DNS na Cloud Run, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, przekierowania OAuth Google i webhook Stripe na nowy adres | S | Darek |
 | 0.11 | Przegląd zmiennych według `ZADANIA_WLASCICIELA.md` (Resend, SMSAPI, Upstash, Stripe) przeniesionych do Secret Manager | M | Darek |
