@@ -88,6 +88,8 @@ grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/
 
 Przebieg z `--apply` jest idempotentny: ponowne uruchomienie etapu nie tworzy
 zasobów drugi raz (`state: exists`) i nie zmienia haseł bazy (sekcja 3.6).
+**Wyjątek: etapu `sql` nie uruchamiać ponownie** do czasu jego poprawki — tworzy
+login przez `gcloud sql users create`, czyli z `cloudsqlsuperuser` (sekcja 3.6).
 
 ## 2a. Cofanie etapu (sesja główna)
 
@@ -98,7 +100,7 @@ zasób powstał z błędną konfiguracją, której nie da się zmienić w miejsc
 | Etap | Cofnięcie | Pułapka |
 |---|---|---|
 | `run` | `gcloud --project=$P run services delete myhelper --region=$R` i `… run jobs delete myhelper-migrate --region=$R` | wiązania na zasobie znikają razem z nim — powtórzyć cały etap `run` |
-| `sql` | padło po utworzeniu instancji → **nie usuwać**, poprawić i powtórzyć etap (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji — starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
+| `sql` | padło po utworzeniu instancji → **nie usuwać**; powtórzenie etapu dopiero po jego poprawce (sekcja 3.6 — dziś tworzy login z `cloudsqlsuperuser`) (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji — starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
 | `sa` | `… remove-iam-policy-binding` dla każdego wiązania z sekcji 3.5 (sekrety, zasobnik, repo, actAs); konta (`iam service-accounts delete`) **dopiero na końcu** | usunięte konto zostawia w politykach wpisy `deleted:serviceAccount:…` — dlatego najpierw wiązania |
 | `secrets` | `… secrets delete NAZWA` | usuwa wszystkie wersje — tylko przed D-5 albo z kopią wartości u źródła |
 | `bucket` | najpierw `… storage buckets remove-iam-policy-binding gs://NAZWA --member=allUsers --role=roles/storage.legacyObjectReader`; zasobnik usuwać (`storage buckets delete`) tylko pusty | nazwy zasobników są globalne — usunięta może zostać zajęta przez kogoś innego |
@@ -164,11 +166,19 @@ Tworzy:
   publiczne IP **bez** autoryzowanych sieci (połączenia wyłącznie przez Cloud SQL
   Auth Proxy / wbudowany konektor Cloud Run);
 - bazę `myhelper`;
-- **jeden login** `myhelper_owner` (aplikacja i migracje; Oliver 19:44) z losowym
+- **jeden login** `myhelper_svc` (aplikacja i migracje; Oliver 19:44) z losowym
   hasłem `[A-Za-z0-9]{32}` i wersję sekretu `postgres-url`:
-  `postgresql://myhelper_owner:<HASŁO>@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg`
-  (bez `sslmode` — szyfruje konektor). Drugi login (osobny dla migracji) to #131
-  (P3, przed pierwszym płacącym salonem) — bootstrap go nie przewiduje;
+  `postgresql://myhelper_svc:<HASŁO>@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg`
+  (bez `sslmode` — szyfruje konektor). **Stan docelowy, wykonany poza
+  bootstrapem:** login utworzyła ręcznie SQL-em rola `postgres` (`CREATE ROLE …
+  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`), bo login
+  z `gcloud sql users create` dostaje członkostwo w `cloudsqlsuperuser` (m.in.
+  `CREATE ROLE`, `CREATE EXTENSION`, `pg_signal_backend`), którego na Cloud SQL
+  nie da się odebrać. Etap `sql` dziś tworzy login inaczej, przez `gcloud sql
+  users create` (akapity niżej), dlatego nie uruchamia się go ponownie. Prawa
+  potrzebne migracjom nadano jawnie: `CONNECT`, `TEMPORARY`, `CREATE` na bazie
+  i `USAGE`, `CREATE` na schemacie `public`. Drugi login (osobny dla migracji)
+  to #131 (P3, przed pierwszym płacącym salonem) — bootstrap go nie przewiduje;
 - losowe hasło wbudowanego `postgres` w osobnym sekrecie
   `postgres-admin-password` — spoza manifestu, bez dostępu runtime, niepodpięty
   do usługi ani joba; tylko do dostępu administracyjnego (sekcja 9);
@@ -201,7 +211,14 @@ jest traktowane jak „brak wersji” (Ethan, #134). Po utworzeniu instancji skr
 sprawdza `state`; baza, loginy i wiązania powstają tylko przy `RUNNABLE`, inaczej
 stop — powtórzyć etap później.
 
-Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005.
+Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005;
+`myhelper_svc` jest jej członkiem (`GRANT myhelper_app TO myhelper_svc`,
+wykonuje `postgres`), bo `forSalon` przełącza się na nią `SET LOCAL ROLE`.
+
+**Etapu `sql` nie uruchamia się ponownie** do czasu jego poprawki: dziś tworzy
+login przez `gcloud sql users create`, czyli z członkostwem
+w `cloudsqlsuperuser`, więc ponowny przebieg odtworzyłby stan sprzed zmiany
+loginu na `myhelper_svc`.
 
 Odczyt stanu po etapie:
 
@@ -218,7 +235,7 @@ gcloud --project=$P secrets versions list postgres-admin-password --format='valu
 Oczekiwane: `POSTGRES_18`, `ENTERPRISE`, `db-f1-micro`, `ZONAL`, `10`, `30`,
 kopie włączone z PITR i `retainedBackups: 7`, `location: europe-central2`, okno `day: 7 hour: 3`,
 `ENCRYPTED_ONLY`, brak `authorizedNetworks`, `deletionProtectionEnabled: true`;
-bazy zawierają `myhelper`; loginy: `myhelper_owner`, `postgres`; oba sekrety:
+bazy zawierają `myhelper`; loginy: `myhelper_svc`, `postgres`; oba sekrety:
 `1 ENABLED`.
 
 **Policy Troubleshooter po etapie `sql`** (W-1, Ryan): deploy ma
@@ -613,11 +630,12 @@ migracja z polityką dla nowej roli: rola w tej samej lub wcześniejszej migracj
 Po przebiegu z migracjami (przez Cloud SQL Auth Proxy, sekcja 9):
 
 ```sql
-SELECT rolname, rolcanlogin, rolbypassrls, rolsuper FROM pg_roles
- WHERE rolname IN ('myhelper_app', 'myhelper_owner');
+SELECT rolname, rolcanlogin, rolbypassrls, rolsuper,
+       pg_has_role(rolname, 'cloudsqlsuperuser', 'MEMBER') FROM pg_roles
+ WHERE rolname IN ('myhelper_app', 'myhelper_svc') ORDER BY rolname;
 ```
 
-Oczekiwane: `myhelper_app | f | f | f`, `myhelper_owner | t | f | f`.
+Oczekiwane: `myhelper_app | f | f | f | f`, `myhelper_svc | t | f | f | f`.
 
 **Migracje produkcyjne** idą wyłącznie przez workflow z `run_migrations=true`
 (kopia na żądanie przed migracją w `run-migrate.sh`) albo przez sesję główną.

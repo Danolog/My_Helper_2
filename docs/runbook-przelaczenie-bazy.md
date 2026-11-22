@@ -78,48 +78,79 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
    procedury nie startuje ani próba generalna, ani okno.** Ten runbook (2.1,
    2.9, wycofanie, 3.3) tylko się do niej odwołuje. Procedura:
    `docs/runbook-zatrzymanie-zapisow.md`.
-2. **Role Cloud SQL w stanie docelowym** — osobny krok wykonywany za zgodą
-   właściciela, z recenzją bezpieczeństwa, **przed** próbą generalną (żeby próba
-   sprawdziła stan docelowy; instancja próbna z 1.1 jest klonem z tym stanem):
-   - login aplikacji zostaje jeden: `myhelper_owner` (aplikacja i migracje,
-     `docs/runbook-krok-d.md:167-170`); pula połączeń musi być właścicielem
+2. **Role Cloud SQL w stanie docelowym** — stan sprawdzany **przed** próbą
+   generalną (żeby próba sprawdziła stan docelowy; instancja próbna z 1.1 jest
+   klonem z tym stanem):
+   - login aplikacji jest jeden: `myhelper_svc` (aplikacja i migracje,
+     `docs/runbook-krok-d.md:169-181`); pula połączeń musi być właścicielem
      tabel (kontrola roli puli), więc osobnego loginu puli nie tworzymy;
-   - jako `postgres` (`psql_csql_admin`, 1.6): odebranie loginowi aplikacji
-     członkostwa w `cloudsqlsuperuser` i nadanie praw tworzenia, bez których po
-     odebraniu członkostwa padłyby przyszłe migracje (schemat `public` należy
-     do `pg_database_owner`). `<baza Cloud SQL>` = ta sama baza co w blokach
-     skryptów (`docs/runbook-krok-d.md:166`):
-
-     ```sql
-     REVOKE cloudsqlsuperuser FROM myhelper_owner;
-     GRANT CREATE ON DATABASE <baza Cloud SQL> TO myhelper_owner;
-     GRANT CREATE ON SCHEMA public TO myhelper_owner;
-     ```
-
-   - jeśli `REVOKE` jest na Cloud SQL niedozwolony: stop, decyzja architektury
-     i bezpieczeństwa przed próbą. Wariantu zapasowego (nowy login + `REASSIGN
-     OWNED` + ponowne uprawnienia) nie wykonuje się w trybie awaryjnym;
+   - **zmiana loginu jest wykonana przed próbą** (osobny krok za zgodą
+     właściciela, z recenzją bezpieczeństwa, najpierw na klonie): odebranie
+     członkostwa w `cloudsqlsuperuser` loginowi utworzonemu przez
+     `gcloud sql users create` okazało się na Cloud SQL niewykonalne, więc
+     `postgres` utworzył SQL-em nowy login `myhelper_svc` (taki login nie
+     dostaje `cloudsqlsuperuser`), własność obiektów przeszła na niego przez
+     `REASSIGN OWNED`, a poprzedni login usunięto. Stan `myhelper_svc`: bez
+     superużytkownika, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` i członkostwa
+     w `cloudsqlsuperuser`; właściciel wszystkich obiektów w schematach
+     `public` i `drizzle`; członek `myhelper_app`; `CONNECT`, `TEMPORARY`,
+     `CREATE` na bazie oraz `USAGE`, `CREATE` na `public` (schemat `public`
+     należy do `pg_database_owner`, bez tych praw padłyby przyszłe migracje);
+     domyślne uprawnienia dla `myhelper_app` na tabelach i sekwencjach
+     w `public`. Sekret `postgres-url` ma jedną włączoną wersję, z loginem
+     `myhelper_svc`;
+   - **etapu `sql` w `infra/gcp/bootstrap.sh` nie uruchamia się ponownie** do
+     czasu jego poprawki: tworzy login przez `gcloud sql users create`, a taki
+     login dostaje `cloudsqlsuperuser`, więc ponowny przebieg odtworzyłby stan
+     sprzed zmiany;
+   - stan inny niż docelowy (kontrole w kroku 2 niżej): stop, decyzja
+     architektury i bezpieczeństwa przed próbą. Naprawy ról nie wykonuje się
+     w trybie awaryjnym;
    - **przebieg migracji idzie na instancji produkcyjnej**, nie na klonie: job
      `myhelper-migrate` działa jako `myhelper-runtime`
-     (`docs/runbook-krok-d.md:187-189`), a jego `roles/cloudsql.client` ma
+     (`docs/runbook-krok-d.md:197-199`), a jego `roles/cloudsql.client` ma
      warunek IAM ograniczony do instancji produkcyjnej
-     (`docs/runbook-krok-d.md:175-176`). Instancja produkcyjna przed oknem nie
+     (`docs/runbook-krok-d.md:185-186`). Instancja produkcyjna przed oknem nie
      ma danych, a kopia jest `--data-only` (`copy-neon-to-cloudsql.sh:12-13`),
      więc cel i tak potrzebuje schematu z migracji;
    - terminal jak w oknie: 1.7 → 1.5 (blok „Tylko w oknie” + tunel, port
      produkcyjny) → 1.6. Kolejność, każdy wynik w zapisie próby:
-     1. zmiana ról (blok SQL wyżej);
-     2. kontrole: 1.3 pkt 4 = `f | f | f` i właściciel tabel
-        (`psql_csql_admin`):
+     1. login z sekretu: 1.6 `owner_pw_format=yes` (wzorzec wycina hasło
+        tylko z URL-a loginu `myhelper_svc`) i `psql_csql_app`:
+
+        ```bash
+        set +x
+        psql_csql_app <<'SQL'
+        SELECT current_user;
+        SQL
+        ```
+
+        Oczekiwane: `myhelper_svc`. Inny wynik = stop, decyzja architektury
+        i bezpieczeństwa;
+     2. kontrole stanu docelowego: 1.3 pkt 4 = `f | f | f`, właściciel obiektów,
+        uprawnienia i domyślne uprawnienia loginu aplikacji (`psql_csql_admin`;
+        `has_*_privilege` z listą praw zwraca `t` przy którymkolwiek z nich,
+        dlatego każde prawo osobno):
 
         ```bash
         set +x
         psql_csql_admin <<'SQL'
-        SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner <> 'myhelper_owner';
+        SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public', 'drizzle') AND c.relowner <> 'myhelper_svc'::regrole;
+        SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public', 'drizzle') AND p.proowner <> 'myhelper_svc'::regrole;
+        SELECT count(*) FROM pg_namespace WHERE nspname = 'drizzle' AND nspowner <> 'myhelper_svc'::regrole;
+        SELECT rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = 'myhelper_svc';
+        SELECT pg_has_role('myhelper_svc', 'myhelper_app', 'MEMBER');
+        SELECT count(*) FROM pg_roles WHERE rolname = 'myhelper_owner';
+        SELECT has_database_privilege('myhelper_svc', current_database(), 'CONNECT'), has_database_privilege('myhelper_svc', current_database(), 'TEMPORARY'), has_database_privilege('myhelper_svc', current_database(), 'CREATE'), has_schema_privilege('myhelper_svc', 'public', 'USAGE'), has_schema_privilege('myhelper_svc', 'public', 'CREATE');
+        SELECT d.defaclobjtype::text || ':' || d.defaclacl::text FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace WHERE d.defaclrole = 'myhelper_svc'::regrole AND n.nspname = 'public' ORDER BY d.defaclobjtype;
         SQL
+        gcloud --project='<projekt GCP>' secrets versions list postgres-url --filter='state=ENABLED' --format='value(name)' | wc -l | tr -d ' '
         ```
 
-        Oczekiwane: `0`. Inny wynik = stop, decyzja architektury
+        Oczekiwane, po kolei: `0`; `0`; `0`; `f|f`; `t`; `0`; `t|t|t|t|t`;
+        dwa wiersze `S:{myhelper_app=rU/myhelper_svc}` i
+        `r:{myhelper_app=arwd/myhelper_svc}`; `1`. Do 1.1 trafia wynik każdego
+        wiersza z osobna. Inny wynik = stop, decyzja architektury
         i bezpieczeństwa;
      3. pustość: blok 2.3 (`compare.sh --expect-empty`) = `expect_empty=yes`,
         `exit=0`. Kod 5 = stop: jobu nie uruchamiamy, decyzja architektury
@@ -135,7 +166,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
         Oczekiwane: jeden wiersz `<ID> SUCCESSFUL pre-migrate-<RRRRMMDD>`; ID
         do zapisu próby. Kopia, którą workflow robi sam przed migracją (rola
-        `myhelperSqlBackup`, `docs/runbook-krok-d.md:177-180`), jej nie
+        `myhelperSqlBackup`, `docs/runbook-krok-d.md:187-190`), jej nie
         zastępuje. Inny wynik = stop, jobu nie uruchamiamy;
      5. przebieg workflow z migracjami (`run_migrations=true`) z `main` o tym
         samym sha co 1.7 i zapis próby; sha przebiegu do zapisu. Przebieg może
@@ -169,7 +200,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
    - zamrożenie i odmrożenie Cloud SQL (2.6, 2.10, 3.3) wykonuje `postgres`
      (członek właściciela bazy, więc ma `ALTER DATABASE`; usługa go nie
-     używa). `myhelper_owner` nie dostaje `pg_read_all_stats` ani
+     używa). `myhelper_svc` nie dostaje `pg_read_all_stats` ani
      `pg_signal_backend`.
 
 ### 1.1 Próba generalna
@@ -189,7 +220,7 @@ instancji produkcyjnej: przywrócenie kopii (1.1 pkt 4) nadpisuje **całą**
 instancję. Powstaje po 1.0 pkt 2 jako klon instancji produkcyjnej (ta sama
 wersja, role i hasła; danych produkcyjnych jeszcze nie ma). Przed próbą:
 koszt instancji próbnej (godziny tieru i dysk na czas próby) policzony
-i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:766-767`).
+i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:784-785`).
 W terminalu próby zmienna `CSQL_INSTANCE` ma wyłącznie nazwę instancji próbnej;
 nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu (blok
 „Tylko w oknie” z 1.5 w próbie się nie wkleja). Do potwierdzenia w próbie,
@@ -205,7 +236,7 @@ CSQL_INSTANCE='<instancja próbna>'
 
 Oczekiwane: `drill_instance_ok=yes`, klon kończy się bez błędu, opis
 `RUNNABLE POSTGRES_18 <tier instancji produkcyjnej>`
-(`docs/runbook-krok-d.md:160`). `drill_instance_ok=no` = stop. Tunel w próbie
+(`docs/runbook-krok-d.md:162`). `drill_instance_ok=no` = stop. Tunel w próbie
 (1.5) prowadzi do instancji próbnej, na `<port tunelu>` **innym** niż port
 z `docs/runbook-krok-d.md` sekcja 9, żeby żaden blok próby nie trafił w tunel
 produkcyjny.
@@ -305,7 +336,7 @@ W próbie generalnej muszą wyjść:
    i zmiennej obejścia nie ma (`copy-cloudsql-to-neon.sh:249`). **Bez tego
    zapisu okno powrotu (sekcja 3) nie startuje.**
 3. `freeze-neon.sh` na instancji próbnej przez tunel ze zmiennymi z 2.6
-   (`PG*` = `postgres`, `VERIFY_PG*` = `myhelper_owner`) daje `frozen=yes`.
+   (`PG*` = `postgres`, `VERIFY_PG*` = `myhelper_svc`) daje `frozen=yes`.
    Warunek: 1.3 pkt 3 dla `postgres` na Cloud SQL = `t | t` (inaczej błąd
    42501 — `freeze-neon.sh:33-36`). Inny wynik = stop i decyzja przed oknem.
 4. Kopia „przed importem” i przywrócenie z niej (bloki 2.4) na instancji
@@ -316,7 +347,7 @@ W próbie generalnej muszą wyjść:
    próby, po 3.3 kroku 11** (wcześniej przywrócenie opróżniłoby instancję
    przed pkt 1 i 2); instancja jest wtedy nadal zamrożona (3.3 krok 11). Po
    przywróceniu (`psql_csql_app`, 1.6 — każde
-   wywołanie to nowe połączenie jako `myhelper_owner`):
+   wywołanie to nowe połączenie jako `myhelper_svc`):
 
    ```bash
    set +x
@@ -381,7 +412,7 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 
 | Zgoda | Krok |
 |---|---|
-| przed próbą generalną, na instancji produkcyjnej Cloud SQL: zmiana ról (`REVOKE`/`GRANT`), kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis). Jeśli właściciel daje zgodę na zmianę ról i na przebieg osobno — dwa wiersze; jedna zgoda nie obejmuje drugiej | 1.0 pkt 2 |
+| przed próbą generalną, na instancji produkcyjnej Cloud SQL: kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis) | 1.0 pkt 2 |
 | przywrócenie z kopii `pre-migrate` po czerwonym jobie | 1.0 pkt 2 |
 | próba generalna na produkcji (procedura zatrzymania zapisów, L8): ingress Cloud Run `internal` i z powrotem `all`, pauza i wznowienie zadań Scheduler, przełącznik cronów Vercela wyłącz/włącz, reguła zapory Vercela na adresie jednego starszego wdrożenia (utworzenie, sprawdzenie, usunięcie) | 1.1; procedura zatrzymania zapisów L8 |
 | w próbie generalnej, zmiana konfiguracji konta Stripe w **trybie testowym**: zmiana adresu endpointu webhooka i ponowienie zdarzeń (bez trybu live) | procedura zatrzymania zapisów 0.3 |
@@ -414,7 +445,7 @@ Dlatego przed `freeze-neon.sh`:
      Preview bez produkcyjnego `POSTGRES_URL` albo bez działających wdrożeń
      na czas okna;
    - **ingress Cloud Run = `internal`** od 2.1 do 2.9. Dziś ingress to `all`
-     (`docs/runbook-krok-d.md:747-751`): adres `run.app` przyjmowałby zapisy do
+     (`docs/runbook-krok-d.md:765-769`): adres `run.app` przyjmowałby zapisy do
      Cloud SQL w trakcie 2.3–2.6, a wtedy `count_auth_rate_limit` > 0 na
      Cloud SQL i 2.7 stoi. To **główna kontrola** braku zapisów na Cloud SQL;
      zamrożenie w 2.6 jest obroną w głąb;
@@ -425,8 +456,8 @@ Dlatego przed `freeze-neon.sh`:
    podane jest, którym (adres i hasło).
 2. Rola logowania aplikacji (adres `VERIFY_PG*`) **nie** jest
    superużytkownikiem — na Neonie (`psql_neon_app`) i na Cloud SQL
-   (`psql_csql_app`; na Cloud SQL to `myhelper_owner`, jedyny login aplikacji,
-   `docs/runbook-krok-d.md:167`):
+   (`psql_csql_app`; na Cloud SQL to `myhelper_svc`, jedyny login aplikacji,
+   `docs/runbook-krok-d.md:169`):
 
    ```bash
    set +x
@@ -456,14 +487,14 @@ Dlatego przed `freeze-neon.sh`:
 
    Oczekiwane: `t|t` dwa razy. Inaczej stop (skrypt i tak odmówi: kod 1, baza
    bez zmian); na Cloud SQL — decyzja przed oknem.
-4. Atrybuty loginu aplikacji na Cloud SQL (`myhelper_owner`, pula połączeń
+4. Atrybuty loginu aplikacji na Cloud SQL (`myhelper_svc`, pula połączeń
    usługi): bez superużytkownika, bez `BYPASSRLS`, poza `cloudsqlsuperuser`
    (`MEMBER` sprawdza członkostwo przechodnio). Polecenie: `psql_csql_admin`:
 
    ```bash
    set +x
    psql_csql_admin <<'SQL'
-   SELECT r.rolsuper, r.rolbypassrls, pg_has_role(r.rolname, 'cloudsqlsuperuser', 'MEMBER') FROM pg_roles r WHERE r.rolname = 'myhelper_owner';
+   SELECT r.rolsuper, r.rolbypassrls, pg_has_role(r.rolname, 'cloudsqlsuperuser', 'MEMBER') FROM pg_roles r WHERE r.rolname = 'myhelper_svc';
    SQL
    ```
 
@@ -573,23 +604,24 @@ echo
 ```
 
 Hasła Cloud SQL są wyłącznie w Secret Managerze
-(`docs/runbook-krok-d.md:167-174`): `postgres-admin-password` (rola `postgres`)
-i `postgres-url` (URL loginu `myhelper_owner`, z którego wycinamy samo hasło).
+(`docs/runbook-krok-d.md:169-184`): `postgres-admin-password` (rola `postgres`)
+i `postgres-url` (URL loginu `myhelper_svc`, z którego wycinamy samo hasło).
 Odczyt do zmiennej, bez ekranu i bez lokalnego logu gcloud — ten sam wzorzec
-co `docs/runbook-krok-d.md:726`. `<projekt GCP>` = identyfikator projektu z
+co `docs/runbook-krok-d.md:744`. `<projekt GCP>` = identyfikator projektu z
 `docs/runbook-krok-d.md` sekcja 9 (nie zapisuje się go w notatce okna):
 
 ```bash
 set +x
 CSQL_ADMIN_PW="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=postgres-admin-password)"
-CSQL_OWNER_PW="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=postgres-url | sed -E 's|^postgresql://[^:/@]+:([^@]+)@.*$|\1|')"
+CSQL_OWNER_PW="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=postgres-url | sed -E 's|^postgresql://myhelper_svc:([^@]+)@.*$|\1|')"
 [[ -n "$CSQL_ADMIN_PW" ]] && echo admin_pw_set=yes || echo admin_pw_set=no
 [[ "$CSQL_OWNER_PW" =~ ^[A-Za-z0-9]{32}$ ]] && echo owner_pw_format=yes || echo owner_pw_format=no
 ```
 
 Oczekiwane: `neon_owner_pw_set=yes`, `neon_app_pw_set=yes`, `admin_pw_set=yes`,
 `owner_pw_format=yes` (hasło loginu ma postać `[A-Za-z0-9]{32}`,
-`docs/runbook-krok-d.md:167-168`; inna wartość = `sed` nie wyciął hasła z URL).
+`docs/runbook-krok-d.md:169-170`; inna wartość = `sed` nie wyciął hasła z URL,
+np. URL ma inny login niż `myhelper_svc`).
 Kontrola wypisuje tylko `yes`/`no`, nigdy wartości. Wynik `no` = stop,
 `unset` (niżej) i wyjaśnienie przed oknem. W próbie instancja próbna jest
 klonem, więc ma te same hasła — potwierdzone kontrolą połączenia niżej.
@@ -604,7 +636,7 @@ set +x
 psql_neon_owner() { PGHOST='<neon-admin>' PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_neon_app() { PGHOST='<neon-pooler>' PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola aplikacji Neona>' PGPASSWORD="$NEON_APP_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_csql_admin() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
-psql_csql_app() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=myhelper_owner PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
+psql_csql_app() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=myhelper_svc PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_neon_owner <<'SQL'
 SELECT 1;
 SQL
@@ -627,7 +659,7 @@ CA 1.4, hasła wyżej).
 | `psql_neon_owner` | `<neon-admin>`, `verify-full` | rola właściciela Neona, `$NEON_OWNER_PW` |
 | `psql_neon_app` | `<neon-pooler>`, `verify-full` | rola aplikacji Neona, `$NEON_APP_PW` |
 | `psql_csql_admin` | tunel 127.0.0.1, `disable` | `postgres`, `$CSQL_ADMIN_PW` |
-| `psql_csql_app` | tunel 127.0.0.1, `disable` | `myhelper_owner`, `$CSQL_OWNER_PW` |
+| `psql_csql_app` | tunel 127.0.0.1, `disable` | `myhelper_svc`, `$CSQL_OWNER_PW` |
 
 **Na końcu okna — także po stopie albo przerwaniu okna, przed zamknięciem
 terminala:**
@@ -645,10 +677,10 @@ Dalej w blokach (symbole zastępcze):
   aplikacji). Oba muszą wskazywać ten sam endpoint, inaczej kod 2
   (`freeze-neon.sh:22-25`, `:131-144`).
 - `<baza>`, `<rola właściciela Neona>`, `<rola aplikacji Neona>`,
-  `<baza Cloud SQL>`, `<rola właściciela Cloud SQL>` = `myhelper_owner`
+  `<baza Cloud SQL>`, `<rola właściciela Cloud SQL>` = `myhelper_svc`
   z hasłem `$CSQL_OWNER_PW` (dla kopii w przód rola właściciela bazy celu —
   `copy-neon-to-cloudsql.sh:24-26`). Zamrożenie i odmrożenie Cloud SQL:
-  `PG*` = `postgres` z `$CSQL_ADMIN_PW`, `VERIFY_PG*` = `myhelper_owner`
+  `PG*` = `postgres` z `$CSQL_ADMIN_PW`, `VERIFY_PG*` = `myhelper_svc`
   z `$CSQL_OWNER_PW` (1.0 pkt 2).
 - `<plik CA>` — plik z 1.4.
 - `<projekt Neona>` — dla `neonctl` (1.1, 3.3 krok 4); gałąź w poleceniach
@@ -686,7 +718,7 @@ neonctl --version
 
 Oczekiwane: `0` zmienionych plików; `git rev-parse HEAD` w oknie = ten sam
 sha co w zapisie próby; wersja główna `psql`, `pg_dump`, `pg_restore` ≥
-wersji serwerów (Cloud SQL `POSTGRES_18`, `docs/runbook-krok-d.md:160`; Neon
+wersji serwerów (Cloud SQL `POSTGRES_18`, `docs/runbook-krok-d.md:162`; Neon
 niżej). Wszystkie wersje trafiają do zapisu próby; w oknie muszą być
 identyczne. Inny sha albo inna wersja = stop, nowa próba albo decyzja przed
 oknem.
@@ -899,7 +931,7 @@ ponownie sprawdza pustość celu (`:229-232`).
 
 ```bash
 set +x
-PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' TARGET_PGHOST=127.0.0.1 TARGET_PGPORT='<port tunelu>' TARGET_PGDATABASE='<baza Cloud SQL>' TARGET_PGUSER=myhelper_owner TARGET_PGPASSWORD="$CSQL_OWNER_PW" TARGET_PGSSLMODE=disable infra/db/cutover/copy-neon-to-cloudsql.sh --dry-run
+PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' TARGET_PGHOST=127.0.0.1 TARGET_PGPORT='<port tunelu>' TARGET_PGDATABASE='<baza Cloud SQL>' TARGET_PGUSER=myhelper_svc TARGET_PGPASSWORD="$CSQL_OWNER_PW" TARGET_PGSSLMODE=disable infra/db/cutover/copy-neon-to-cloudsql.sh --dry-run
 ```
 
 Potem bez `--dry-run`. Oczekiwane: `target_nonempty_tables=0`,
@@ -943,12 +975,12 @@ zostaje, bo bez niego `compare.sh` czytałby sekwencje poza migawką transakcji
 (`freeze-neon.sh:108-110`, `:135-139`, `:142-144`).
 
 Zamraża `postgres` (`PG*`, hasło `$CSQL_ADMIN_PW`); test zapisu idzie adresem
-loginu aplikacji (`VERIFY_PG*` = `myhelper_owner`, hasło `$CSQL_OWNER_PW`) —
+loginu aplikacji (`VERIFY_PG*` = `myhelper_svc`, hasło `$CSQL_OWNER_PW`) —
 1.0 pkt 2, 1.3 pkt 3. Najpierw `--dry-run` (sekcja 0):
 
 ```bash
 set +x
-PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable VERIFY_PGHOST=127.0.0.1 VERIFY_PGPORT='<port tunelu>' VERIFY_PGDATABASE='<baza Cloud SQL>' VERIFY_PGUSER=myhelper_owner VERIFY_PGPASSWORD="$CSQL_OWNER_PW" VERIFY_PGSSLMODE=disable infra/db/cutover/freeze-neon.sh --dry-run
+PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable VERIFY_PGHOST=127.0.0.1 VERIFY_PGPORT='<port tunelu>' VERIFY_PGDATABASE='<baza Cloud SQL>' VERIFY_PGUSER=myhelper_svc VERIFY_PGPASSWORD="$CSQL_OWNER_PW" VERIFY_PGSSLMODE=disable infra/db/cutover/freeze-neon.sh --dry-run
 ```
 
 Oczekiwane `dry_run=yes`, `steps=5`, `exit=0` (`freeze-neon.sh:50`,
@@ -1048,12 +1080,12 @@ droga A), `off` → droga C.
 ### 2.10 Odmrożenie Cloud SQL — `unfreeze-neon.sh` przez tunel
 
 Te same zmienne co w 2.6 (`PG*` = `postgres` z `$CSQL_ADMIN_PW`,
-`VERIFY_PG*` = `myhelper_owner` z `$CSQL_OWNER_PW`), skrypt
+`VERIFY_PG*` = `myhelper_svc` z `$CSQL_OWNER_PW`), skrypt
 `unfreeze-neon.sh`:
 
 ```bash
 set +x
-PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable VERIFY_PGHOST=127.0.0.1 VERIFY_PGPORT='<port tunelu>' VERIFY_PGDATABASE='<baza Cloud SQL>' VERIFY_PGUSER=myhelper_owner VERIFY_PGPASSWORD="$CSQL_OWNER_PW" VERIFY_PGSSLMODE=disable infra/db/cutover/unfreeze-neon.sh --dry-run
+PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable VERIFY_PGHOST=127.0.0.1 VERIFY_PGPORT='<port tunelu>' VERIFY_PGDATABASE='<baza Cloud SQL>' VERIFY_PGUSER=myhelper_svc VERIFY_PGPASSWORD="$CSQL_OWNER_PW" VERIFY_PGSSLMODE=disable infra/db/cutover/unfreeze-neon.sh --dry-run
 ```
 
 Oczekiwane `dry_run=yes`, `steps=5`, `exit=0` (`unfreeze-neon.sh:46`,
@@ -1133,7 +1165,7 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
 
    ```bash
    set +x
-   PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable VERIFY_PGHOST=127.0.0.1 VERIFY_PGPORT='<port tunelu>' VERIFY_PGDATABASE='<baza Cloud SQL>' VERIFY_PGUSER=myhelper_owner VERIFY_PGPASSWORD="$CSQL_OWNER_PW" VERIFY_PGSSLMODE=disable infra/db/cutover/freeze-neon.sh --dry-run
+   PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable VERIFY_PGHOST=127.0.0.1 VERIFY_PGPORT='<port tunelu>' VERIFY_PGDATABASE='<baza Cloud SQL>' VERIFY_PGUSER=myhelper_svc VERIFY_PGPASSWORD="$CSQL_OWNER_PW" VERIFY_PGSSLMODE=disable infra/db/cutover/freeze-neon.sh --dry-run
    ```
 
    Potem ten sam wiersz bez `--dry-run`; kody jak w 2.2, przy czym „stop” =
