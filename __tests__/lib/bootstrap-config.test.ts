@@ -1035,7 +1035,7 @@ describe("G-D2: płoty kodu runbooka kroku D — bez komentarzy, `set +x` przy s
   // Jawna lista wyjątków: płoty, które NIE są poleceniami powłoki (język + dokładna pierwsza linia).
   const NOT_SHELL = [
     { lang: "", first: "assertion.repository_id == '1152153440' &&", why: "warunek atrybutów WIF (CEL) dla --wif-condition-file, sekcja 3.8" },
-    { lang: "sql", first: "SELECT rolname, rolcanlogin, rolbypassrls, rolsuper FROM pg_roles", why: "zapytanie wpisywane w psql, D-7" },
+    { lang: "sql", first: "SELECT rolname, rolcanlogin, rolbypassrls, rolsuper,", why: "zapytanie wpisywane w psql, D-7" },
   ];
   const isException = (f: { lang: string; first: string }) => NOT_SHELL.some((e) => e.lang === f.lang && e.first === f.first);
   const SHELL = FENCES.filter((f) => !isException(f));
