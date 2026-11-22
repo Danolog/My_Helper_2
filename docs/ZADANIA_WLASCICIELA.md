@@ -17,21 +17,33 @@ zrobić w kodzie.
 **Nowa wersja sekretu — przez schowek, we własnym terminalu:**
 
 1. Wyłącz menedżer schowka i Handoff (Universal Clipboard).
-2. Skopiuj samą wartość z panelu dostawcy, bez spacji i entera na końcu.
-   Schowek idzie do sekretu bajt w bajt.
-3. Uruchom (`<nazwa>` = nazwa sekretu z manifestu):
+2. Skopiuj samą wartość z panelu dostawcy. Polecenie samo usuwa enter na końcu.
+   Spacji nie usuwa — kopiuj bez spacji na początku i na końcu.
+3. W poleceniu podmień oba znaczniki, razem z nawiasami `< >`:
+   `<projekt GCP>` na nazwę projektu, `<nazwa>` na nazwę sekretu z manifestu
+   (np. `smsapi-token`). Bez podmiany zsh potraktuje `<nazwa>` jako odczyt z pliku.
+4. Uruchom:
 
    ```bash
    set +x
-   pbpaste | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions add <nazwa> --data-file=-
+   [ -n "$(pbpaste | tr -d '\r\n')" ] && pbpaste | tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions add <nazwa> --data-file=-
    pbcopy </dev/null
    ```
 
-   Ostatnia linia czyści schowek.
-4. Nigdy `echo … |` — wartość trafiłaby do historii powłoki.
+   Pierwsza część sprawdza, czy schowek nie jest pusty. Ostatnia linia czyści schowek.
+5. Sprawdź, czy wersja powstała:
+
+   ```bash
+   gcloud --project='<projekt GCP>' secrets versions list <nazwa> --sort-by=~createTime --limit=1 --format='value(name,state)'
+   ```
+
+   Ma być nowy numer wersji i `ENABLED`.
+6. Nigdy `echo … |` — wartość trafiłaby do historii powłoki.
 
 **Po każdej zmianie** sekretu albo zmiennej potrzebne jest nowe wdrożenie, bez migracji
 (`docs/runbook-krok-d.md`, sekcja 7). Wdrożenie podpina tylko te sekrety, które mają wersję.
+Wdrożenia nie uruchamiasz sam. Uruchamia je zespół za Twoją zgodą, a Ty je zatwierdzasz
+w GitHubie jako wymagany recenzent środowiska `production-gcp`.
 
 ## 1. E-maile — Resend (PRIORYTET: bez tego nie działa weryfikacja konta i reset hasła)
 
@@ -45,16 +57,19 @@ zrobić w kodzie.
 5. Dodaj klucz jako sekret `resend-api-key` (sekcja 0).
 6. Ustaw zmienną `EMAIL_FROM` w `production-gcp`:
    `MyHelper <adres w zweryfikowanej domenie>`.
-7. Nowe wdrożenie.
+   Bez tej zmiennej maile idą z testowego nadawcy Resend. Taki nadawca dostarcza
+   pocztę tylko na adres, na który założono konto Resend.
+7. Nowe wdrożenie (zatwierdzasz je, sekcja 0).
 
 **Co się stanie po włączeniu:** rejestracja zacznie WYMAGAĆ potwierdzenia maila
-(tak jak w spec). Bez klucza wymóg jest wyłączony, żeby nie zablokować logowania,
-a mail jest tylko zapisywany w logu. Niezweryfikowane konta dostaną link weryfikacyjny
+(tak jak w spec). Bez klucza wymóg jest wyłączony, żeby nie zablokować logowania.
+Mail wtedy nie wychodzi; w logu jest tylko wpis, bez linku. Niezweryfikowane konta dostaną link weryfikacyjny
 przy najbliższej próbie logowania. Zacznie też realnie wychodzić reset hasła.
 Newslettery i faktury mailem są zamrożone (plan, zadanie 2.4).
 
-**Test:** zarejestruj konto na własny adres → mail z linkiem powinien dojść;
-„zapomniałem hasła” → mail z linkiem resetu.
+**Test:** zarejestruj konto na własny adres, inny niż adres konta Resend → mail z linkiem
+powinien dojść; „zapomniałem hasła” → mail z linkiem resetu. Gdy mail dochodzi tylko
+na adres konta Resend, `EMAIL_FROM` nie jest ustawiona.
 
 ## 2. SMS-y — SMSAPI.pl (potwierdzenia i przypomnienia wizyt)
 
@@ -65,18 +80,17 @@ Newslettery i faktury mailem są zamrożone (plan, zadanie 2.4).
 4. Dodaj token jako sekret `smsapi-token` (sekcja 0).
 5. Ustaw zmienną `SMSAPI_SENDER` w `production-gcp` = zaakceptowana nazwa nadawcy
    (bez niej SMS pójdzie z „Info”).
-6. Nowe wdrożenie.
+6. Nowe wdrożenie (zatwierdzasz je, sekcja 0).
 
 Bez tokena SMS na produkcji nie wychodzi: jest błąd w logu i brak wpisu w historii
 powiadomień. Symulacja działa tylko poza produkcją.
 
-**Test przed włączeniem przypomnień:** warunek w `docs/runbook-krok-d.md`, linie 722–734
+**Test przed włączeniem przypomnień:** warunek w `docs/runbook-krok-d.md`, linie 736–748
 (przed włączeniem zadania `mh-sms-reminders`). Brak SMS-a w teście = przypomnień nie włączać.
 
 ## 3. Przypomnienia i zadania cykliczne — Cloud Scheduler
 
-Zadania cykliczne uruchamia Cloud Scheduler w projekcie GCP. Nie ma cronów na Vercelu,
-w GitHub Actions ani w zewnętrznych serwisach.
+Na GCP zadania cykliczne uruchamia tylko Cloud Scheduler w projekcie GCP.
 
 Zadań jest 5 (tabela w `infra/gcp/scheduler.sh`):
 - `mh-sms-reminders` — przypomnienia SMS, co 5 min;
@@ -110,8 +124,10 @@ Po Twojej stronie jest tylko test.
   z migracji. Danych z Neona nie przenosimy — każdy zakłada konto od nowa.
 - `POSTGRES_URL` (sekret `postgres-url`) ustawia procedura tworzenia bazy
   (`docs/runbook-krok-d.md`, sekcja 3.6). Nie zmieniaj go ręcznie.
-- Migracje idą tylko przez workflow wdrożenia z `run_migrations=true`. Nigdy ręcznie.
-- `DB_POOL_MAX` = 4 (mała instancja bazy ma mało połączeń).
+- Migracje idą tylko przez workflow wdrożenia z `run_migrations=true` albo przez zespół
+  według runbooka (`docs/runbook-krok-d.md`, sekcja 7). Nigdy ręcznie.
+- `DB_POOL_MAX` = 4 (mała instancja bazy ma mało połączeń). Ustawia go pierwsze
+  wdrożenie (`docs/runbook-krok-d.md`, sekcja 6), nie Ty.
 - Neona nie kasujemy, nie kopiujemy i nie zmieniamy do zadania 0.13 planu
   (po tygodniu stabilnej pracy na GCP i udanym odtworzeniu kopii). Skasować go możesz tylko Ty.
 
@@ -122,7 +138,7 @@ Cloud Run łatwo go obejść. Docelowo:
 1. Załóż bazę Redis w Upstash.
 2. Dodaj token jako sekret `upstash-redis-rest-token` (sekcja 0).
 3. Ustaw zmienną `UPSTASH_REDIS_REST_URL` w `production-gcp`.
-4. Nowe wdrożenie. Kod sam zacznie używać Redisa (`checkAsync`).
+4. Nowe wdrożenie (zatwierdzasz je, sekcja 0). Kod sam zacznie używać Redisa (`checkAsync`).
 
 ## 7. Push — klucze VAPID
 
@@ -137,11 +153,17 @@ Nie generuj pary ręcznie — obie połówki muszą do siebie pasować.
 
 - **Stripe:** nie dotyczy (Stripe nieużywany na produkcji; wraca z 1.1 planu, jeśli
   subskrypcja pójdzie przez Stripe). Sekrety `stripe-secret-key` i `stripe-webhook-secret`
-  zostają puste — oba naraz.
-- **Zadatki:** bez płatności online. Klient płaci BLIK-iem na telefon właściciela salonu,
-  a salon oznacza zadatek ręcznie (plan, decyzja D1 i zadanie 1.2).
+  zostają puste. Żadnemu nie dodawaj wersji. Jeśli kiedyś, to obu naraz — jeden bez
+  drugiego zatrzymuje wdrożenie.
+- **Zadatki:** decyzja jest taka: bez płatności online, klient płaci BLIK-iem na telefon
+  właściciela salonu, a salon oznacza zadatek ręcznie (plan, decyzja D1). Przełączenie
+  w kodzie nie jest jeszcze włączone — to zadanie 1.2 planu, w kroku „Pieniądze i prawda”,
+  po przenosinach na GCP. Do tego czasu portal rezerwacji wybiera ścieżkę płatności online.
+  Nic tu nie ustawiasz.
 - **Logowanie Google:** wyłączone na betę. Bez `GOOGLE_CLIENT_ID` i bez wersji sekretu
-  `google-client-secret`. Logowanie tylko e-mailem i hasłem.
+  `google-client-secret`. Logowanie tylko e-mailem i hasłem. Przycisk Google na razie
+  zostaje widoczny i po kliknięciu pokazuje błąd. To znane, nie zgłaszaj tego jako awarii.
+  Ukrycie przycisku to osobna zmiana w kodzie, przed oknem przełączenia.
 - **Vercel:** zmienne, Blob i crony Vercela nie są częścią produkcji na GCP.
 
 ## 9. Sprawdzenie po wszystkim (checklist)
@@ -149,8 +171,9 @@ Nie generuj pary ręcznie — obie połówki muszą do siebie pasować.
 - [ ] Rejestracja: mail weryfikacyjny dochodzi, konto wymaga potwierdzenia
 - [ ] Reset hasła: mail z linkiem dochodzi
 - [ ] Rezerwacja bez zadatku: SMS potwierdzenia dochodzi (test z sekcji 2)
-- [ ] Rezerwacja z zadatkiem: salon oznacza zadatek ręcznie w panelu
+- [ ] Rezerwacja z zadatkiem: salon oznacza zadatek ręcznie w panelu — dopiero gdy
+      przełączenie na BLIK (zadanie 1.2 planu) będzie włączone w kodzie
 - [ ] Przypomnienie SMS przed wizytą — po włączeniu `mh-sms-reminders`; pierwszy przebieg
-      z wizytami bez błędów (`docs/runbook-krok-d.md`, linie 722–734, pkt 2)
+      z wizytami bez błędów (`docs/runbook-krok-d.md`, linie 736–748, pkt 2)
 - [ ] Galeria: upload i wyświetlanie zdjęć
 - [ ] Newsletter i faktura mailem — dopiero po odmrożeniu tych modułów
