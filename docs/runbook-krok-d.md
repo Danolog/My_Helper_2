@@ -762,9 +762,9 @@ proxy do bazy nie zostaje w tle.
 
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
-Obowiązujący wariant (decyzja z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.
-Na produkcji były tylko konta testowe. Neon zostaje nietknięty do 0.13. Bramka bazy (j'): plan, wiersz 0.5 (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, etap 0).
-Procedura okna przełączenia bazy i powrotu: `docs/runbook-przelaczenie-bazy.md`.
+Obowiązujący wariant (decyzja COO z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.
+Na produkcji były tylko konta testowe. Neona nie kasujemy, nie kopiujemy i nie zmieniamy do 0.13. Bramka bazy (j'): plan, wiersz 0.5 (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, etap 0).
+Z `docs/runbook-przelaczenie-bazy.md` obowiązują tylko kontrola ról (1.0 pkt 2) i próba odtworzenia; kopia w przód i wstecz (sekcje 2–3) nie obowiązuje, odchudzenie w osobnym PR.
 
 ## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)
 

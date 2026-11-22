@@ -1,6 +1,6 @@
 # MyHelper — stan aplikacji i plan wejścia na rynek
 
-**Data:** 2026-11-14 · **Wersja planu:** 1.3 (aplikacja 1.1.2) · **Badane:** kod (`main` @ 1320e69), produkcja `my-helper-2.vercel.app`, dokumenty z lipca 2026
+**Data:** 2026-11-14 · **Wersja planu:** 1.4 (aplikacja 1.1.2) · **Badane:** kod (`main` @ 1320e69), produkcja `my-helper-2.vercel.app`, dokumenty z lipca 2026
 
 Ten dokument uzupełnia `RAPORT_I_PLAN_NAPRAWY_2026-07.md`. Tamten raport zamknął jakość kodu.
 Ten dotyczy tego, czego kod nie pokazuje: działania na produkcji, pieniędzy, prawa i wyglądu.
@@ -18,9 +18,21 @@ Ten dotyczy tego, czego kod nie pokazuje: działania na produkcji, pieniędzy, p
 >    zostaje zamrożona zgodnie z D4 i zadaniami 2.3–2.4.
 > 3. **Pytanie 6 rozstrzygnięte:** dane z Neon do Cloud SQL przenosi Ethan (delegacja v1.26, bramka (j)).
 >    Skasowanie Neon i instancji Cloud SQL — tylko Darek (zadanie 0.13).
+>    *(Przeniesienie danych nieaktualne od 1.4 — patrz niżej.)*
 > 4. **Kolejność wykonania:** najpierw odchudzić, potem przenosić — sekcja 7.1.
 >
 > Zmienione: 4.2, tabela 4.4, zadania 0.5, 2.3, 2.4, 2.5, nowa sekcja 7.1, pytanie 6. Reszta planu bez zmian.
+
+> **Zmiana 1.4 (2026-11-22, decyzja COO w delegacji; fakty od Darka 22.11).** Trzy rzeczy:
+> 1. **Cloud SQL startuje z pustą bazą.** Na produkcji są tylko konta testowe, więc danych z Neona nie przenosimy.
+>    W 0.5 bramka (j') zastępuje przeniesienie; (j) z delegacji bez zmian i wraca w całości, jeśli kiedykolwiek
+>    kopiujemy dane. Neona nie kasujemy, nie kopiujemy i nie zmieniamy do 0.13.
+> 2. **Monitoring błędów bez Sentry:** Error Reporting i alerty w Cloud Monitoring (0.12).
+> 3. **Stripe: nie ma czego przenosić** (nigdy nieużywany na produkcji; wraca z 1.1, jeśli subskrypcja pójdzie
+>    przez Stripe). **Logowanie Google wyłączone na betę**, tylko e-mail i hasło (0.10, 0.11).
+>
+> Zmienione: zadania 0.5, 0.10, 0.11, 0.12, wiersz B12, pytanie 6; przy okazji pytanie 7 i akapit pod tabelą 7.1
+> (projekt GCP rozstrzygnięty przez Darka 2026-11-19). Reszta planu bez zmian.
 
 ---
 
@@ -317,12 +329,12 @@ Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To sz
 | 0.2 | Konteneryzacja: `output: 'standalone'` w `next.config.ts`, `Dockerfile`, build lokalny i uruchomienie obrazu | S | agent |
 | 0.3 | GCP: włączenie API, Artifact Registry, konto serwisowe z minimalnymi rolami, Secret Manager na wszystkie sekrety | S | Darek + agent |
 | 0.4 | Cloud SQL Postgres 18 w `europe-central2` (pgvector, kopie automatyczne, PITR, połączenie przez Cloud SQL connector), osobna baza produkcyjna; lokalnie Docker | M | Darek + agent |
-| 0.5 | Dane Neon → Cloud SQL: bez kopii. Na produkcji są tylko konta testowe, więc Cloud SQL startuje z pustą bazą i schematem z migracji. Neon zostaje nietknięty do 0.13 i do tego czasu sam jest zrzutem. Dane testowe nie trafiają do Cloud SQL, a konta zakłada się od nowa po przełączeniu. Bramka (j'): przed przełączeniem ruchu role RLS/BYPASSRLS na Cloud SQL potwierdzone kontrolą stanu docelowego (`docs/runbook-przelaczenie-bazy.md`, 1.0 pkt 2) i próbne odtworzenie kopii Cloud SQL (= 4.3) z wynikiem w `docs/drills/restore-<data>.md`; po pierwszym salonie testowym na GCP `rls-check` (na pustej bazie niczego nie dowodzi). Zrzut Neona i porównanie liczby wierszy odpadają, bo nie ma czego przenosić | M | Ethan |
+| 0.5 | Dane Neon → Cloud SQL: bez kopii. Na produkcji są tylko konta testowe, więc Cloud SQL startuje z pustą bazą i schematem z migracji. Neona nie kasujemy, nie kopiujemy i nie zmieniamy do 0.13. Dane testowe nie trafiają do Cloud SQL, a konta zakłada się od nowa po przełączeniu. Bramka (j'): przed przełączeniem ruchu role RLS/BYPASSRLS na Cloud SQL potwierdzone kontrolą stanu docelowego (`docs/runbook-przelaczenie-bazy.md`, 1.0 pkt 2) i próbne odtworzenie kopii Cloud SQL na klonie (procedura jak 4.3); samo 4.3 zostaje w kroku H na danych z bety i to ono jest warunkiem 0.13. Wynik próby zapisany i podpisany przez Ethana przed oknem; do repo (`docs/drills/`) trafia po K1. `rls-check` po pierwszym salonie testowym z co najmniej jednym klientem i jedną wizytą, przed pierwszym prawdziwym salonem (na pustej bazie niczego nie dowodzi). Bramka (j) z delegacji bez zmian; wraca w całości, jeśli kiedykolwiek kopiujemy dane. Zrzut Neona i porównanie liczby wierszy odpadają, bo nie ma czego przenosić | M | Ethan |
 | 0.6 | Cloud Run w `europe-central2`, pomiar TTFB przed i po (punkt odniesienia: 2,5–3,5 s na Vercelu) | S | agent |
 | 0.7 | Cloud Scheduler dla 5 tras z `src/app/api/cron/` z `CRON_SECRET`; usunięcie `cron-scheduler.yml`; usunięcie klucza `crons` z `vercel.json` po okresie powrotu, cały plik w 0.13 (`docs/runbook-zatrzymanie-zapisow.md`, sekcja 7) | S | agent |
 | 0.8 | `@vercel/blob` → Cloud Storage w `src/lib/storage.ts`, bez przenoszenia istniejących plików (tylko konta testowe; bramka w `docs/runbook-zatrzymanie-zapisow.md`, sekcja 7); usunięcie `@vercel/analytics` | S | agent |
 | 0.9 | CI/CD: odblokowanie GitHub Actions (limit wydatków), wdrożenie na Cloud Run z `main` (Workload Identity Federation, bez kluczy JSON), `e2e-production.yml` przepięty z wdrożenia Vercela | M | Darek + agent |
-| 0.10 | Domena i DNS na Cloud Run, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`. Logowanie Google wyłączone na betę (tylko e-mail i hasło), więc przekierowania OAuth Google odpadają. Webhook Stripe: nie dotyczy (Stripe nieużywany na produkcji) | S | Darek |
+| 0.10 | Domena i DNS na Cloud Run, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`. Logowanie Google wyłączone na betę (tylko e-mail i hasło), więc przekierowania OAuth Google odpadają. Webhook Stripe: nie dotyczy (Stripe nieużywany na produkcji); wraca z 1.1, jeśli subskrypcja pójdzie przez Stripe | S | Darek |
 | 0.11 | Przegląd zmiennych według `ZADANIA_WLASCICIELA.md` (Resend, SMSAPI, Upstash) przeniesionych do Secret Manager. Stripe: nie dotyczy (nieużywany na produkcji) | M | Darek |
 | 0.12 | Monitoring błędów: Error Reporting + alerty w Cloud Monitoring, bez Sentry (nowy dostawca danych dopiero przy potrzebie błędów z przeglądarki); uptime check i alert w Cloud Monitoring na `/api/health`; budżet i alert kosztów w GCP | S | agent |
 | 0.13 | Wyłączenie projektu na Vercelu i bazy Neon dopiero po tygodniu stabilnej pracy na GCP i udanym odtworzeniu kopii | S | Darek |
@@ -399,8 +411,8 @@ do sprawdzenia po przenosinach. Numery zadań zostają takie jak w tabelach wyż
 | G | Wygląd | etap 3 |
 | H | Dowód | etap 4, na końcu 0.13 |
 
-Krok D wymaga od Darka wskazania projektu GCP i konta. Kod i konfiguracja z kroku C powstają wcześniej,
-z nazwą projektu jako parametrem.
+~~Krok D wymaga od Darka wskazania projektu GCP i konta. Kod i konfiguracja z kroku C powstają wcześniej,
+z nazwą projektu jako parametrem.~~ Rozstrzygnięte 2026-11-19: istniejący projekt.
 
 ### Trzy warianty zakresu
 
@@ -419,5 +431,5 @@ z nazwą projektu jako parametrem.
 3. Czy są salony gotowe do bety?
 4. Kto zrobi regulamin i umowę powierzenia: prawnik czy szablon do weryfikacji?
 5. Jeden plan czy dwa na start? Dwa plany to zmiana planu w trakcie okresu, rozliczenia proporcjonalne i limity AI. Jeden plan na premierę uprościłby etap 1.1.
-6. ~~Kto wykonuje przeniesienie danych produkcyjnych Neon → Cloud SQL (0.5): Ty czy Ethan po rozszerzeniu delegacji v1.12?~~ Rozstrzygnięte 2026-11-14: Ethan, delegacja v1.26, bramka (j). Skasowanie Neon i instancji Cloud SQL — tylko Darek (0.13).
-7. W którym projekcie GCP i na którym koncie stawiamy MyHelper? Bez tego krok D nie rusza.
+6. ~~Kto wykonuje przeniesienie danych produkcyjnych Neon → Cloud SQL (0.5): Ty czy Ethan po rozszerzeniu delegacji v1.12?~~ Rozstrzygnięte 2026-11-14: Ethan, delegacja v1.26, bramka (j). Skasowanie Neon i instancji Cloud SQL — tylko Darek (0.13). Od 22.11 przeniesienia nie ma (0.5, bramka (j')); skasowanie Neona nadal tylko Darek (0.13).
+7. ~~W którym projekcie GCP i na którym koncie stawiamy MyHelper? Bez tego krok D nie rusza.~~ Rozstrzygnięte 2026-11-19: istniejący projekt.
