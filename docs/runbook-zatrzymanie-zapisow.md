@@ -95,6 +95,14 @@ Skutki:
   W wariancie bez kopii (plan 1.4) przebieg jest możliwy (ingress zostaje
   `all`). Chronią P14 (tylko `workflow_dispatch`) i odczyt rewizji w W4 na
   końcu okna.
+- po P4 rewizja GCP przyjmuje logowanie, rejestrację i inne żądania Better
+  Auth ze zmianą stanu tylko z originu `https://app.nordsignal.cc`
+  (`trustedOrigins` w `src/lib/auth.ts`; inny origin = 403 `INVALID_ORIGIN`).
+  Adresy `run.app` (główny i tagi) służą po P4 wyłącznie do odczytów: smoke
+  `/api/health` i e2e `@production` (`tests/production/health.spec.ts`, same
+  wejścia na strony, bez logowania). Próby z logowaniem przed K1 idą przez LB
+  z `--resolve` (jak w P6), nie przez `run.app`. Adresów `run.app` do
+  `trustedOrigins` nie dopisujemy.
 
 ### 0.1 Decyzje
 
