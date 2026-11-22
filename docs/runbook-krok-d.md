@@ -795,6 +795,21 @@ z tokenami.
    (443 i 80) + statyczny IP. Suma > **150 PLN/mies.** = stop, architekt wraca
    z decyzją (globalny LB albo bez reguły 80). Wynik (SKU, stawki, suma) w tej
    sekcji, bez danych kont.
+
+   **Wynik (2026-11-22, PLN netto, `europe-central2`, Billing Catalog):**
+
+   | SKU | Pozycja | Stawka | Miesięcznie (730 h) |
+   |---|---|---|---|
+   | `2876-7A32-9C9D` | Regional External Application LB Forwarding Rule Minimum (obejmuje obie reguły, 443 i 80) | 0,118626 PLN/h | 86,60 PLN |
+   | `8C72-8818-9026` | Static Ip Charge (adres regionalny) | 0,047450 PLN/h | 34,64 PLN |
+   | `F051-558E-CBE7`, `0805-38B4-A6AA` | przetwarzanie danych, wejście i wyjście | 0,039542 PLN/GiB | < 1 PLN przy ruchu bety |
+
+   Opłaty za instancje proxy katalog dla zewnętrznego regionalnego LB
+   w `europe-central2` nie zawiera (jest tylko dla LB wewnętrznych). Suma ok.
+   **122 PLN/mies.** — poniżej progu 150 PLN. Stawkę IP potwierdzić odczytem
+   kosztów po 24 h (jak IP instancji w sekcji 1 pkt 3). Razem z Cloud SQL
+   (45–100 PLN, sekcja 1 pkt 3) to ok. 170–220 PLN/mies. przed Cloud Run, czyli
+   blisko progu 90% budżetu (270 PLN) w najgorszym przypadku.
 2. **CAA.** CA szuka CAA od nazwy certyfikatu w górę drzewa, a gdy `app` jest
    CNAME-em, idzie za aliasem (RFC 8659) i obowiązuje CAA domeny docelowej.
    Dlatego najpierw `app.nordsignal.cc` (dig idzie za CNAME), potem
