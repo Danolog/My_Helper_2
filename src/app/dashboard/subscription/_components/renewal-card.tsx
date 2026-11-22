@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { planGrossText, planPriceText } from "@/lib/plan-price";
 import { formatDate } from "../_types";
 import type { SubscriptionData, PlanData, ScheduledPlanData } from "../_types";
 
@@ -23,6 +24,11 @@ export function RenewalCard({
   plan,
   scheduledPlan,
 }: RenewalCardProps) {
+  // Płatność pobiera kwotę brutto, więc karta pokazuje brutto, a netto w nawiasie.
+  const renewalPrice = scheduledPlan
+    ? scheduledPlan.priceMonthly
+    : plan.priceMonthly;
+
   return (
     <Card>
       <CardHeader>
@@ -57,9 +63,8 @@ export function RenewalCard({
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Kwota odnowienia</span>
             <span className="font-medium">
-              {scheduledPlan
-                ? `${parseFloat(scheduledPlan.priceMonthly).toFixed(2)} PLN (plan ${scheduledPlan.name})`
-                : `${parseFloat(plan.priceMonthly).toFixed(2)} PLN`}
+              {`${planGrossText(renewalPrice)} (${planPriceText(renewalPrice)})`}
+              {scheduledPlan && ` (plan ${scheduledPlan.name})`}
             </span>
           </div>
           {scheduledPlan && (
@@ -76,11 +81,9 @@ export function RenewalCard({
           <CalendarDays className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             Twoja subskrypcja zostanie automatycznie odnowiona{" "}
-            {formatDate(subscription.currentPeriodEnd)}. Oplata{" "}
-            {scheduledPlan
-              ? `${parseFloat(scheduledPlan.priceMonthly).toFixed(2)} PLN`
-              : `${parseFloat(plan.priceMonthly).toFixed(2)} PLN`}{" "}
-            zostanie pobrana automatycznie z Twojej metody platnosci.
+            {formatDate(subscription.currentPeriodEnd)}. Opłata{" "}
+            {planGrossText(renewalPrice)} zostanie pobrana automatycznie z
+            Twojej metody płatności.
           </span>
         </div>
       </CardContent>

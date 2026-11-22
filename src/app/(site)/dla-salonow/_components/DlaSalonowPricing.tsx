@@ -83,7 +83,7 @@ export function DlaSalonowPricing() {
             Inwestycja w Rozwój
           </Badge>
           <h2 id="pricing-heading" className="font-[family-name:var(--font-playfair)] text-4xl md:text-6xl font-bold tracking-tight mb-6">
-            Jeden plan. Wszystkie funkcje w cenie, bez ukrytych kosztów.
+            Jeden plan. Wszystko z listy poniżej w cenie, bez ukrytych kosztów.
           </h2>
           <p className="text-muted-foreground/90 max-w-xl mx-auto text-xl font-light">
             Przejrzyste zasady. {TRIAL_DAYS}-dniowy okres próbny.

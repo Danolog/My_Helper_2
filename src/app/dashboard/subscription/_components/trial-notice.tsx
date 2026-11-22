@@ -2,11 +2,15 @@
 
 import { AlertTriangle, Timer, CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { TRIAL_DAYS } from "@/lib/constants";
+import { isPlanPurchaseOpen } from "@/lib/features";
 import { planOnSaleOr } from "@/lib/plan-catalog";
 import { planPriceText } from "@/lib/plan-price";
 import { formatDate } from "../_types";
 import type { SubscriptionData, PlanData, AllPlansMap } from "../_types";
+
+/** Zdanie w miejscu przycisku zakupu, gdy zakup planu jest zamknięty (`isPlanPurchaseOpen()`). */
+export const PURCHASE_CLOSED_CONTACT_TEXT =
+  "Zakup planu nie jest jeszcze dostępny. W sprawie dalszego dostępu napisz na kontakt@nordsignal.cc.";
 
 interface TrialNoticeProps {
   subscription: SubscriptionData;
@@ -56,6 +60,9 @@ export function TrialNotice({
   const isNearEnd = daysRemaining <= 3;
   const soldSlug = planOnSaleOr(plan.slug);
   const soldPriceText = priceTextOrNull(allPlans[soldSlug]?.priceMonthly);
+  const purchaseOpen = isPlanPurchaseOpen();
+  const readOnlyAfterTrial =
+    "Po zakończeniu okresu próbnego panel przejdzie w tryb tylko do odczytu.";
 
   return (
     <div
@@ -91,8 +98,11 @@ export function TrialNotice({
             }`}
           >
             {isNearEnd
-              ? "Wykup subskrypcje, aby zachowac dostep do wszystkich funkcji po zakonczeniu okresu probnego."
-              : `Korzystasz z pelnych funkcji planu ${plan.name} w ramach ${TRIAL_DAYS}-dniowego okresu probnego. Okres probny konczy sie ${formatDate(subscription.trialEndsAt)}.`}
+              ? purchaseOpen
+                ? `${readOnlyAfterTrial} Aby zachować pełny dostęp, wykup subskrypcję.`
+                : readOnlyAfterTrial
+              : // Bez liczby dni: salon może mieć indywidualną datę końca okresu próbnego.
+                `Korzystasz z pełnych funkcji planu ${plan.name} w okresie próbnym. Okres próbny kończy się ${formatDate(subscription.trialEndsAt)}.`}
           </p>
         </div>
       </div>
@@ -137,31 +147,40 @@ export function TrialNotice({
         </div>
       </div>
 
-      {/* Subscribe CTA button */}
-      <div className="flex items-center gap-3 mt-1">
-        <Button
-          size="sm"
-          onClick={() => onChangePlan(soldSlug)}
-          disabled={changePlanLoading}
-          className={
-            isNearEnd ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
-          }
-        >
-          {changePlanLoading ? (
-            <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-          ) : (
-            <CreditCard className="h-3 w-3 mr-2" />
-          )}
-          Wykup subskrypcje
-        </Button>
-        {soldPriceText && (
-          <span
-            className={`text-xs ${isNearEnd ? "text-amber-600 dark:text-amber-300" : "text-blue-600 dark:text-blue-300"}`}
+      {/* Subscribe CTA button — przy zamkniętym zakupie zamiast niego kontakt */}
+      {purchaseOpen ? (
+        <div className="flex items-center gap-3 mt-1">
+          <Button
+            size="sm"
+            onClick={() => onChangePlan(soldSlug)}
+            disabled={changePlanLoading}
+            className={
+              isNearEnd ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
+            }
           >
-            {soldPriceText} / miesiac po okresie probnym
-          </span>
-        )}
-      </div>
+            {changePlanLoading ? (
+              <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+            ) : (
+              <CreditCard className="h-3 w-3 mr-2" />
+            )}
+            Wykup subskrypcję
+          </Button>
+          {soldPriceText && (
+            <span
+              className={`text-xs ${isNearEnd ? "text-amber-600 dark:text-amber-300" : "text-blue-600 dark:text-blue-300"}`}
+            >
+              {soldPriceText} / miesiąc po okresie próbnym
+            </span>
+          )}
+        </div>
+      ) : (
+        <p
+          className={`text-sm mt-1 ${isNearEnd ? "text-amber-700 dark:text-amber-300" : "text-blue-700 dark:text-blue-300"}`}
+          data-testid="trial-purchase-closed"
+        >
+          {PURCHASE_CLOSED_CONTACT_TEXT}
+        </p>
+      )}
     </div>
   );
 }

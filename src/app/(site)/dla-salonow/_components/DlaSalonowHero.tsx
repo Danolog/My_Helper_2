@@ -6,7 +6,6 @@ import {
   Sparkles,
   ArrowRight,
   Search,
-  CalendarCheck,
   Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,7 @@ export function DlaSalonowHero() {
             className="inline-flex items-center gap-2 px-5 py-2 rounded-full border border-primary/30 bg-primary/5 text-sm text-primary mb-10 shadow-[0_0_15px_rgba(var(--primary),0.1)] backdrop-blur-md"
           >
             <Sparkles className="h-4 w-4" aria-hidden="true" />
-            <span className="font-medium tracking-wide">Alternatywa Premium dla Booksy z AI</span>
+            <span className="font-medium tracking-wide">Prosty system rezerwacji dla salonów</span>
           </motion.div>
 
           <motion.h1
@@ -49,8 +48,8 @@ export function DlaSalonowHero() {
             transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
             className="text-lg md:text-2xl text-muted-foreground/90 max-w-3xl mx-auto mb-12 leading-relaxed font-light"
           >
-            Zarządzaj salonem z niespotykaną elegancją. Rezerwacje online, inteligentny kalendarz,
-            asystent AI i luksusowe doświadczenie dla Twoich klientów.
+            Rezerwacje online, kalendarz zespołu, kartoteka klientów i przypomnienia SMS
+            w jednym miejscu.
           </motion.p>
 
           <motion.div
@@ -113,18 +112,6 @@ export function DlaSalonowHero() {
                           </div>
                         );
                       })}
-                    </div>
-                  </div>
-                  {/* Stats floating card */}
-                  <div className="absolute -right-4 md:-right-12 top-2 md:top-4 bg-card/90 backdrop-blur-sm border border-border/30 rounded-xl p-3 md:p-4 shadow-[var(--shadow-warm-md)]">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <CalendarCheck className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold">+340 wizyt</div>
-                        <div className="text-xs text-muted-foreground">w tym tygodniu</div>
-                      </div>
                     </div>
                   </div>
                 </div>

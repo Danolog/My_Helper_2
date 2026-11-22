@@ -21,7 +21,10 @@
  * @/lib/plan-catalog. Atrapa @/lib/plan-catalog przepuszcza prawdziwy moduł,
  * a SOLD_PLAN_SLUG czyta z przełącznika, który domyślnie ma wartość
  * z prawdziwego modułu. Grupa z przełącznikiem w beforeAll ustawia go na
- * "pro", a w afterAll przywraca wartość z prawdziwego modułu.
+ * "pro", a w afterAll przywraca wartość z prawdziwego modułu. Atrapa
+ * @/lib/features przepuszcza prawdziwy moduł, a isPlanPurchaseOpen() czyta
+ * z przełącznika (domyślnie wartość z prawdziwego modułu); grupa „zakup
+ * otwarty” ustawia go na true.
  *
  * Test NIE sprawdza trasy /api/subscription-plans, argumentów wywołania
  * mutationFetch, przekierowania do płatności, komunikatów błędów zakupu ani
@@ -39,7 +42,19 @@ const hoisted = vi.hoisted(() => ({
   push: vi.fn(),
   soldPlanSlug: { real: "", current: "" },
   session: { current: null as null | { user: { id: string } } },
+  purchaseOpen: { real: false, current: false },
 }));
+
+// isPlanPurchaseOpen() czyta przełącznik; domyślnie wartość z prawdziwego modułu.
+vi.mock("@/lib/features", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/features")>();
+  hoisted.purchaseOpen.real = actual.isPlanPurchaseOpen();
+  hoisted.purchaseOpen.current = hoisted.purchaseOpen.real;
+  return {
+    ...actual,
+    isPlanPurchaseOpen: () => hoisted.purchaseOpen.current,
+  };
+});
 
 vi.mock("@/lib/plan-catalog", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/plan-catalog")>();
@@ -90,8 +105,11 @@ const PRO = {
 const LOAD_ERROR = "Nie udalo sie zaladowac planow cenowych. Sprobuj ponownie pozniej.";
 const CARD_BUTTON = "Zacznij za darmo";
 const BOTTOM_BUTTON = `Zacznij ${TRIAL_DAYS} dni za darmo`;
-const PAID_BUTTON = "Wykup subskrypcje";
+const PAID_BUTTON = "Wykup subskrypcję";
 const TRIAL_NOTE = "14 dni okresu probnego bez zobowiazan";
+const CLOSED_NOTE = "Zakup planu nie jest jeszcze dostępny. Nie pobieramy żadnych opłat.";
+const OPEN_NOTE = "Płatność kartą co miesiąc, 60,27 zł brutto.";
+const CONTACT_TEXT = "W sprawie dalszego dostępu napisz na kontakt@nordsignal.cc.";
 
 function stubPlans(plans: unknown[]) {
   vi.stubGlobal(
@@ -202,13 +220,63 @@ describe('PricingPage — SOLD_PLAN_SLUG przełączony na "pro"', () => {
   );
 });
 
-describe("PricingPage — użytkownik zalogowany", () => {
+describe("PricingPage — zakup zamknięty (wartość z modułu)", () => {
+  it("prawdziwy isPlanPurchaseOpen() zwraca false", () => {
+    expect(hoisted.purchaseOpen.real).toBe(false);
+  });
+
+  it("niezalogowany: zdanie o zamkniętym zakupie, oba przyciski rejestracji zostają, brak zdania kontaktowego", async () => {
+    render(<PricingPage />);
+
+    expect((await screen.findByTestId("plan-billing-note")).textContent).toBe(CLOSED_NOTE);
+    expect(screen.getByRole("button", { name: CARD_BUTTON })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: BOTTOM_BUTTON })).toBeInTheDocument();
+    expect(screen.queryByTestId("plan-purchase-closed")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Stripe/);
+  });
+
+  describe("zalogowany", () => {
+    beforeAll(() => {
+      hoisted.session.current = { user: { id: "u1" } };
+    });
+
+    afterAll(() => {
+      hoisted.session.current = null;
+    });
+
+    it("brak przycisku „Wykup subskrypcję” i jakiegokolwiek przycisku, jest zdanie kontaktowe z linkiem mailto", async () => {
+      render(<PricingPage />);
+
+      await screen.findByTestId("plan-price");
+      expect(screen.queryByRole("button", { name: /Wykup subskrypcj/ })).not.toBeInTheDocument();
+      expect(screen.queryAllByRole("button")).toHaveLength(0);
+      expect(screen.getByTestId("plan-purchase-closed").textContent).toBe(CONTACT_TEXT);
+      expect(screen.getByRole("link", { name: "kontakt@nordsignal.cc" })).toHaveAttribute(
+        "href",
+        "mailto:kontakt@nordsignal.cc"
+      );
+      expect(screen.getByTestId("plan-billing-note").textContent).toBe(CLOSED_NOTE);
+      expect(mutationFetch).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("PricingPage — użytkownik zalogowany, zakup otwarty (atrapa)", () => {
   beforeAll(() => {
     hoisted.session.current = { user: { id: "u1" } };
+    hoisted.purchaseOpen.current = true;
   });
 
   afterAll(() => {
     hoisted.session.current = null;
+    hoisted.purchaseOpen.current = hoisted.purchaseOpen.real;
+  });
+
+  it("zdanie o płatności kartą z kwotą brutto, brak zdania kontaktowego", async () => {
+    render(<PricingPage />);
+
+    expect((await screen.findByTestId("plan-billing-note")).textContent).toBe(OPEN_NOTE);
+    expect(screen.queryByTestId("plan-purchase-closed")).not.toBeInTheDocument();
   });
 
   beforeEach(() => {

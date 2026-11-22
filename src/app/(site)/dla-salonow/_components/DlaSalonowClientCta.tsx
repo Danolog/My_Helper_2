@@ -40,7 +40,7 @@ export function DlaSalonowClientCta() {
               Szukasz salonu?
             </CardTitle>
             <CardDescription className="text-lg mt-3 font-light text-muted-foreground/90">
-              Przeglądaj ekskluzywne salony, rezerwuj wizyty i zarządzaj swoim czasem z klasą.
+              Przeglądaj salony i rezerwuj wizyty online.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4 pb-10 relative z-10">

@@ -4,12 +4,14 @@ import Link from "next/link";
 import { AlertTriangle, Timer, CreditCard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/hooks/use-subscription";
-import { TRIAL_DAYS } from "@/lib/constants";
+import { isPlanPurchaseOpen } from "@/lib/features";
 
 export function DashboardTrialBanner() {
   const { isTrialing, trialDaysRemaining } = useSubscription();
 
   if (!isTrialing || trialDaysRemaining === null) return null;
+
+  const purchaseOpen = isPlanPurchaseOpen();
 
   return (
     <div className={`flex items-center gap-3 p-4 rounded-lg border mb-6 ${
@@ -39,15 +41,20 @@ export function DashboardTrialBanner() {
             : "text-blue-600 dark:text-blue-300"
         }`}>
           {trialDaysRemaining <= 3
-            ? "Wykup subskrypcje, aby zachowac dostep do wszystkich funkcji."
-            : `Korzystasz z pelnych funkcji w ramach ${TRIAL_DAYS}-dniowego okresu probnego.`
+            ? purchaseOpen
+              ? "Wykup subskrypcję, aby zachować pełny dostęp po okresie próbnym."
+              : "Po zakończeniu okresu próbnego panel przejdzie w tryb tylko do odczytu."
+            : // Bez liczby dni: salon może mieć indywidualną datę końca okresu próbnego.
+              "Korzystasz z pełnych funkcji w okresie próbnym."
           }
         </p>
       </div>
       <Button asChild size="sm" variant={trialDaysRemaining <= 3 ? "default" : "outline"}>
         <Link href="/dashboard/subscription">
           <CreditCard className="h-3 w-3 mr-2" />
-          {trialDaysRemaining <= 3 ? "Wykup teraz" : "Zarzadzaj"}
+          {trialDaysRemaining <= 3
+            ? purchaseOpen ? "Wykup teraz" : "Szczegóły"
+            : "Zarzadzaj"}
         </Link>
       </Button>
     </div>

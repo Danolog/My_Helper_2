@@ -7,7 +7,13 @@ import { SwRegister } from "@/components/pwa/sw-register";
 import { SwUpdateToast } from "@/components/pwa/sw-update-toast";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { PLANS } from "@/lib/constants";
+import { planPriceText } from "@/lib/plan-price";
 import type { Metadata } from "next";
+
+// Opis trafia do wyników wyszukiwania i podglądów linków, więc cena idzie
+// z tej samej funkcji co cennik, żeby oba miejsca nie rozjechały się.
+const SITE_DESCRIPTION = `MyHelper — system rezerwacji online dla salonów usługowych. Jeden plan, ${planPriceText(PLANS.basic.priceMonthly)} miesięcznie.`;
 
 const playfair = Playfair_Display({
   variable: "--font-playfair",
@@ -26,17 +32,12 @@ export const metadata: Metadata = {
     default: "MyHelper",
     template: "%s | MyHelper",
   },
-  description:
-    "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
+  description: SITE_DESCRIPTION,
   keywords: [
-    "Next.js",
-    "React",
-    "TypeScript",
-    "AI",
-    "OpenRouter",
-    "Booksy alternative",
-    "Authentication",
-    "PostgreSQL",
+    "system rezerwacji",
+    "salon",
+    "kalendarz wizyt",
+    "alternatywa Booksy",
   ],
   authors: [{ name: "MyHelper Team" }],
   creator: "MyHelper Team",
@@ -45,14 +46,12 @@ export const metadata: Metadata = {
     locale: "pl_PL",
     siteName: "MyHelper",
     title: "MyHelper",
-    description:
-      "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
+    description: SITE_DESCRIPTION,
   },
   twitter: {
     card: "summary_large_image",
     title: "MyHelper",
-    description:
-      "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
+    description: SITE_DESCRIPTION,
   },
   robots: {
     index: true,
@@ -76,8 +75,7 @@ const jsonLd = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
   name: "MyHelper",
-  description:
-    "MyHelper - aplikacja do zarzadzania salonem uslugowym z asystentem AI",
+  description: "MyHelper — aplikacja do zarządzania salonem usługowym",
   applicationCategory: "BusinessApplication",
   operatingSystem: "Any",
   author: {

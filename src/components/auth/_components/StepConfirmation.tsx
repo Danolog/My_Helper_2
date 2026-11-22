@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { sendVerificationEmail } from "@/lib/auth-client";
+import { planPriceText } from "@/lib/plan-price";
 import type { Plan } from "../_hooks/use-registration";
 
 interface StepConfirmationProps {
@@ -64,8 +65,7 @@ export function StepConfirmation({
                 {selectedPlanData.name}
               </span>
               <span className="text-muted-foreground">
-                - {parseFloat(selectedPlanData.priceMonthly).toFixed(0)}{" "}
-                PLN/mies.
+                - {planPriceText(selectedPlanData.priceMonthly)}/mies.
               </span>
             </div>
           </div>

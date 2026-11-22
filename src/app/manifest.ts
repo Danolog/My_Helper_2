@@ -1,11 +1,13 @@
+import { PLANS } from "@/lib/constants";
+import { planPriceText } from "@/lib/plan-price";
 import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "MyHelper",
     short_name: "MyHelper",
-    description:
-      "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
+    // Ten sam opis co w metadanych strony (layout.tsx), cena z funkcji cennika.
+    description: `MyHelper — system rezerwacji online dla salonów usługowych. Jeden plan, ${planPriceText(PLANS.basic.priceMonthly)} miesięcznie.`,
     start_url: "/salons",
     scope: "/",
     display: "standalone",

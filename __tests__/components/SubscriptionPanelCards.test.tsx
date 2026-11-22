@@ -75,7 +75,7 @@ describe("karta ostrzeżenia o wygaśnięciu", () => {
     expectNoButtonsAndNoRemovedTexts();
   });
 
-  it("isNearExpiry: true — baner z tekstem „Subskrypcja wygasa za 3 dni!” i kwotą odnowienia „149.00 PLN”", () => {
+  it("isNearExpiry: true — baner z tekstem „Subskrypcja wygasa za 3 dni!” i kwotą odnowienia brutto „183,27 zł brutto”", () => {
     render(
       <ExpirationWarningCard
         subscription={SUBSCRIPTION}
@@ -84,7 +84,33 @@ describe("karta ostrzeżenia o wygaśnięciu", () => {
     );
 
     const bannerText = screen.getByText("Subskrypcja wygasa za 3 dni!");
-    expect(within(bannerText.parentElement!).getByText("149.00 PLN")).toBeInTheDocument();
+    expect(within(bannerText.parentElement!).getByText("183,27 zł brutto")).toBeInTheDocument();
+  });
+
+  it("wiersz „Kwota odnowienia”: brutto z netto w nawiasie, bez „PLN”", () => {
+    render(
+      <ExpirationWarningCard
+        subscription={SUBSCRIPTION}
+        expirationData={expirationData({ renewalAmount: "49.00" })}
+      />,
+    );
+
+    expect(
+      screen.getByText("60,27 zł brutto (49 zł netto + 23% VAT)"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/PLN/)).toBeNull();
+  });
+
+  it("brak kwoty odnowienia: „-” w obu miejscach, render bez wyjątku", () => {
+    render(
+      <ExpirationWarningCard
+        subscription={SUBSCRIPTION}
+        expirationData={expirationData({ renewalAmount: null })}
+      />,
+    );
+
+    expect(screen.getAllByText("-").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/zł/)).toBeNull();
   });
 
   it("isNearExpiry: false — brak przycisków i tekstów „Tryb deweloperski”, „Symuluj”, „Wyslij ostrzezenie”, „Odnow teraz”, „Sprawdz metode platnosci”", () => {
@@ -106,5 +132,23 @@ describe("karta automatycznego odnowienia", () => {
     );
 
     expectNoButtonsAndNoRemovedTexts();
+  });
+
+  it("kwota odnowienia brutto z netto w nawiasie i zdanie o opłacie brutto, bez „PLN”", () => {
+    render(
+      <RenewalCard
+        subscription={SUBSCRIPTION}
+        plan={{ ...PLAN, priceMonthly: "49.00" }}
+        scheduledPlan={null}
+      />,
+    );
+
+    expect(
+      screen.getByText("60,27 zł brutto (49 zł netto + 23% VAT)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Opłata 60,27 zł brutto zostanie pobrana automatycznie z\s+Twojej metody płatności\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/PLN/)).toBeNull();
   });
 });
