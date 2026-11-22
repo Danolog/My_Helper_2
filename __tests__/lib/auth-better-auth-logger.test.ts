@@ -22,6 +22,8 @@ describe("auth.ts: logger Better Auth", () => {
     vi.resetModules();
     const { auth } = await import("@/lib/auth");
     const { logger } = await import("@/lib/logger");
+    // Wpisy z inicjalizacji kontekstu nie mieszają się z wpisem żądania.
+    await auth.$context;
     const warn = vi.spyOn(logger, "warn");
     const error = vi.spyOn(logger, "error");
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
