@@ -82,7 +82,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
    generalną (żeby próba sprawdziła stan docelowy; instancja próbna z 1.1 jest
    klonem z tym stanem):
    - login aplikacji jest jeden: `myhelper_svc` (aplikacja i migracje,
-     `docs/runbook-krok-d.md:167-170`); pula połączeń musi być właścicielem
+     `docs/runbook-krok-d.md:167-179`); pula połączeń musi być właścicielem
      tabel (kontrola roli puli), więc osobnego loginu puli nie tworzymy;
    - **zmiana loginu jest wykonana przed próbą** (osobny krok za zgodą
      właściciela, z recenzją bezpieczeństwa, najpierw na klonie): odebranie
@@ -108,9 +108,9 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
      w trybie awaryjnym;
    - **przebieg migracji idzie na instancji produkcyjnej**, nie na klonie: job
      `myhelper-migrate` działa jako `myhelper-runtime`
-     (`docs/runbook-krok-d.md:187-189`), a jego `roles/cloudsql.client` ma
+     (`docs/runbook-krok-d.md:195-197`), a jego `roles/cloudsql.client` ma
      warunek IAM ograniczony do instancji produkcyjnej
-     (`docs/runbook-krok-d.md:175-176`). Instancja produkcyjna przed oknem nie
+     (`docs/runbook-krok-d.md:183-184`). Instancja produkcyjna przed oknem nie
      ma danych, a kopia jest `--data-only` (`copy-neon-to-cloudsql.sh:12-13`),
      więc cel i tak potrzebuje schematu z migracji;
    - terminal jak w oknie: 1.7 → 1.5 (blok „Tylko w oknie” + tunel, port
@@ -153,7 +153,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
         Oczekiwane: jeden wiersz `<ID> SUCCESSFUL pre-migrate-<RRRRMMDD>`; ID
         do zapisu próby. Kopia, którą workflow robi sam przed migracją (rola
-        `myhelperSqlBackup`, `docs/runbook-krok-d.md:177-180`), jej nie
+        `myhelperSqlBackup`, `docs/runbook-krok-d.md:185-188`), jej nie
         zastępuje. Inny wynik = stop, jobu nie uruchamiamy;
      5. przebieg workflow z migracjami (`run_migrations=true`) z `main` o tym
         samym sha co 1.7 i zapis próby; sha przebiegu do zapisu. Przebieg może
@@ -207,7 +207,7 @@ instancji produkcyjnej: przywrócenie kopii (1.1 pkt 4) nadpisuje **całą**
 instancję. Powstaje po 1.0 pkt 2 jako klon instancji produkcyjnej (ta sama
 wersja, role i hasła; danych produkcyjnych jeszcze nie ma). Przed próbą:
 koszt instancji próbnej (godziny tieru i dysk na czas próby) policzony
-i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:766-767`).
+i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:782-783`).
 W terminalu próby zmienna `CSQL_INSTANCE` ma wyłącznie nazwę instancji próbnej;
 nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu (blok
 „Tylko w oknie” z 1.5 w próbie się nie wkleja). Do potwierdzenia w próbie,
@@ -399,7 +399,7 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 
 | Zgoda | Krok |
 |---|---|
-| przed próbą generalną, na instancji produkcyjnej Cloud SQL: zmiana loginu aplikacji na `myhelper_svc` (wykonana; kontrola stanu w §1.0 pkt 2), kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis). Jeśli właściciel daje zgodę na zmianę ról i na przebieg osobno — dwa wiersze; jedna zgoda nie obejmuje drugiej | 1.0 pkt 2 |
+| przed próbą generalną, na instancji produkcyjnej Cloud SQL: kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis) | 1.0 pkt 2 |
 | przywrócenie z kopii `pre-migrate` po czerwonym jobie | 1.0 pkt 2 |
 | próba generalna na produkcji (procedura zatrzymania zapisów, L8): ingress Cloud Run `internal` i z powrotem `all`, pauza i wznowienie zadań Scheduler, przełącznik cronów Vercela wyłącz/włącz, reguła zapory Vercela na adresie jednego starszego wdrożenia (utworzenie, sprawdzenie, usunięcie) | 1.1; procedura zatrzymania zapisów L8 |
 | w próbie generalnej, zmiana konfiguracji konta Stripe w **trybie testowym**: zmiana adresu endpointu webhooka i ponowienie zdarzeń (bez trybu live) | procedura zatrzymania zapisów 0.3 |
@@ -432,7 +432,7 @@ Dlatego przed `freeze-neon.sh`:
      Preview bez produkcyjnego `POSTGRES_URL` albo bez działających wdrożeń
      na czas okna;
    - **ingress Cloud Run = `internal`** od 2.1 do 2.9. Dziś ingress to `all`
-     (`docs/runbook-krok-d.md:747-751`): adres `run.app` przyjmowałby zapisy do
+     (`docs/runbook-krok-d.md:763-767`): adres `run.app` przyjmowałby zapisy do
      Cloud SQL w trakcie 2.3–2.6, a wtedy `count_auth_rate_limit` > 0 na
      Cloud SQL i 2.7 stoi. To **główna kontrola** braku zapisów na Cloud SQL;
      zamrożenie w 2.6 jest obroną w głąb;
@@ -591,10 +591,10 @@ echo
 ```
 
 Hasła Cloud SQL są wyłącznie w Secret Managerze
-(`docs/runbook-krok-d.md:167-174`): `postgres-admin-password` (rola `postgres`)
+(`docs/runbook-krok-d.md:167-182`): `postgres-admin-password` (rola `postgres`)
 i `postgres-url` (URL loginu `myhelper_svc`, z którego wycinamy samo hasło).
 Odczyt do zmiennej, bez ekranu i bez lokalnego logu gcloud — ten sam wzorzec
-co `docs/runbook-krok-d.md:726`. `<projekt GCP>` = identyfikator projektu z
+co `docs/runbook-krok-d.md:742`. `<projekt GCP>` = identyfikator projektu z
 `docs/runbook-krok-d.md` sekcja 9 (nie zapisuje się go w notatce okna):
 
 ```bash

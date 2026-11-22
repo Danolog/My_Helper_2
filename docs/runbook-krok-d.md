@@ -167,16 +167,16 @@ Tworzy:
 - **jeden login** `myhelper_svc` (aplikacja i migracje; Oliver 19:44) z losowym
   hasłem `[A-Za-z0-9]{32}` i wersję sekretu `postgres-url`:
   `postgresql://myhelper_svc:<HASŁO>@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg`
-  (bez `sslmode` — szyfruje konektor). Login tworzy **SQL-em rola `postgres`**
-  (`CREATE ROLE … LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
-  NOBYPASSRLS`), a nie `gcloud sql users create`: login z `gcloud sql users
-  create` dostaje automatycznie członkostwo w `cloudsqlsuperuser` (m.in.
-  `CREATE ROLE`, `CREATE EXTENSION`, `pg_signal_backend`), którego na Cloud
-  SQL nie da się potem odebrać; login z `CREATE ROLE` go nie dostaje, a
-  `gcloud sql users set-password` go nie dodaje. Prawa potrzebne migracjom
-  nadaje się jawnie: `CONNECT`, `TEMPORARY`, `CREATE` na bazie i `USAGE`,
-  `CREATE` na schemacie `public`. Drugi login (osobny dla migracji) to #131
-  (P3, przed pierwszym płacącym salonem) — bootstrap go nie przewiduje;
+  (bez `sslmode` — szyfruje konektor). **Stan docelowy, wykonany poza
+  bootstrapem:** login utworzyła ręcznie SQL-em rola `postgres` (`CREATE ROLE …
+  LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`), bo login
+  z `gcloud sql users create` dostaje członkostwo w `cloudsqlsuperuser` (m.in.
+  `CREATE ROLE`, `CREATE EXTENSION`, `pg_signal_backend`), którego na Cloud SQL
+  nie da się odebrać. Etap `sql` dziś tworzy login inaczej, przez `gcloud sql
+  users create` (akapity niżej), dlatego nie uruchamia się go ponownie. Prawa
+  potrzebne migracjom nadano jawnie: `CONNECT`, `TEMPORARY`, `CREATE` na bazie
+  i `USAGE`, `CREATE` na schemacie `public`. Drugi login (osobny dla migracji)
+  to #131 (P3, przed pierwszym płacącym salonem) — bootstrap go nie przewiduje;
 - losowe hasło wbudowanego `postgres` w osobnym sekrecie
   `postgres-admin-password` — spoza manifestu, bez dostępu runtime, niepodpięty
   do usługi ani joba; tylko do dostępu administracyjnego (sekcja 9);
