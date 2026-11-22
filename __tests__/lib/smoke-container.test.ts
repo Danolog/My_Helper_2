@@ -10,7 +10,8 @@
  *    i niedozwoloną wartością AUTH_RATE_LIMIT_STORE musi się zakończyć kodem 1,
  *    log z nazwą zmiennej, bez wartości — także PRZED pierwszym /api/health;
  *  - kontrola W1: losowa wartość + jednorazowa baza w sieci --internal → 200;
- *  - bez bazy i bez K_SERVICE → 503 (dotychczasowy przypadek).
+ *  - bez bazy i bez K_SERVICE → 503 (dotychczasowy przypadek), a potem
+ *    /_next/image → 200 i content-type image/* (sharp w obrazie standalone).
  * Mutacje: wynik w opisie PR.
  */
 import { spawnSync } from "node:child_process";
@@ -116,7 +117,18 @@ case "$cmd" in
 esac
 `,
 );
-writeFileSync(join(BIN, "curl"), '#!/bin/sh\necho "curl $*" >> "$FAKE_LOG"\nprintf "%s" "$FAKE_PLAIN_HEALTH"\n');
+// Fałszywy curl: sonda /_next/image dostaje FAKE_IMAGE („kod typ”, jak -w
+// '%{http_code} %{content_type}'), każda inna — FAKE_PLAIN_HEALTH.
+writeFileSync(
+  join(BIN, "curl"),
+  String.raw`#!/bin/sh
+echo "curl $*" >> "$FAKE_LOG"
+case "$*" in
+  */_next/image*) printf "%s" "$FAKE_IMAGE" ;;
+  *) printf "%s" "$FAKE_PLAIN_HEALTH" ;;
+esac
+`,
+);
 writeFileSync(join(BIN, "sleep"), "#!/bin/sh\nexit 0\n");
 for (const f of ["docker", "curl", "sleep"]) chmodSync(join(BIN, f), 0o755);
 
@@ -137,6 +149,7 @@ function smoke(extra: Record<string, string> = {}) {
       FAKE_W1_SHA: sha256Hex(W1_VALUE),
       FAKE_CTL_HEALTH: "200",
       FAKE_PLAIN_HEALTH: "503",
+      FAKE_IMAGE: "200 image/webp",
       SMOKE_WAIT: "3",
       ...extra,
     },
@@ -178,6 +191,7 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(lines[1]).toMatch(/^ok: rate-limit store: invalid AUTH_RATE_LIMIT_STORE → exit 1/);
     expect(lines[2]).toMatch(/^ok: W1 control: .* 200/);
     expect(lines[3]).toMatch(/^ok: \/api\/health -> 503/);
+    expect(lines[4]).toMatch(/^ok: next\/image -> 200 image\/webp/);
     const guardRun = r.calls.findIndex((c) => c.startsWith("run ") && c.includes("mh-smoke-guard-"));
     const guardExit = r.calls.findIndex((c) => c.startsWith("inspect -f {{.State.ExitCode}} mh-smoke-guard-"));
     const guardLogs = r.calls.findIndex((c) => c.startsWith("logs mh-smoke-guard-"));
@@ -297,8 +311,38 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(plain.env.some((e) => e.startsWith("K_SERVICE="))).toBe(false);
   });
 
+  it("next/image: 200 + image/webp → kod 0; sonda z hosta po /api/health 503, plik z public/, Accept: image/webp", () => {
+    const r = smoke();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/^ok: next\/image -> 200 image\/webp/m);
+    const health = r.calls.findIndex((c) => c.startsWith("curl ") && c.includes("/api/health"));
+    const image = r.calls.findIndex((c) => c.startsWith("curl ") && c.includes("/_next/image"));
+    expect(health).toBeGreaterThanOrEqual(0);
+    expect(image).toBeGreaterThan(health);
+    const probe = r.calls[image]!;
+    expect(probe).toContain("http://127.0.0.1:18090/_next/image?url=%2Fhero-salon.jpg&w=640&q=75");
+    expect(probe).toContain("Accept: image/webp");
+    expect(existsSync(join(ROOT, "public/hero-salon.jpg"))).toBe(true);
+  });
+
+  it.each([
+    ["500", "500 text/html; charset=utf-8", /next\/image: .*returned code '500', content-type 'text\/html; charset=utf-8'/],
+    ["200, ale text/html", "200 text/html; charset=utf-8", /next\/image: .*returned code '200', content-type 'text\/html; charset=utf-8'/],
+    ["200 bez content-type", "200 ", /next\/image: .*returned code '200', content-type ''/],
+    ["200, ale oryginał jpg (bez sharp)", "200 image/jpeg", /next\/image: .*returned code '200', content-type 'image\/jpeg'/],
+    ["brak połączenia", "000 ", /next\/image: .*returned code '000'/],
+  ])("next/image: %s → kod 1 z komunikatem next/image", (_l, out, msg) => {
+    const r = smoke({ FAKE_IMAGE: out });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/^FAIL: next\/image: /m);
+    expect(r.stderr).toMatch(msg);
+    expect(r.stdout).not.toMatch(/ok: next\/image/);
+    // Sonda obrazu po przejściu /api/health, więc porażka dotyczy tylko sharp.
+    expect(r.stdout).toMatch(/^ok: \/api\/health -> 503/m);
+  });
+
   it("sprzątanie: każdy kontener i sieć usuwane przy wyjściu (także po porażce W1 i trybu limitu)", () => {
-    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_STORE: "run" }, { FAKE_CTL_HEALTH: "503" }]) {
+    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_STORE: "run" }, { FAKE_CTL_HEALTH: "503" }, { FAKE_IMAGE: "500 text/html" }]) {
       const r = smoke(extra);
       const rmCalls = r.calls.filter((c) => c.startsWith("rm -f ")).join(" ");
       for (const c of r.containers) expect(rmCalls, c.name).toContain(c.name);
