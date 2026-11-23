@@ -78,12 +78,45 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   `: "${CSQL_INSTANCE:?}" &&`: przy pustej zmiennej zsh przerywa cały wiersz,
   ale wykonałby następny wklejony wiersz — dlatego strażnik i polecenie są
   w jednym wierszu.
+- **Pytania gcloud.** `sql backups restore`, `sql backups delete` i `sql
+  instances delete` pytają o potwierdzenie, a pytanie nie pokazuje nazwy
+  instancji. Dlatego wiersz `echo "instance=$CSQL_INSTANCE"` stoi w bloku
+  **przed** poleceniem, a polecenie z pytaniem jest ostatnim wierszem bloku
+  (wiersz wklejony za nim zostałby odczytany jako odpowiedź). Właściciel
+  sprawdza nazwę z `echo`, a na pytanie odpowiada tylko `Y` albo `n` — nic
+  innego nie wpisuje.
+- **Wklejanie do zsh** (próba 2026-11-23):
+  - przed pierwszym blokiem właściciel **wpisuje ręcznie** (nie wkleja)
+    `unset zle_bracketed_paste`; bez tego zsh dokleja do wklejki znaczniki
+    `^[[200~` i `~`, a pierwszy i ostatni wiersz bloku pada;
+  - nie wklejać, dopóki trwa poprzednie polecenie (np. `sleep`) — wiersze się
+    mieszają. Blok z `sleep` wkleja się sam, następny dopiero po jego końcu;
+  - długie bloki `<<'SQL'` psują się przy wklejaniu. Zapytanie dłuższe niż
+    kilka wierszy zapisuje się w pliku (poza repozytorium albo w katalogu
+    ignorowanym przez git) i uruchamia z pliku: `psql_csql_admin < '<plik>'`
+    (tak samo pozostałe funkcje z 1.6).
 - **Polecenia gcloud, neonctl i `cloud-sql-proxy`** (1.0 pkt 2, 1.1 „Instancja
   próbna” i „Gałąź próbna Neona”, 1.5, 2.4, 3.3 krok 4, przywrócenia) mają
   składnię do potwierdzenia w próbie generalnej: każde polecenie i jego
   oczekiwany wynik są zapisane w `docs/drills/` przed oknem. Polecenie, które
   w próbie dało inny wynik, poprawia się w tym runbooku przed oknem. Takie
-  bloki mają dopisek „(do potwierdzenia w próbie, sekcja 0)”.
+  bloki mają dopisek „(do potwierdzenia w próbie, sekcja 0)”. Bloki wykonane
+  w próbie 2026-11-23 mają zamiast niego „potwierdzone w próbie 2026-11-23”.
+- **Długie operacje Cloud SQL** (`sql instances clone`, `sql backups
+  restore`). W próbie klon trwał ok. 22 min, przywrócenie ok. 16 min. Po ok.
+  10 min gcloud może wypisać, że operacja trwa dłużej niż oczekiwano, i
+  zakończyć się błędem (`failed`), choć operacja w Cloud SQL nadal trwa.
+  Wtedy polecenia **nie powtarza się**. Czeka się na operację z ID
+  z komunikatu, potem idzie blok kontrolny z danego kroku:
+
+  ```bash
+  set +x
+  gcloud --project='<projekt GCP>' sql operations wait '<ID operacji z komunikatu>' --timeout=unlimited
+  ```
+
+  Oczekiwane: polecenie kończy się bez błędu, gdy operacja jest gotowa
+  (`--timeout=unlimited` — bez limitu czasu; domyślnie 300 s). Do
+  potwierdzenia w próbie, sekcja 0 (w próbie 2026-11-23 nie wykonane).
 
 ## 1. Warunki przed oknem
 
@@ -153,7 +186,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
         Oczekiwane: `myhelper_svc`. Inny wynik = stop, decyzja architektury
         i bezpieczeństwa;
-     2. kontrole stanu docelowego: 1.3 pkt 4 = `f | f | f`, właściciel obiektów,
+     2. kontrole stanu docelowego: 1.3 pkt 4 (pierwszy wiersz bloku), właściciel obiektów,
         uprawnienia i domyślne uprawnienia loginu aplikacji (`psql_csql_admin`;
         `has_*_privilege` z listą praw zwraca `t` przy którymkolwiek z nich,
         dlatego każde prawo osobno):
@@ -161,6 +194,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
         ```bash
         set +x
         psql_csql_admin <<'SQL'
+        SELECT r.rolsuper, r.rolbypassrls, pg_has_role(r.rolname, 'cloudsqlsuperuser', 'MEMBER') FROM pg_roles r WHERE r.rolname = 'myhelper_svc';
         SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public', 'drizzle') AND c.relowner <> 'myhelper_svc'::regrole;
         SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public', 'drizzle') AND p.proowner <> 'myhelper_svc'::regrole;
         SELECT count(*) FROM pg_namespace WHERE nspname = 'drizzle' AND nspowner <> 'myhelper_svc'::regrole;
@@ -173,7 +207,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
         gcloud --project='<projekt GCP>' secrets versions list postgres-url --filter='state=ENABLED' --format='value(name)' | wc -l | tr -d ' '
         ```
 
-        Oczekiwane, po kolei: `0`; `0`; `0`; `f|f|f`; `t`; `0`; `t|t|t|t|t`;
+        Oczekiwane, po kolei: `f|f|f`; `0`; `0`; `0`; `f|f|f`; `t`; `0`; `t|t|t|t|t`;
         dwa wiersze `S:{myhelper_app=rU/myhelper_svc}` i
         `r:{myhelper_app=arwd/myhelper_svc}`; `1`. Do 1.1 trafia wynik każdego
         wiersza z osobna. Inny wynik = stop, decyzja architektury
@@ -184,7 +218,7 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
         zapisu próby i notatki okna; kod 5 nie blokuje. Kody 2 i 4 →
         poprawić zmienne; 1, 3, 130 → stop, jobu nie uruchamiamy;
      4. kopia na żądanie `pre-migrate-<RRRRMMDD>` (wzorzec 2.4;
-        do potwierdzenia w próbie, sekcja 0):
+        potwierdzone w próbie 2026-11-23):
 
         ```bash
         set +x
@@ -227,8 +261,13 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
 
      ```bash
      set +x
+     echo "instance=$CSQL_INSTANCE"
      : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql backups delete '<ID kopii pre-migrate>' --instance="$CSQL_INSTANCE"
      ```
+
+     Oczekiwane: `instance=<instancja produkcyjna>`; inna nazwa = odpowiedź
+     `n`, stop. Na pytanie gcloud tylko `Y` albo `n` (sekcja 0, „Pytania
+     gcloud”).
 
    - zamrożenie i odmrożenie Cloud SQL (2.6, 2.10, 3.3) wykonuje `postgres`
      (członek właściciela bazy, więc ma `ALTER DATABASE`; usługa go nie
@@ -258,8 +297,8 @@ koszt instancji próbnej (godziny tieru i dysk na czas próby) policzony
 i mieszczący się w budżecie miesięcznym (`docs/runbook-krok-d.md:793-794`).
 W terminalu próby zmienna `CSQL_INSTANCE` ma wyłącznie nazwę instancji próbnej;
 nazwy instancji produkcyjnej nie przypisuje się do niej w tym terminalu (blok
-„Tylko w oknie” z 1.5 w próbie się nie wkleja). Do potwierdzenia w próbie,
-sekcja 0:
+„Tylko w oknie” z 1.5 w próbie się nie wkleja). Potwierdzone w próbie
+2026-11-23:
 
 ```bash
 set +x
@@ -271,7 +310,11 @@ CSQL_INSTANCE='<instancja próbna>'
 
 Oczekiwane: `drill_instance_ok=yes`, klon kończy się bez błędu, opis
 `RUNNABLE POSTGRES_18 <tier instancji produkcyjnej>`
-(`docs/runbook-krok-d.md:162`). `drill_instance_ok=no` = stop. Tunel w próbie
+(`docs/runbook-krok-d.md:162`). `drill_instance_ok=no` = stop. Klon trwa
+długo (w próbie ok. 22 min). Komunikat, że operacja trwa dłużej niż
+oczekiwano, zakończony `failed` = klonu **nie powtarzać**; `sql operations
+wait` z ID z komunikatu (sekcja 0, „Długie operacje Cloud SQL”), potem
+jeszcze raz sam wiersz `instances describe` z bloku wyżej. Tunel w próbie
 (1.5) prowadzi do instancji próbnej, na `<port tunelu>` **innym** niż port
 z `docs/runbook-krok-d.md` sekcja 9, żeby żaden blok próby nie trafił w tunel
 produkcyjny.
@@ -333,34 +376,52 @@ unset NEON_BRANCH DRILL_NEON_OK DRILL_BACKUP_ID
 unset -f drill_neon_guard
 ```
 
-Usunięcie po próbie (wynik w zapisie próby), najpierw kopie na żądanie
-instancji próbnej, potem instancja:
+Usunięcie po próbie (wynik w zapisie próby; potwierdzone w próbie
+2026-11-23), najpierw kopie na żądanie instancji próbnej, potem instancja:
 
 ```bash
 set +x
 : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql backups list --instance="$CSQL_INSTANCE" --format='value(id,type,status)'
 ```
 
-Każda kopia `ON_DEMAND` z listy:
+Każda kopia `ON_DEMAND` z listy (pytanie gcloud — sekcja 0, „Pytania
+gcloud”):
 
 ```bash
 set +x
+echo "instance=$CSQL_INSTANCE"
 : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql backups delete '<ID kopii próby>' --instance="$CSQL_INSTANCE"
 ```
 
-Potem instancja (jeśli klon odziedziczył ochronę przed usunięciem — najpierw
-jej zdjęcie, tylko na instancji próbnej):
+Oczekiwane: `instance=<instancja próbna>`; inna nazwa = odpowiedź `n`, stop.
+
+Potem instancja. Klon dziedziczy ochronę przed usunięciem, więc najpierw jej
+zdjęcie, tylko na instancji próbnej:
 
 ```bash
 set +x
 : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql instances patch "$CSQL_INSTANCE" --no-deletion-protection
+```
+
+Usunięcie instancji — `echo` przed poleceniem, polecenie z pytaniem jako
+ostatni wiersz bloku (sekcja 0, „Pytania gcloud”):
+
+```bash
+set +x
+echo "instance=$CSQL_INSTANCE"
 : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql instances delete "$CSQL_INSTANCE"
+```
+
+Oczekiwane: `instance=<instancja próbna>`; inna nazwa = odpowiedź `n`, stop.
+Na pytanie gcloud tylko `Y` albo `n`. Po usunięciu:
+
+```bash
+set +x
 : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances list --format='value(name)' | grep -cxF -- "$CSQL_INSTANCE"
 unset CSQL_INSTANCE
 ```
 
-Oczekiwane: ostatnia liczba `0`. gcloud pyta o potwierdzenie usunięcia —
-przed `Y` właściciel czyta nazwę instancji w pytaniu.
+Oczekiwane: `0`.
 
 W próbie generalnej muszą wyjść (w wariancie bez kopii, plan 1.4, tylko
 pkt 4; pkt 1–3 i 5–8 nie obowiązują):
@@ -381,8 +442,8 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 4. Próba odtworzenia kopii na instancji próbnej, na **niepustym** stanie.
    Obowiązuje także w wariancie bez kopii i nie zależy od sekcji 2 i 3.
    Kolejność: znacznik → kopia → usunięcie znacznika → przywrócenie →
-   znacznik obecny → kontrole. Polecenia gcloud do potwierdzenia w próbie,
-   sekcja 0.
+   znacznik obecny → kontrole. Polecenia gcloud potwierdzone w próbie
+   2026-11-23.
 
    Znacznik — wiersz testowy w osobnym schemacie, poza `public` (nie
    zmienia wyników 1.0 pkt 2 ani `--expect-empty`), `psql_csql_admin`:
@@ -430,16 +491,31 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    Przywrócenie — nadpisuje całą instancję próbną i ją restartuje; tunel
    (1.5) zostaje, otwarte połączenia padają:
 
+   `echo` przed poleceniem, polecenie z pytaniem jako ostatni wiersz bloku
+   (sekcja 0, „Pytania gcloud”):
+
    ```bash
    set +x
+   echo "instance=$CSQL_INSTANCE"
    : "${CSQL_INSTANCE:?}" && : "${DRILL_BACKUP_ID:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql backups restore "$DRILL_BACKUP_ID" --restore-instance="$CSQL_INSTANCE"
-   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --limit=1 --format='value(operationType,status)'
+   ```
+
+   Oczekiwane: `instance=<instancja próbna>`; inna nazwa = odpowiedź `n`,
+   stop. Na pytanie gcloud tylko `Y` albo `n`. Przywrócenie trwa długo
+   (w próbie ok. 16 min); komunikat o przekroczonym czasie z `failed` =
+   przywrócenia **nie powtarzać**, `sql operations wait` z ID z komunikatu
+   (sekcja 0, „Długie operacje Cloud SQL”). Potem:
+
+   ```bash
+   set +x
+   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --limit=2 --format='value(operationType,status)'
    : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
    ```
 
-   gcloud pyta o potwierdzenie — przed `Y` właściciel czyta nazwę instancji
-   w pytaniu. Oczekiwane: przywrócenie bez błędu, `RESTORE_VOLUME DONE`,
-   `RUNNABLE`; czas przywrócenia do zapisu. Po przywróceniu:
+   Oczekiwane: przywrócenie bez błędu; na liście dwóch ostatnich operacji
+   wiersz `RESTORE_VOLUME DONE` (Cloud SQL po przywróceniu sam robi kopię,
+   więc najnowszy wiersz może być `BACKUP_VOLUME DONE`); `RUNNABLE`; czas
+   przywrócenia do zapisu. Po przywróceniu:
 
    ```bash
    set +x
@@ -689,12 +765,15 @@ NEON_BRANCH='<gałąź produkcyjna Neona>'
 Blok z sekcji 9 kończy proxy zaraz po `psql`, więc na czas okna proxy startuje
 osobno, w tle, z wyjściem do pliku (jego wiersze zawierają nazwę połączenia
 instancji, czyli identyfikator projektu — nie mogą mieszać się z ekranem).
-Do potwierdzenia w próbie, sekcja 0 (flagi `--address`, `--port`):
+Potwierdzone w próbie 2026-11-23. Flaga `--gcloud-auth` jest konieczna: bez
+niej proxy szuka domyślnych poświadczeń aplikacji (ADC), nie znajduje ich
+i kończy się kodem 1 (`could not find default credentials`); z flagą używa
+logowania `gcloud` właściciela. Blok z `sleep` wkleja się sam (sekcja 0):
 
 ```bash
 set +x
 mkdir -p -m 700 "$HOME/secure"
-: "${CSQL_INSTANCE:?}" && cloud-sql-proxy --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:$CSQL_INSTANCE" > "$HOME/secure/cutover-proxy.log" 2>&1 &
+: "${CSQL_INSTANCE:?}" && cloud-sql-proxy --gcloud-auth --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:$CSQL_INSTANCE" > "$HOME/secure/cutover-proxy.log" 2>&1 &
 CSQL_PROXY_PID=$!
 sleep 5
 kill -0 "$CSQL_PROXY_PID" 2>/dev/null && echo proxy_running=yes || echo proxy_running=no
@@ -854,6 +933,22 @@ wersji serwerów (Cloud SQL `POSTGRES_18`, `docs/runbook-krok-d.md:162`; Neon
 niżej). Wszystkie wersje trafiają do zapisu próby; w oknie muszą być
 identyczne. Inny sha albo inna wersja = stop, nowa próba albo decyzja przed
 oknem.
+
+Brak `psql`, `pg_dump` albo `pg_restore` (`command not found`) — instalacja
+z Homebrew. Pakiet `libpq` nie trafia sam do ścieżki, więc `export PATH`
+w każdym nowym terminalu (także w nowym terminalu z 1.0 pkt 2 krok 8);
+w próbie 2026-11-23 wersja 19.0:
+
+```bash
+set +x
+brew install libpq
+export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
+psql --version
+pg_dump --version
+pg_restore --version
+```
+
+Oczekiwane: trzy wersje, każda ≥ wersji serwerów (jak wyżej).
 
 Wersja serwera Neona (po 1.6):
 
@@ -1040,17 +1135,31 @@ kontrola 1 po nim jest wtedy według 1.0 pkt 2, kontrola 2 bez zmian.
 Nadpisuje całą instancję `CSQL_INSTANCE` i ją restartuje: tunel (1.5) zostaje,
 otwarte połączenia padają.
 
+`echo` przed poleceniem, polecenie z pytaniem jako ostatni wiersz bloku
+(sekcja 0, „Pytania gcloud”):
+
 ```bash
 set +x
+echo "instance=$CSQL_INSTANCE"
 : "${CSQL_INSTANCE:?}" && : "${PRE_IMPORT_ID:?}" && gcloud --project='<projekt GCP>' sql backups restore "$PRE_IMPORT_ID" --restore-instance="$CSQL_INSTANCE"
-: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --limit=1 --format='value(operationType,status)'
+```
+
+Oczekiwane: `instance=<instancja produkcyjna>`; inna nazwa = odpowiedź `n`,
+stop. Na pytanie gcloud tylko `Y` albo `n`. Komunikat o przekroczonym
+czasie z `failed` = przywrócenia **nie powtarzać**, `sql operations wait`
+z ID z komunikatu (sekcja 0, „Długie operacje Cloud SQL”; w próbie
+przywrócenie trwało ok. 16 min). Potem:
+
+```bash
+set +x
+: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --limit=2 --format='value(operationType,status)'
 : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
 ```
 
-gcloud pyta o potwierdzenie — przed `Y` właściciel czyta nazwę instancji
-w pytaniu. Oczekiwane: przywrócenie bez błędu, ostatnia operacja
-`RESTORE_VOLUME DONE`, stan `RUNNABLE`. Kontrola po przywróceniu, oba wyniki
-w notatce okna:
+Oczekiwane: przywrócenie bez błędu; na liście dwóch ostatnich operacji
+wiersz `RESTORE_VOLUME DONE` (najnowszy może być `BACKUP_VOLUME DONE` —
+kopia, którą Cloud SQL robi sam po przywróceniu); stan `RUNNABLE`. Kontrola
+po przywróceniu, oba wyniki w notatce okna:
 
 1. `compare.sh --expect-empty` (blok 2.3) = `exit=0`;
 2. stan zamrożenia (zdjęte przez przywrócenie, 1.1 pkt 4):
