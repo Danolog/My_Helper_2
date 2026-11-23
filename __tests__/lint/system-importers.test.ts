@@ -67,6 +67,8 @@ const INTERMEDIATE_CONTRACT =
 /** Migawka: wpis `<plik w system/>:<deklaracja>` → posortowani importerzy spoza `system/**`. */
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts:authAdapter": ["src/lib/auth.ts"],
+  // Retencja auth: bez argumentów (brak userId/salonId), kasuje wyłącznie wiersze już wygasłe.
+  "auth-retention.ts:cleanupExpiredAuthRecords": ["src/app/api/cron/cleanup-expired-auth/route.ts"],
   "auth-throttle.ts:clearSignInFailures": ["src/lib/auth-rate-limit-options.ts"],
   "auth-throttle.ts:consumeAuthRateLimit": ["src/lib/auth-rate-limit-options.ts"],
   "auth-throttle.ts:reserveAccountSignInAttempt": ["src/lib/auth-rate-limit-options.ts"],
@@ -380,6 +382,12 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
       "src/app/api/cron/cleanup-temporary-access/route.ts",
       "src/app/api/temporary-access/route.ts",
       "src/lib/temporary-access.ts",
+    ]);
+  });
+
+  it("auth-retention.ts:cleanupExpiredAuthRecords (kasuje dane): lista DOKŁADNIE — tylko trasa crona", () => {
+    expect(a.importers["auth-retention.ts:cleanupExpiredAuthRecords"], DATA_DELETING_CONTRACT).toEqual([
+      "src/app/api/cron/cleanup-expired-auth/route.ts",
     ]);
   });
 
