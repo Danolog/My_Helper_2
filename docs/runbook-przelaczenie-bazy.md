@@ -372,7 +372,7 @@ NEON_POOLER='<neon-pooler próby>'
 : "${NEON_BRANCH:?}" && : "${NEON_ADMIN:?}" && [[ "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' ]] && neonctl endpoints list --project-id '<projekt Neona>' --branch "$NEON_BRANCH" --output json | grep -qF -- "$NEON_ADMIN" && NEON_PROD_EP="$(neonctl endpoints list --project-id '<projekt Neona>' --branch '<gałąź produkcyjna Neona>' --output json)" && [[ -n "$NEON_PROD_EP" ]] && ! printf '%s' "$NEON_PROD_EP" | grep -qF -- "$NEON_ADMIN" && DRILL_NEON_OK=yes || DRILL_NEON_OK=no
 unset NEON_PROD_EP
 echo "drill_neon_ok=$DRILL_NEON_OK"
-drill_neon_guard() { [[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' && -n "$NEON_ADMIN" && "$NEON_ADMIN" != '<neon-admin okna>' && "$DRILL_NEON_OK" == yes ]]; }
+drill_neon_guard() { [[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' && -n "$NEON_ADMIN" && "$NEON_ADMIN" != '<neon-admin okna>' && "$NEON_POOLER" != '<neon-pooler okna>' && "$NEON_POOLER" == "${NEON_ADMIN/./-pooler.}" && "$DRILL_NEON_OK" == yes ]]; }
 ```
 
 Oczekiwane: `drill_branch_ok=yes`, `drill_endpoint_ok=yes`,
@@ -385,7 +385,9 @@ do zmiennej, więc błąd `neonctl` (kod ≠ 0) albo pusty wynik daje
 pozytywna (host na liście gałęzi próbnej); negatywna jest pomocnicza.
 `NEON_POOLER` musi
 wskazywać ten sam endpoint co `NEON_ADMIN`, inaczej skrypty dają kod 2
-(`freeze-neon.sh:22-25`, `:131-144`).
+(`freeze-neon.sh:22-25`, `:131-144`). `drill_neon_guard` sprawdza to samo
+przed połączeniem: `NEON_POOLER` = `NEON_ADMIN` z `-pooler` przed pierwszą
+kropką.
 
 **Strażnik Neona w próbie** — nie obowiązuje w wariancie bez kopii (plan
 1.4). W próbie każdy wiersz, który zmienia Neona —
@@ -918,8 +920,8 @@ z hasłem tylko w środowisku `psql`; zapytanie idzie ze strumienia
 
 ```bash
 set +x
-psql_neon_owner() { PGHOST="$NEON_ADMIN" PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
-psql_neon_app() { PGHOST="$NEON_POOLER" PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola aplikacji Neona>' PGPASSWORD="$NEON_APP_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
+psql_neon_owner() { : "${NEON_ADMIN:?}" || return; PGHOST="$NEON_ADMIN" PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
+psql_neon_app() { : "${NEON_POOLER:?}" || return; PGHOST="$NEON_POOLER" PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola aplikacji Neona>' PGPASSWORD="$NEON_APP_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_csql_admin() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_csql_app() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=myhelper_svc PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_neon_owner <<'SQL'
@@ -966,7 +968,11 @@ Dalej w blokach (symbole zastępcze):
   i `<neon-pooler okna>` (blok „Tylko w oknie”, 1.5), w próbie `<neon-admin
   próby>` i `<neon-pooler próby>` (1.1 „Gałąź próbna Neona”, ze strażnikiem).
   Pusta zmienna = skrypty kończą się kodem 2 bez połączenia (np.
-  `compare.sh:106`, `freeze-neon.sh:128-129`).
+  `compare.sh:106`, `freeze-neon.sh:128-129`). Funkcje `psql_neon_owner`
+  i `psql_neon_app` przy pustej zmiennej (`NEON_ADMIN` albo `NEON_POOLER`)
+  wypisują „parameter not set” i kończą się bez połączenia. Powłoka zostaje
+  otwarta; reszta tego wiersza się nie wykonuje (sprawdzone w zsh 5.9
+  i bash 3.2).
 - `<baza>`, `<rola właściciela Neona>`, `<rola aplikacji Neona>`,
   `<baza Cloud SQL>`, `<rola właściciela Cloud SQL>` = `myhelper_svc`
   z hasłem `$CSQL_OWNER_PW` (dla kopii w przód rola właściciela bazy celu —
