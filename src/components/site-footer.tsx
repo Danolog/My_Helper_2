@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { Scissors } from "lucide-react";
-import { areLegalDocsPublished } from "@/lib/features";
+import { publishedLegalLinks } from "@/lib/legal/documents";
 
 export function SiteFooter() {
-  // Bez opublikowanych stron prawnych link dawałby 404, więc stopka go nie pokazuje.
-  const legalDocsPublished = areLegalDocsPublished();
+  // Tylko opublikowane dokumenty: link do nieopublikowanego dawałby 404.
+  const legalLinks = publishedLegalLinks();
 
   return (
     <footer className="border-t bg-[oklch(0.22_0.03_55)]" role="contentinfo">
@@ -39,13 +39,15 @@ export function SiteFooter() {
               <li><Link href="/dla-klientow" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Portal klienta</Link></li>
             </ul>
           </div>
-          {legalDocsPublished && (
+          {legalLinks.length > 0 && (
             <div>
               <h3 className="font-semibold text-sm mb-3 text-[oklch(0.95_0.01_70)]">Informacje</h3>
               <ul className="space-y-2 text-sm text-[oklch(0.60_0.03_55)]">
-                <li><Link href="/privacy" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Polityka prywatnosci</Link></li>
-                <li><Link href="/terms" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Regulamin</Link></li>
-                <li><Link href="/contact" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Kontakt</Link></li>
+                {legalLinks.map((link) => (
+                  <li key={link.key}>
+                    <Link href={link.href} className="hover:text-[oklch(0.95_0.01_70)] transition-colors">{link.title}</Link>
+                  </li>
+                ))}
               </ul>
             </div>
           )}
@@ -64,12 +66,9 @@ export function SiteFooter() {
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-[oklch(0.60_0.03_55)]">
             <Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Salony</Link>
             <Link href="/pricing" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Cennik</Link>
-            {legalDocsPublished && (
-              <>
-                <Link href="/privacy" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Prywatnosc</Link>
-                <Link href="/terms" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Regulamin</Link>
-              </>
-            )}
+            {legalLinks.map((link) => (
+              <Link key={link.key} href={link.href} className="hover:text-[oklch(0.95_0.01_70)] transition-colors">{link.title}</Link>
+            ))}
           </div>
         </div>
 

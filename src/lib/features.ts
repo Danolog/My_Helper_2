@@ -227,15 +227,6 @@ export function isPlanPurchaseOpen(): boolean {
 }
 
 /**
- * Czy dokumenty prawne (polityka prywatności, regulamin, kontakt) są
- * opublikowane. Jedna flaga dla wszystkich tych stron i odnośników do nich:
- * dopóki zwraca false, stopka nie linkuje do stron, których jeszcze nie ma.
- */
-export function areLegalDocsPublished(): boolean {
-  return false;
-}
-
-/**
  * Informacja w Ustawienia → Moduły o funkcjach, których salon mógł używać
  * przed zamrożeniem, i o tym, co dzieje się z jego danymi. Żeby ją zdjąć,
  * wystarczy ustawić `null` — strona jej wtedy nie pokazuje.
