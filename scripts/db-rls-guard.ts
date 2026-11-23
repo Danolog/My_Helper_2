@@ -122,7 +122,10 @@ export function parseRlsRequirements(sql: string): RlsRequirement[] {
  * Migracje po 0005, które zakładają RLS nowej tabeli jawnym `CREATE POLICY`.
  * Plik dopisuje się tu w tym samym PR co migrację.
  */
-export const RLS_EXTRA_MIGRATION_FILES: readonly string[] = ["drizzle/0014_deposit_status_events.sql"];
+export const RLS_EXTRA_MIGRATION_FILES: readonly string[] = [
+  "drizzle/0014_deposit_status_events.sql",
+  "drizzle/0015_legal_acceptances.sql",
+];
 
 const failIn = (file: string, what: string): never => {
   throw new Error(`${file}: ${what} — zmieniony format migracji, popraw parser strażnika`);

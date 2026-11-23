@@ -136,6 +136,12 @@ const FACTORIES: Record<string, Factory> = {
     actor_user_id: `${PREFIX}-actor`,
     actor_role: "owner",
   })),
+  legal_acceptances: direct(() => ({
+    user_id: `${PREFIX}-acceptor`,
+    document: "terms",
+    version: "2026-01-01",
+    source: "registration",
+  })),
 
   time_blocks: child("employees", "employee_id", () => ({ start_time: START, end_time: END, block_type: "break" })),
   work_schedules: child("employees", "employee_id", () => ({ day_of_week: 1, start_time: "09:00", end_time: "17:00" })),
@@ -244,10 +250,11 @@ type Result = typeof EXPECTED;
 /**
  * Tabele tylko do dopisywania: rola aplikacji nie ma UPDATE ani DELETE, więc (d) i (e) kończą
  * się odmową uprawnienia (42501 bez komunikatu o polityce RLS), a nie polityką. Niezmienność
- * wiersza po odmowie sprawdza `deposit-status-events.pg.test.ts`.
+ * wiersza po odmowie sprawdzają `deposit-status-events.pg.test.ts` i `legal-acceptances.pg.test.ts`.
  */
 const APPEND_ONLY: Record<string, Partial<Result>> = {
   deposit_status_events: { dUpdate: "42501", eUpdate: "42501", eUpdateKept: false, eDelete: "42501", eDeleteKept: false },
+  legal_acceptances: { dUpdate: "42501", eUpdate: "42501", eUpdateKept: false, eDelete: "42501", eDeleteKept: false },
 };
 
 describe("parametry testu izolacji (#193)", () => {
