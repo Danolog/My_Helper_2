@@ -151,15 +151,38 @@ afterEach(() => {
 });
 
 describe("BlikDepositSection — formularz zapisu (zapis otwarty)", () => {
-  it("renderuje 6 zdań i etykietę dokładnie ze stałych, każde zdanie w osobnym akapicie", async () => {
+  it("renderuje 8 zdań i etykietę dokładnie ze stałych, każde zdanie w osobnym akapicie", async () => {
     queueResponses(getOk(EMPTY));
     render(<BlikDepositSection />);
 
     const box = await screen.findByTestId("blik-consent-sentences");
     const paragraphs = Array.from(box.querySelectorAll("p")).map((p) => p.textContent);
-    expect(actualConsent.BLIK_CONSENT_SENTENCES).toHaveLength(6);
-    expect(paragraphs.slice(0, 6)).toEqual([...actualConsent.BLIK_CONSENT_SENTENCES]);
+    expect(actualConsent.BLIK_CONSENT_SENTENCES).toHaveLength(8);
+    expect(paragraphs.slice(0, 8)).toEqual([...actualConsent.BLIK_CONSENT_SENTENCES]);
     expect(screen.getByText(actualConsent.BLIK_CONSENT_LABEL).tagName).toBe("LABEL");
+  });
+
+  it("tekst karty: zdanie o numerze służbowym, link do polityki zaraz pod zdaniem o administratorze, bez „Zgadzam się” i „zgoda RODO”", async () => {
+    queueResponses(getOk(EMPTY));
+    render(<BlikDepositSection />);
+
+    const card = await screen.findByTestId("blik-deposit-section");
+    await screen.findByLabelText(actualConsent.BLIK_CONSENT_LABEL);
+    const text = card.textContent ?? "";
+    expect(text).toContain("Najlepiej podaj numer służbowy, nie prywatny.");
+    expect(text).not.toMatch(/zgadzam się/i);
+    expect(text).not.toMatch(/zgod\p{L}*\s+RODO/iu);
+
+    const paragraphs = Array.from(
+      screen.getByTestId("blik-consent-sentences").querySelectorAll("p")
+    );
+    const adminIndex = paragraphs.findIndex((p) =>
+      p.textContent?.includes("administratorem danych jest MyHelper")
+    );
+    expect(adminIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      paragraphs[adminIndex + 1]?.querySelector("a")?.getAttribute("href")
+    ).toBe(POLICY_HREF);
   });
 
   it("checkbox zgody jest odznaczony na starcie, a zapis nieaktywny bez numeru i bez zgody", async () => {
@@ -439,6 +462,9 @@ describe("BlikDepositSection — zapis zamknięty przy prawdziwej stałej", () =
     const box = screen.getByTestId("blik-consent-sentences");
     const paragraphs = Array.from(box.querySelectorAll("p")).map((p) => p.textContent);
     expect(paragraphs).toEqual([...actualConsent.BLIK_CONSENT_SENTENCES]);
+    const cardText = screen.getByTestId("blik-deposit-section").textContent ?? "";
+    expect(cardText).toContain("Najlepiej podaj numer służbowy, nie prywatny.");
+    expect(cardText).not.toMatch(/zgadzam się/i);
     expect(screen.queryByLabelText("Numer telefonu BLIK")).not.toBeInTheDocument();
     const save = screen.queryByRole("button", { name: "Zapisz numer" });
     if (save) expect(save).toBeDisabled();

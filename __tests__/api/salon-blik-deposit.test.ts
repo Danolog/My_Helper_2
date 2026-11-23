@@ -505,6 +505,7 @@ describe("PUT /api/salon/blik-deposit (zapis numeru otwarty — stała podmienio
 
   it.each([
     ["stara wersja", "2026-01-01"],
+    ["poprzednia wersja treści", "2026-11-21"],
     ["pusty napis", ""],
   ])("409 BLIK_CONSENT_VERSION_STALE: %s — brak zapisu, numer poza odpowiedzią i logiem", async (_label, consentVersion) => {
     m.asOwnerOf(SALON_A);
