@@ -37,6 +37,13 @@ function jobs(): Job[] {
 
 const JOBS = jobs();
 
+/**
+ * Zamknięta lista tras crona bez zadania w skrypcie: harmonogram dochodzi
+ * osobnym krokiem infrastruktury (zmiana produkcji). Do tego czasu trasa
+ * istnieje, ale nikt jej nie woła. Dopisanie pozycji = zmiana przypiętej listy.
+ */
+const CRON_ROUTES_AWAITING_SCHEDULE = ["/api/cron/cleanup-expired-auth"];
+
 function routeFile(path: string): string {
   return join(ROOT, "src/app", path, "route.ts");
 }
@@ -57,12 +64,22 @@ describe("G-C5: scheduler.sh ↔ trasy", () => {
     expect(src).toMatch(/export\s+(async\s+function\s+GET|const\s+GET)\b/);
   });
 
-  it("każdy katalog src/app/api/cron/* ma zadanie w skrypcie", () => {
+  it("każdy katalog src/app/api/cron/* ma zadanie w skrypcie (poza zamkniętą listą tras czekających na harmonogram)", () => {
     const dirs = readdirSync(join(ROOT, "src/app/api/cron"), { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => `/api/cron/${d.name}`);
     const paths = new Set(JOBS.map((j) => j.path));
-    expect(dirs.filter((d) => !paths.has(d))).toEqual([]);
+    expect(dirs.filter((d) => !paths.has(d) && !CRON_ROUTES_AWAITING_SCHEDULE.includes(d))).toEqual([]);
+  });
+
+  it("lista tras czekających na harmonogram: przypięta, każda istnieje i nie ma jeszcze zadania", () => {
+    expect(CRON_ROUTES_AWAITING_SCHEDULE).toEqual(["/api/cron/cleanup-expired-auth"]);
+    const paths = new Set(JOBS.map((j) => j.path));
+    for (const p of CRON_ROUTES_AWAITING_SCHEDULE) {
+      expect(existsSync(routeFile(p)), p).toBe(true);
+      // Gdy zadanie trafi do skryptu, pozycja schodzi z listy (wtedy działa reguła główna).
+      expect(paths.has(p), p).toBe(false);
+    }
   });
 
   it("harmonogram: 5 pól crona, stan ENABLED|PAUSED", () => {
