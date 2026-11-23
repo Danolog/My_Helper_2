@@ -83,8 +83,10 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   instancji. Dlatego wiersz `echo "instance=$CSQL_INSTANCE"` stoi w bloku
   **przed** poleceniem, a polecenie z pytaniem jest ostatnim wierszem bloku
   (wiersz wklejony za nim zostałby odczytany jako odpowiedź). Właściciel
-  sprawdza nazwę z `echo`, a na pytanie odpowiada tylko `Y` albo `n` — nic
-  innego nie wpisuje.
+  sprawdza nazwę z `echo`, a na pytanie odpowiada tylko `Y` albo `n`,
+  wpisane ręcznie — nic innego nie wpisuje. Domyślna odpowiedź to `Y`:
+  pusty wiersz (Enter) = zgoda. Blok zaznacza się bez pustego wiersza po
+  nim.
 - **Wklejanie do zsh** (próba 2026-11-23):
   - przed pierwszym blokiem właściciel **wpisuje ręcznie** (nie wkleja)
     `unset zle_bracketed_paste`; bez tego zsh dokleja do wklejki znaczniki
@@ -578,7 +580,10 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    **W wariancie z kopią dodatkowo** (nie obowiązuje w wariancie bez kopii,
    plan 1.4): kopia „przed importem” i przywrócenie z niej (bloki 2.4) na
    instancji próbnej: kopia `SUCCESSFUL`, przywrócenie bez błędu, po nim
-   kontrole z 2.4. Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
+   kontrole z 2.4. W próbie przywrócenie idzie **blokiem z pkt 4** (ze
+   strażnikiem instancji produkcyjnej), z ID kopii w `DRILL_BACKUP_ID`;
+   bloku przywrócenia z 2.4 (oczekuje instancji produkcyjnej) w próbie się
+   nie wkleja. Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
    `ALTER DATABASE … SET` siedzi w `pg_db_role_setting`, czyli w kopii
    instancji (`freeze-neon.sh:37-38`). Próba przywraca kopię **na końcu
    próby, po 3.3 kroku 11** (wcześniej przywrócenie opróżniłoby instancję
@@ -636,7 +641,7 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    z gałęzi, która jest jej własnym dzieckiem (`pre-return` jest dzieckiem
    `NEON_BRANCH`); odmowa = sekcja 3 nie ma cofnięcia, okno powrotu nie
    startuje, decyzja architektury. Kopia Cloud SQL „przed powrotem” — jak
-   pkt 4, przywrócenie na końcu próby, po 3.3 kroku 11 i **przed**
+   pkt 4 (przywrócenie blokiem z pkt 4, ID kopii w `DRILL_BACKUP_ID`), przywrócenie na końcu próby, po 3.3 kroku 11 i **przed**
    przywróceniem z pkt 4; po nim kontrola z pkt 4 (`psql_csql_app`,
    `default_transaction_read_only`), oczekiwane **`on`** — kopia „przed
    powrotem” powstaje po zamrożeniu z 3.3 kroku 2 (`freeze-neon.sh:37-38`),
