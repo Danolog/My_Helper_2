@@ -1115,11 +1115,19 @@ export const clientWaitingListResponseSchema = z.object({
 // Konto bierze trasa z sesji. `email` zostaje opcjonalne tylko dla zgodnosci
 // ze starszymi klientami (UI go wysyla), trasa go IGNORUJE.
 // Dozwolone wartosci planSlug to elementy PLANS_ON_SALE z @/lib/plan-catalog.
+// Akceptacja regulaminu i umowy powierzenia: dwie wersje w osobnych polach i
+// zrodlo (formularz rejestracji albo zakladanie salonu z panelu). Tu tylko ksztalt;
+// czy akceptacja obowiazuje i czy wersje sa biezace, rozstrzyga
+// checkLegalAcceptance z @/lib/legal/acceptance.
+const legalVersionField = z.string().min(1).max(64).optional();
 export const registerSubscriptionSchema = z.object({
   planSlug: z.enum(PLANS_ON_SALE, {
     message: `planSlug musi byc jednym z: ${PLANS_ON_SALE.join(", ")}`,
   }),
   email: z.string().optional(),
+  termsVersion: legalVersionField,
+  dpaVersion: legalVersionField,
+  acceptanceSource: z.enum(["registration", "create_salon"]).optional(),
 });
 
 export const sendInvoiceEmailSchema = z.object({

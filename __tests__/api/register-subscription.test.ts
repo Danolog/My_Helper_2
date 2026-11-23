@@ -145,6 +145,31 @@ vi.mock("@/lib/schema", () => {
     salonSubscriptions: table("salonSubscriptions"),
     salons: table("salons"),
     user: table("user"),
+    legalAcceptances: table("legalAcceptances"),
+  };
+});
+
+// Stan publikacji dokumentów prawnych. Domyślnie jak w module (nieopublikowane);
+// testy akceptacji włączają flagę i ustawiają wersje.
+const legalState = vi.hoisted(() => ({
+  published: false,
+  terms: null as string | null,
+  dpa: null as string | null,
+}));
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/legal/documents")>();
+  return {
+    ...real,
+    get LEGAL_DOCS_PUBLISHED() {
+      return legalState.published;
+    },
+    get LEGAL_DOCUMENTS() {
+      return {
+        ...real.LEGAL_DOCUMENTS,
+        terms: { ...real.LEGAL_DOCUMENTS.terms, version: legalState.terms },
+        dpa: { ...real.LEGAL_DOCUMENTS.dpa, version: legalState.dpa },
+      };
+    },
   };
 });
 
@@ -179,6 +204,9 @@ beforeEach(() => {
   opLog.length = 0;
   failInsert = null;
   lockFailure.next = null;
+  legalState.published = false;
+  legalState.terms = null;
+  legalState.dpa = null;
   mockRequireAuth.mockResolvedValue({ session: { user: USER_A }, user: USER_A });
 });
 
@@ -380,5 +408,142 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
     const { status } = await post({ planSlug: 123 });
     expect(status).toBe(400);
     expect(opLog).toEqual([]);
+  });
+});
+
+describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () => {
+  const TERMS_V = "2026-12-01";
+  const DPA_V = "2026-12-02";
+  const ACCEPTED = { termsVersion: TERMS_V, dpaVersion: DPA_V, acceptanceSource: "registration" };
+
+  function publish() {
+    legalState.published = true;
+    legalState.terms = TERMS_V;
+    legalState.dpa = DPA_V;
+  }
+
+  it("dokumenty nieopublikowane: rejestracja bez akceptacji przechodzi, bez wpisów legal_acceptances", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockInsert).not.toHaveBeenCalledWith("legalAcceptances");
+  });
+
+  it("dokumenty nieopublikowane: przysłane wersje są ignorowane (nie ma czego akceptować)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic", ...ACCEPTED });
+
+    expect(status).toBe(200);
+    expect(mockInsert).not.toHaveBeenCalledWith("legalAcceptances");
+  });
+
+  it("(b) opublikowane, bez obu wersji → 400 LEGAL_ACCEPTANCE_REQUIRED, bez zapytań i bez salonu", async () => {
+    publish();
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(400);
+    expect(body.code).toBe("LEGAL_ACCEPTANCE_REQUIRED");
+    expect(Object.keys(body.details as object)).toEqual(expect.arrayContaining(["termsVersion", "dpaVersion"]));
+    expect(body.requiredVersions).toEqual({ terms: TERMS_V, dpa: DPA_V });
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tylko regulamin", { termsVersion: TERMS_V, acceptanceSource: "registration" }],
+    ["tylko DPA", { dpaVersion: DPA_V, acceptanceSource: "registration" }],
+    ["nieaktualna wersja regulaminu", { ...ACCEPTED, termsVersion: "2026-01-01" }],
+    ["nieaktualna wersja DPA", { ...ACCEPTED, dpaVersion: "2026-01-01" }],
+    ["bez źródła akceptacji", { termsVersion: TERMS_V, dpaVersion: DPA_V }],
+  ])("(b) opublikowane, %s → 400, bez salonu", async (_n, fields) => {
+    publish();
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status, body } = await post({ planSlug: "basic", ...fields });
+
+    expect(status).toBe(400);
+    expect(body.code).toBe("LEGAL_ACCEPTANCE_REQUIRED");
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["źródło spoza formularza (email_pilot)", { ...ACCEPTED, acceptanceSource: "email_pilot" }],
+    ["wersja nie jest napisem", { ...ACCEPTED, termsVersion: 20261201 }],
+    ["wersja dłuższa niż 64 znaki", { ...ACCEPTED, dpaVersion: "x".repeat(65) }],
+  ])("%s → 400 z walidacji, bez zapytań", async (_n, fields) => {
+    publish();
+    const { status } = await post({ planSlug: "basic", ...fields });
+    expect(status).toBe(400);
+    expect(opLog).toEqual([]);
+  });
+
+  it("(c) opublikowane, obie bieżące wersje → dwa wpisy w tej samej transakcji co salon i trial", async () => {
+    publish();
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic", ...ACCEPTED, acceptanceSource: "create_salon" });
+
+    expect(status).toBe(200);
+    expect(opLog).toEqual([
+      "select:subscriptionPlans",
+      "tx:start",
+      "lock_timeout",
+      "select:salons",
+      "insert:salons",
+      `lock:salon:${SALON_A}`,
+      "select:salonSubscriptions",
+      "insert:salonSubscriptions",
+      "insert:legalAcceptances",
+      "commit",
+    ]);
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      { salonId: SALON_A, userId: USER_A.id, document: "terms", version: TERMS_V, source: "create_salon" },
+      { salonId: SALON_A, userId: USER_A.id, document: "dpa", version: DPA_V, source: "create_salon" },
+    ]);
+    expect(dbOutsideTx.insert).not.toHaveBeenCalled();
+  });
+
+  it("(c) błąd zapisu akceptacji → rollback salonu i triala, 500", async () => {
+    publish();
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    failInsert = { table: "legalAcceptances", error: Object.assign(new Error("boom"), { code: "XX000" }) };
+
+    const { status } = await post({ planSlug: "basic", ...ACCEPTED });
+
+    expect(status).toBe(500);
+    expect(opLog).toContain("insert:salons");
+    expect(opLog.at(-1)).toBe("rollback");
+  });
+
+  it("opublikowane, salon ma już subskrypcję → 409 bez wpisów akceptacji", async () => {
+    publish();
+    tableRows = {
+      subscriptionPlans: [PLAN_BASIC],
+      salons: [{ id: SALON_A, ownerId: USER_A.id }],
+      salonSubscriptions: [{ id: crypto.randomUUID(), salonId: SALON_A, status: "active" }],
+    };
+
+    const { status } = await post({ planSlug: "basic", ...ACCEPTED });
+
+    expect(status).toBe(409);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("flaga włączona, DPA bez wersji (błąd konfiguracji) → 500, bez zapytań i bez salonu", async () => {
+    legalState.published = true;
+    legalState.terms = TERMS_V;
+    legalState.dpa = null;
+
+    const { status } = await post({ planSlug: "basic", ...ACCEPTED });
+
+    expect(status).toBe(500);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 });
