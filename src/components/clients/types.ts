@@ -13,6 +13,10 @@ export interface ClientData {
   notes: string | null;
   preferences: string | null;
   allergies: string | null;
+  /** Czas zapisu zgody na informacje o zdrowiu (nadaje serwer); `null` = brak zgody. */
+  healthDataConsentAt: string | null;
+  /** Konto personelu, które zapisało zgodę. */
+  healthDataConsentBy: string | null;
   favoriteEmployeeId: string | null;
   birthday: string | null;
   requireDeposit: boolean | null;
@@ -132,4 +136,6 @@ export interface Employee {
   role: string;
   isActive: boolean;
   color: string | null;
+  /** Konto powiązane z pracownikiem (zwraca je lista pracowników). */
+  userId?: string | null;
 }
