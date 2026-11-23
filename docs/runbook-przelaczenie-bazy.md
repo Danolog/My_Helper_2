@@ -581,9 +581,18 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    plan 1.4): kopia „przed importem” i przywrócenie z niej (bloki 2.4) na
    instancji próbnej: kopia `SUCCESSFUL`, przywrócenie bez błędu, po nim
    kontrole z 2.4. W próbie przywrócenie idzie **blokiem z pkt 4** (ze
-   strażnikiem instancji produkcyjnej), z ID kopii w `DRILL_BACKUP_ID`;
-   bloku przywrócenia z 2.4 (oczekuje instancji produkcyjnej) w próbie się
-   nie wkleja. Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
+   strażnikiem instancji produkcyjnej); bloku przywrócenia z 2.4 (oczekuje
+   instancji produkcyjnej) w próbie się nie wkleja. `DRILL_BACKUP_ID` trzyma
+   wtedy jeszcze ID kopii `drill-restore` — przed przywróceniem trzeba ją
+   przestawić na ID kopii „przed importem”:
+
+   ```bash
+   set +x
+   : "${PRE_IMPORT_ID:?}" && DRILL_BACKUP_ID="$PRE_IMPORT_ID" && echo "drill_backup=$DRILL_BACKUP_ID"
+   ```
+
+   Oczekiwane: `drill_backup=<ID>` równe ID `pre-import-<RRRRMMDD>`
+   z notatki próby (lista 2.4); inne ID albo błąd = stop. Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
    `ALTER DATABASE … SET` siedzi w `pg_db_role_setting`, czyli w kopii
    instancji (`freeze-neon.sh:37-38`). Próba przywraca kopię **na końcu
    próby, po 3.3 kroku 11** (wcześniej przywrócenie opróżniłoby instancję
@@ -641,8 +650,19 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    z gałęzi, która jest jej własnym dzieckiem (`pre-return` jest dzieckiem
    `NEON_BRANCH`); odmowa = sekcja 3 nie ma cofnięcia, okno powrotu nie
    startuje, decyzja architektury. Kopia Cloud SQL „przed powrotem” — jak
-   pkt 4 (przywrócenie blokiem z pkt 4, ID kopii w `DRILL_BACKUP_ID`), przywrócenie na końcu próby, po 3.3 kroku 11 i **przed**
-   przywróceniem z pkt 4; po nim kontrola z pkt 4 (`psql_csql_app`,
+   pkt 4, przywrócenie blokiem z pkt 4 na końcu próby, po 3.3 kroku 11
+   i **przed** przywróceniem z pkt 4. Przed nim `DRILL_BACKUP_ID` na ID
+   kopii „przed powrotem” (lista z 3.x pkt 4), tym samym wzorem:
+
+   ```bash
+   set +x
+   : "${PRE_RETURN_ID:?}" && DRILL_BACKUP_ID="$PRE_RETURN_ID" && echo "drill_backup=$DRILL_BACKUP_ID"
+   ```
+
+   Oczekiwane: ID równe `pre-return-<RRRRMMDD>` z notatki próby; inne =
+   stop. Po tym przywróceniu, przed przywróceniem z pkt 4, zmienna wraca na
+   ID „przed importem” (blok wyżej, z `PRE_IMPORT_ID`). Po przywróceniu
+   „przed powrotem” kontrola z pkt 4 (`psql_csql_app`,
    `default_transaction_read_only`), oczekiwane **`on`** — kopia „przed
    powrotem” powstaje po zamrożeniu z 3.3 kroku 2 (`freeze-neon.sh:37-38`),
    inaczej niż kopia z pkt 4 (tam `off`). Inny wynik = stop; wynik w zapisie
