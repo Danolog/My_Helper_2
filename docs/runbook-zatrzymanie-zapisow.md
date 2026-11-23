@@ -178,7 +178,7 @@ przed zaporą, albo zapora nie dopasowuje hosta adresu wdrożenia; próba tego
 nie rozstrzyga, więc kodu zapory na adresie wdrożenia nie znamy); czy wywołanie crona przechodzi przez
 zaporę (dlatego L2 jest osobnym krokiem); ponawianie zdarzeń Stripe na
 zmieniony adres (inny wynik = zdarzenia z okna ponawia się ręcznie z panelu
-Stripe); składnia `--format` w W0; składnia w P3, P5 i W4 (potwierdzone 2026-11-23, `docs/drills/restore-20261123.md`); rewizja obsługująca ruch w P5 i W4 — `traffic[0]` zwracał w próbie rewizję z wpisu z samym tagiem (0% ruchu), poprawione na `--flatten='status.traffic'`; nagłówek `x-vercel-id` w T6 (potwierdzone 2026-11-23 wariantem z `--resolve`, jak P6, `docs/drills/restore-20261123.md`); nazwy zmiennych rewizji w P5 (`spec.containers[0].env[].name`) (potwierdzone 2026-11-23, `docs/drills/restore-20261123.md`) i odczyt wyników zadań Schedulera po R5; odczyt `metadata.creationTimestamp` rewizji i zapytanie o wpisy „Invalid origin” (sekcja 3, „Kontrola originu logowania”: pola `message` i `origin` w `jsonPayload`, `--bucket`/`--view`) (potwierdzone 2026-11-23, `docs/drills/restore-20261123.md`). Ponawianie zdarzeń Stripe — nie dotyczy (Stripe nieużywany).
+Stripe); składnia `--format` w W0; składnia w P3, w P5 (poza `secrets versions list`) i w W4 (potwierdzone 2026-11-23, `docs/drills/restore-20261123.md`); `secrets versions list` w P5 do potwierdzenia; rewizja obsługująca ruch w P5 i W4 — `traffic[0]` zwracał w próbie rewizję z wpisu z samym tagiem (0% ruchu), poprawione na `--flatten='status.traffic'`; nagłówek `x-vercel-id` w T6 (potwierdzone 2026-11-23 wariantem z `--resolve`, jak P6, `docs/drills/restore-20261123.md`); nazwy zmiennych rewizji w P5 (`spec.containers[0].env[].name`) (potwierdzone 2026-11-23, `docs/drills/restore-20261123.md`) i odczyt wyników zadań Schedulera po R5; odczyt `metadata.creationTimestamp` rewizji i zapytanie o wpisy „Invalid origin” (sekcja 3, „Kontrola originu logowania”): składnia i `--bucket`/`--view` potwierdzone 2026-11-23 (`docs/drills/restore-20261123.md`); dopasowanie pól `message` i `origin` w `jsonPayload` do żywego wpisu niepotwierdzone (pusty wynik w próbie). Ponawianie zdarzeń Stripe — nie dotyczy (Stripe nieużywany).
 
 ## 1. Warunki przed oknem
 
@@ -464,7 +464,7 @@ gcloud --project='<projekt GCP>' run revisions describe <nazwa rewizji z P5> --r
 gcloud --project='<projekt GCP>' logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="myhelper" AND severity=WARNING AND jsonPayload.message="Invalid origin" AND jsonPayload.origin="https://app.nordsignal.cc" AND timestamp>="<czas rewizji z P5>"' --bucket=myhelper-logs --location=europe-central2 --view=_AllLogs --limit=5 --format='value(timestamp)'
 ```
 
-Oczekiwane (oba polecenia potwierdzone 2026-11-23, `docs/drills/restore-20261123.md`): rejestracja
+Oczekiwane (składnia obu poleceń potwierdzona 2026-11-23, `docs/drills/restore-20261123.md`; dopasowanie filtru do żywego wpisu niepotwierdzone, pusty wynik w próbie): rejestracja
 i logowanie bez 403; drugie polecenie bez błędu gcloud i z pustym wynikiem.
 Wpisy z innymi originami (obcy ruch na publicznym adresie) filtr pomija
 celowo. Dowolny wiersz wyniku albo 403 `INVALID_ORIGIN` przy rejestracji lub
