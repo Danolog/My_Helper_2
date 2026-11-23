@@ -3,22 +3,14 @@
  * BLIK, i jej wersja (w kodzie nazwy z „consent” zostają dla zgodności
  * z kolumnami i kontraktem trasy).
  *
- * Moduł importuje tylko rejestr dokumentów prawnych (też bez importów) —
- * bezpieczny dla klienta i serwera (trasa `/api/salon/blik-deposit`
- * porównuje wersję).
+ * Moduł bez importów — bezpieczny dla klienta i serwera (trasa
+ * `/api/salon/blik-deposit` porównuje wersję).
  *
  * Zmiana któregokolwiek zdania albo etykiety wymaga nowej wersji
  * (`BLIK_CONSENT_VERSION`) i ponownej zgody właściciela. Test
  * `__tests__/lib/blik-consent.test.ts` trzyma skrót treści per wersja:
  * zmiana treści bez nowej wersji daje czerwony wynik.
  */
-
-import {
-  isLegalPagePublished,
-  LEGAL_DOCS_PUBLISHED,
-  LEGAL_DOCUMENTS,
-  type LegalDocuments,
-} from "@/lib/legal/documents";
 
 /** Wersja treści zgody zapisywana przez serwer obok `blikConsentAt`. */
 export const BLIK_CONSENT_VERSION = "2026-11-23";
@@ -50,32 +42,16 @@ export const BLIK_CONSENT_LABEL =
   "Rozumiem, że ten numer zobaczy każda osoba rezerwująca wizytę z zadatkiem, i chcę włączyć wpłaty BLIK na ten numer.";
 
 /**
- * Adres polityki prywatności dla karty BLIK: adres strony z rejestru
- * dokumentów, ale tylko gdy polityka jest opublikowana; inaczej `null`.
- * Parametry istnieją, żeby test sprawdzał regułę przy obu wartościach flagi
- * bez atrapy modułu.
- */
-export function blikPrivacyPolicyHref(
-  published: boolean = LEGAL_DOCS_PUBLISHED,
-  documents: LegalDocuments = LEGAL_DOCUMENTS,
-): string | null {
-  return isLegalPagePublished("privacy", published, documents)
-    ? documents.privacy.href
-    : null;
-}
-
-/**
  * Adres polityki prywatności. Dopóki stała jest `null`, serwer odrzuca zapis
  * numeru BLIK (409 `BLIK_SETTINGS_NOT_AVAILABLE`); usunięcie numeru działa
- * także przy zamkniętym zapisie.
- *
- * Wartość wynika wyłącznie ze stałych w kodzie (flaga publikacji i wersja
- * polityki w `@/lib/legal/documents`), więc publikacja polityki otwiera zapis
- * numeru i link na karcie w tym samym wdrożeniu, a link nigdy nie prowadzi
- * do strony 404. Zmiana flagi lub wersji polityki wymaga recenzji
- * bezpieczeństwa i zgody właściciela produktu na treść polityki prywatności.
+ * także przy zamkniętym zapisie. Ta stała otwiera zapis numeru — jej zmiana
+ * wymaga recenzji bezpieczeństwa i zgody właściciela produktu na treść
+ * polityki prywatności. Stała nie wynika z rejestru dokumentów: publikacja
+ * polityki sama niczego tu nie otwiera. Test `__tests__/lib/blik-consent.test.ts`
+ * pilnuje, że wartość inna niż `null` wymaga opublikowanej polityki i adresu
+ * równego adresowi z rejestru (bez linku do strony 404).
  */
-export const BLIK_PRIVACY_POLICY_HREF: string | null = blikPrivacyPolicyHref();
+export const BLIK_PRIVACY_POLICY_HREF: string | null = null;
 
 /** 409: wersja zgody z żądania inna niż bieżąca (karta otwarta przed zmianą treści). */
 export const BLIK_CONSENT_VERSION_STALE = "BLIK_CONSENT_VERSION_STALE";

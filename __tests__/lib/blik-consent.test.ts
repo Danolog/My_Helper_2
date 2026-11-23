@@ -14,12 +14,11 @@ import {
   BLIK_CONSENT_VERSION_STALE,
   BLIK_PRIVACY_POLICY_HREF,
   BLIK_SETTINGS_NOT_AVAILABLE,
-  blikPrivacyPolicyHref,
 } from "@/lib/blik-consent";
 import {
+  isLegalPagePublished,
   LEGAL_DOCS_PUBLISHED,
   LEGAL_DOCUMENTS,
-  type LegalDocuments,
 } from "@/lib/legal/documents";
 
 const CONTENT_SHA256_BY_VERSION: Record<string, string> = {
@@ -81,33 +80,17 @@ describe("blik-consent", () => {
 
   it("adres polityki prywatności to null — zapis numeru zamknięty", () => {
     expect(BLIK_PRIVACY_POLICY_HREF === null).toBe(true);
-    expect(LEGAL_DOCS_PUBLISHED).toBe(false);
   });
 
-  describe("adres polityki z rejestru dokumentów", () => {
-    const withPrivacyVersion = (version: string | null): LegalDocuments => ({
-      ...LEGAL_DOCUMENTS,
-      privacy: { ...LEGAL_DOCUMENTS.privacy, version },
-    });
-
-    it("flaga wyłączona: null, także przy ustalonej wersji polityki", () => {
-      expect(blikPrivacyPolicyHref(false, withPrivacyVersion("2026-11-23"))).toBeNull();
-    });
-
-    it("flaga włączona, polityka bez wersji: null (strona nadal 404)", () => {
-      expect(blikPrivacyPolicyHref(true, withPrivacyVersion(null))).toBeNull();
-    });
-
-    it("flaga włączona i wersja polityki: adres strony polityki z rejestru", () => {
-      expect(blikPrivacyPolicyHref(true, withPrivacyVersion("2026-11-23"))).toBe(
-        LEGAL_DOCUMENTS.privacy.href
-      );
-      expect(LEGAL_DOCUMENTS.privacy.href).toBe("/privacy");
-    });
-
-    it("bez argumentów odpowiada stałej modułu", () => {
-      expect(blikPrivacyPolicyHref()).toBe(BLIK_PRIVACY_POLICY_HREF);
-    });
+  // Niezmiennik: adres polityki na karcie BLIK ustawia się jawnie, ale nigdy
+  // przed publikacją polityki — inaczej link prowadziłby do strony 404.
+  it("adres polityki ustawiony ⇒ polityka opublikowana i adres równy adresowi z rejestru", () => {
+    if (BLIK_PRIVACY_POLICY_HREF !== null) {
+      expect(LEGAL_DOCS_PUBLISHED).toBe(true);
+      expect(LEGAL_DOCUMENTS.privacy.version).not.toBeNull();
+      expect(isLegalPagePublished("privacy")).toBe(true);
+      expect(BLIK_PRIVACY_POLICY_HREF).toBe(LEGAL_DOCUMENTS.privacy.href);
+    }
   });
 
   it("kody odpowiedzi 409", () => {
