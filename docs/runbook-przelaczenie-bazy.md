@@ -526,14 +526,15 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   : "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)')
+   : "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)' </dev/null) || prev_restore='BLAD'
    echo "instance=$CSQL_INSTANCE prev_restore=${prev_restore:-brak} start=$(date -u +%FT%TZ)"
    : "${CSQL_INSTANCE:?}" && : "${DRILL_BACKUP_ID:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql backups restore "$DRILL_BACKUP_ID" --restore-instance="$CSQL_INSTANCE"
    ```
 
    Oczekiwane: `instance=<instancja próbna> prev_restore=<ID albo brak>
-   start=<czas UTC>`, cały wiersz do notatki; inna nazwa = odpowiedź `n`,
-   stop. Na pytanie gcloud tylko `Y` albo `n`. Przywrócenie trwa długo
+   start=<czas UTC>`, cały wiersz do notatki; inna nazwa albo
+   `prev_restore=BLAD` = odpowiedź `n`, stop. `brak` jest poprawny tylko
+   wtedy, gdy na tej instancji nie było jeszcze przywrócenia. Na pytanie gcloud tylko `Y` albo `n`. Przywrócenie trwa długo
    (w próbie ok. 16 min, gcloud czekał do końca); błąd czasu albo zerwany
    terminal = przywrócenia **nie powtarzać**, `sql operations wait`
    (sekcja 0, „Długie operacje Cloud SQL”). Potem:
@@ -1177,14 +1178,16 @@ otwarte połączenia padają.
 
 ```bash
 set +x
-: "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)')
+: "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)' </dev/null) || prev_restore='BLAD'
 echo "instance=$CSQL_INSTANCE prev_restore=${prev_restore:-brak} start=$(date -u +%FT%TZ)"
 : "${CSQL_INSTANCE:?}" && : "${PRE_IMPORT_ID:?}" && gcloud --project='<projekt GCP>' sql backups restore "$PRE_IMPORT_ID" --restore-instance="$CSQL_INSTANCE"
 ```
 
 Oczekiwane: `instance=<instancja produkcyjna> prev_restore=<ID albo brak>
-start=<czas UTC>`, cały wiersz do notatki okna; inna nazwa = odpowiedź `n`, stop. Na pytanie gcloud tylko `Y`
-albo `n`. Błąd czasu albo zerwany
+start=<czas UTC>`, cały wiersz do notatki okna; inna nazwa albo
+`prev_restore=BLAD` = odpowiedź `n`, stop. `brak` jest poprawny tylko
+wtedy, gdy na tej instancji nie było jeszcze przywrócenia. Na pytanie
+gcloud tylko `Y` albo `n`. Błąd czasu albo zerwany
 terminal = przywrócenia **nie powtarzać**, `sql operations wait`
 (sekcja 0, „Długie operacje Cloud SQL”; w próbie
 przywrócenie trwało ok. 16 min). Potem:
