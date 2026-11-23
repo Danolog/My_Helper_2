@@ -33,6 +33,9 @@
 >   K1.4 i R1 = „nie dotyczy”. Do K1 Vercel przyjmuje zapisy do Neona, które
 >   nie przechodzą na GCP. Dopuszczalne tylko przy F8 = „nie”; przy F8 = „tak”
 >   L1 wraca do nowej decyzji przed oknem.
+> - **Fakty z próby 2026-11-23:** F2 = tak, F3 = nie (tabela 0.2). L2, W3
+>   i R3 = „nie dotyczy (plan Hobby, F3 = nie)”; W3 to kontrola godziny
+>   startu i planowanego końca okna, pierwszy raz na koniec W0.
 > - **Konta:** na GCP nie ma kont ani danych z Vercela. Każdy zakłada konto
 >   od nowa.
 > - **Powrót bez danych** jest ważny do pierwszego prawdziwego salonu na GCP
@@ -117,8 +120,8 @@ Skutki:
 
 | | Decyzja | Kroki |
 |---|---|---|
-| L1 | Zatrzymanie zapisów Vercela = reguła zapory Vercela (Firewall → Custom Rules) na poziomie projektu: `Deny` dla wszystkich żądań (każda ścieżka, każda metoda), bez wyjątków. Tworzona przed oknem jako wyłączona; w oknie włączana i publikowana; cofnięcie = wyłączenie. Bez kodu i bez wdrożenia. Blokuje też `GET`, bo `GET` odświeża sesję. Zmienna środowiskowa odpada (wymaga wdrożenia w oknie). Jeśli plan Vercela nie daje reguł własnych z `Deny` (F2 = nie): stop, nowa decyzja przed próbą (wariant zapasowy: tryb utrzymania w aplikacji, osobny PR w pełnym procesie). W wariancie bez kopii (plan 1.4) F2 nie jest warunkiem okna: przy F2 = nie — blok na górze („Zapora (L1) przy F2 = nie”) | W1, R1, K1.2 |
-| L2 | Crony Vercela: Settings → Cron Jobs → „Disable Cron Jobs” (oba crony, `vercel.json:9-12`); cofnięcie = „Enable”. Okno poza 02:00–03:30 UTC. Po udanym oknie crony Vercela zostają wyłączone na stałe (pracę przejmuje Cloud Scheduler); usunięcie ich z `vercel.json` — osobny krok porządkowy po oknie | W3, R3 |
+| L1 | Zatrzymanie zapisów Vercela = reguła zapory Vercela (Firewall → Custom Rules) na poziomie projektu: `Deny` dla wszystkich żądań (każda ścieżka, każda metoda), bez wyjątków. Tworzona przed oknem jako wyłączona; w oknie włączana i publikowana; cofnięcie = wyłączenie. Bez kodu i bez wdrożenia. Blokuje też `GET`, bo `GET` odświeża sesję. Zmienna środowiskowa odpada (wymaga wdrożenia w oknie). Jeśli plan Vercela nie daje reguł własnych z `Deny` (F2 = nie): stop, nowa decyzja przed próbą (wariant zapasowy: tryb utrzymania w aplikacji, osobny PR w pełnym procesie). W wariancie bez kopii (plan 1.4) F2 nie jest warunkiem okna: przy F2 = nie — blok na górze („Zapora (L1) przy F2 = nie”). Zapora projektu wystarczy. Pierwsze włączenie reguły dla całego projektu następuje w oknie (W1); przed oknem nie testuje się jej na domenie produkcyjnej (sekcja 0.3) | W1, R1, K1.2 |
+| L2 | Crony Vercela: Settings → Cron Jobs → „Disable Cron Jobs” (oba crony, `vercel.json:9-12`); cofnięcie = „Enable”. Okno poza 02:00–03:30 UTC (plan Hobby: poza 02:00–04:00 UTC, bo cron startuje w dowolnej chwili zadanej godziny). Po udanym oknie crony Vercela zostają wyłączone na stałe (pracę przejmuje Cloud Scheduler); usunięcie ich z `vercel.json` — osobny krok porządkowy po oknie. W wariancie bez kopii (plan 1.4) przy F3 = nie (plan Hobby nie ma przełącznika): „nie dotyczy, okno poza 02:00–04:00 UTC” (na Hobby cron `0 3 * * *` może ruszyć do 03:59 — dokumentacja Vercela, „Hobby scheduling limits”). Uzasadnienie: crony Vercela piszą tylko do Neona; Neona nie kopiujemy ani nie zamrażamy; Cloud SQL startuje pusty; na GCP pracę cronów przejmuje Cloud Scheduler (W6/R5), więc nic nie wykona się dwa razy na tej samej bazie. Usunięcie klucza `crons` z `vercel.json` — osobny krok porządkowy po oknie (sekcja 7 pkt 2) | W3, R3 |
 | L3 | Przed oknem, na stałe: Deployment Protection = „Standard Protection” (Vercel Authentication — blokuje Preview i wygenerowane adresy starszych wdrożeń Production, domena produkcyjna działa dalej) oraz usunięcie `POSTGRES_URL` z zakresu Preview. Preview nie dostaje go z powrotem (nowe Preview nie powstają, `vercel.json:3-7`; gdy wrócą — osobna gałąź Neona). Istniejących wdrożeń Preview nie usuwa się. W oknie W2 = odczyt stanu | P11, W2, R2 |
 | L4 | Zmiana domeny (wyżej). Rekord `A app` → `<LB_IP>`, **DNS only** (bez proxy Cloudflare — `TRUSTED_PROXIES` ustawiony z pomiaru adresów LB, `env.example:70-81`), TTL 60 s. Droga B = usunięcie rekordu. Przekierowanie starej domeny = K1 po 2.10 z kodem 0 albo po drodze C (sekcja 3, K1); w wariancie bez kopii (plan 1.4) K1 po 2.9 i po 2.8 z kodem 0 | P7, T4–T6, B1–B3, K1 |
 | L5 | Google OAuth: według F5/F6. Jeśli logowanie Google działa na Vercelu — przed oknem **dopisać** (nie podmieniać) adres przekierowania i origin `app.nordsignal.cc` do tego samego klienta OAuth; wersja `google-client-secret` i `GOOGLE_CLIENT_ID` w `production-gcp` przed przebiegiem z P5. Wersja sekretu jak w L6: `pbpaste \| CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions add google-client-secret --data-file=-`, potem `pbcopy </dev/null`. Jeśli nie działa — GCP startuje bez Google, P8 = „nie dotyczy”, a przed P10 osobne sprawdzenie w kodzie, że przycisk Google nie pokazuje się bez `GOOGLE_CLIENT_ID`. Logowania Google na GCP nie testuje się przed oknem (zapis do pustego Cloud SQL rozbiłby `--expect-empty`) — pierwsza próba po 2.10. W wariancie bez kopii (plan 1.4) Google jest wyłączony na betę niezależnie od F5/F6: GCP startuje bez Google, P8 = „nie dotyczy”, bez dopisywania adresów do klienta OAuth i bez wersji `google-client-secret`; sprawdzenie w kodzie przed P10 obowiązuje (warunek P10). Zdanie o pierwszej próbie po 2.10 nie obowiązuje | P4, P5, P8, P10 |
@@ -134,8 +137,8 @@ Odpowiedź tylko do notatki okna — bez wartości w repo i w zgłoszeniach.
 | | Co | Gdzie | Postać odpowiedzi | Skutek |
 |---|---|---|---|---|
 | F1 | domena Production projektu i inne domeny | Vercel → projekt → Settings → Domains | host = `<domena Vercel Production>`; lista innych domen albo „brak” | każda inna domena dostaje to samo przekierowanie w K1 |
-| F2 | reguła własna z akcją `Deny` | Vercel → projekt → Firewall | tak/nie; limit reguł | „nie” = L1 do nowej decyzji, okno nie startuje; w wariancie bez kopii (plan 1.4) nie jest warunkiem okna — blok na górze („Zapora (L1) przy F2 = nie”) |
-| F3 | przełącznik „Disable Cron Jobs” | Vercel → Settings → Cron Jobs | tak/nie | „nie” = L2 do nowej decyzji |
+| F2 | reguła własna z akcją `Deny` | Vercel → projekt → Firewall | tak/nie; limit reguł | „nie” = L1 do nowej decyzji, okno nie startuje; w wariancie bez kopii (plan 1.4) nie jest warunkiem okna — blok na górze („Zapora (L1) przy F2 = nie”). **Odczyt 2026-11-23: tak** — reguły `Deny` działają na planie Hobby (sprawdzone przez CLI `vercel firewall rules add`, `publish`, `remove`) |
+| F3 | przełącznik „Disable Cron Jobs” | Vercel → Settings → Cron Jobs | tak/nie | „nie” = L2 do nowej decyzji. **Odczyt 2026-11-23: nie** — plan Hobby nie ma przełącznika wyłączającego crony; decyzja w L2 (wariant bez kopii: „nie dotyczy”) |
 | F4 | obecne ustawienie ochrony wdrożeń | Vercel → Settings → Deployment Protection | nazwa ustawienia | wejście do P11 |
 | F5 | zakresy `POSTGRES_URL`; `GOOGLE_CLIENT_ID` w Production | Vercel → Settings → Environment Variables | lista zakresów (Production / Preview / Development); tak/nie | wejście do P11 i L5; w wariancie bez kopii (plan 1.4) tylko zakresy `POSTGRES_URL` (P11), część o `GOOGLE_CLIENT_ID` nie obowiązuje |
 | F6 | adresy przekierowań i originy klienta OAuth z F5 | konsola Google → Credentials → klient OAuth | host = `<domena Vercel Production>` tak/nie; inne hosty: liczba (bez identyfikatora klienta) | wejście do P8 (L5); nie obowiązuje w wariancie bez kopii (plan 1.4) — Google wyłączony na betę |
@@ -144,7 +147,7 @@ Odpowiedź tylko do notatki okna — bez wartości w repo i w zgłoszeniach.
 
 ### 0.3 Próba generalna na produkcji (L8)
 
-Godzina małego ruchu, poza 02:00–03:30 UTC; zgoda: wiersz 1.2 „próba
+Godzina małego ruchu, poza 02:00–03:30 UTC (plan Hobby: poza 02:00–04:00 UTC); zgoda: wiersz 1.2 „próba
 generalna na produkcji”; każdy wynik w `docs/drills/`. W `docs/drills/` wyniki P3, P5, W0, T5 bez adresów IP, hostów i numerów projektu — tylko tak/nie, stany, czasy.
 
 | W próbie | Co sprawdza |
@@ -152,9 +155,9 @@ generalna na produkcji”; każdy wynik w `docs/drills/`. W `docs/drills/` wynik
 | W0, W4, P2–P5 | odczyty, składnia poleceń |
 | W5 → T1 (ingress `internal` → `all`) — nie obowiązuje w wariancie bez kopii (plan 1.4) | oba `curl` z W5; usługa nie ma użytkowników |
 | W6 → R5 (pauza i wznowienie zadań Scheduler) | Cloud SQL pusty, zadania bez skutków |
-| przełącznik cronów Vercela wyłącz → włącz | F3, ścieżka w panelu |
-| reguła zapory jak w L1, zawężona warunkiem do hosta `<adres starszego wdrożenia>`; potem usunięta (przy F2 = nie — nie dotyczy) | czy zapora obejmuje adresy wdrożeń; kod odpowiedzi W1 |
-| odczyt W2 | kod odpowiedzi przy ochronie wdrożeń |
+| przełącznik cronów Vercela wyłącz → włącz | F3, ścieżka w panelu. Wynik 2026-11-23: przełącznika nie ma (F3 = nie, L2) |
+| reguła zapory jak w L1, zawężona warunkiem do hosta `<adres starszego wdrożenia>`; potem usunięta (przy F2 = nie — nie dotyczy) | czy zapora obejmuje adresy wdrożeń; kod odpowiedzi W1. Wynik 2026-11-23: starsze wdrożenie nadal `302` do SSO, produkcja `200` przez cały test, reguła usunięta. Wniosek nierozstrzygnięty: albo ochrona wdrożeń działa przed zaporą, albo zapora nie dopasowuje hosta adresu wdrożenia |
+| odczyt W2 | kod odpowiedzi przy ochronie wdrożeń. Wynik 2026-11-23: `302` do SSO; adres przekierowania odczytany tego dnia: `https://vercel.com/sso-api…` |
 | zgodność sekretu Stripe (P9): tylko `yes`/`no` — nie dotyczy (Stripe nieużywany) | zgodność sekretu |
 | zmiana adresu endpointu i ponowienie zdarzeń w **trybie testowym** Stripe — nie dotyczy (Stripe nieużywany) | czy Stripe ponawia zdarzenia na zmieniony adres |
 | W7 na gałęzi próbnej Neona (zasada 1.1) — nie obowiązuje w wariancie bez kopii (plan 1.4) | składnia i zachowanie liczników |
@@ -169,7 +172,10 @@ Google na GCP nie obowiązują; kontrolą zastępczą jest P6.
 
 **Do potwierdzenia w próbie** (nieznane zachowanie Vercela i Stripe): kod
 odpowiedzi zapory (`403`) na domenie i na adresie wdrożenia; kod odpowiedzi
-ochrony wdrożeń (`401` albo `403`); czy wywołanie crona przechodzi przez
+ochrony wdrożeń (`401` albo `403`; w próbie 2026-11-23: `302` do SSO;
+reguła `Deny` na hoście wdrożenia nie zmieniła `302` — albo ochrona działa
+przed zaporą, albo zapora nie dopasowuje hosta adresu wdrożenia; próba tego
+nie rozstrzyga, więc kodu zapory na adresie wdrożenia nie znamy); czy wywołanie crona przechodzi przez
 zaporę (dlatego L2 jest osobnym krokiem); ponawianie zdarzeń Stripe na
 zmieniony adres (inny wynik = zdarzenia z okna ponawia się ręcznie z panelu
 Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6 (w próbie wariantem z `--resolve`, jak P6); nazwy zmiennych rewizji w P5 (`spec.containers[0].env[].name`) i odczyt wyników zadań Schedulera po R5; odczyt `metadata.creationTimestamp` rewizji i zapytanie o wpisy „Invalid origin” (sekcja 3, „Kontrola originu logowania”: pola `message` i `origin` w `jsonPayload`, `--bucket`/`--view`). Ponawianie zdarzeń Stripe — nie dotyczy (Stripe nieużywany).
@@ -192,7 +198,7 @@ P9, P11, P12) i „przed oknem: zmienne środowiska `production-gcp` …” (P4,
 | P8 | Google OAuth (L5) | konsola Google: klient OAuth z F6 | lista przekierowań zawiera `https://app.nordsignal.cc/api/auth/callback/google` obok dotychczasowego, originy zawierają `https://app.nordsignal.cc`; przy L5 „nie działa” — „nie dotyczy”. W wariancie bez kopii (plan 1.4) — „nie dotyczy” (Google wyłączony na betę) |
 | P9 | **Nie dotyczy (Stripe nieużywany).** Stripe (L6) | panel Stripe live: endpoint z F7 ma adres `https://<domena Vercel Production>/api/stripe/webhook`. Zgodność sekretu: właściciel kopiuje sekret podpisu z panelu, potem jedno porównanie bez wypisywania skrótów: `[ "$(pbpaste \| shasum -a 256)" = "$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=stripe-webhook-secret \| shasum -a 256)" ] && echo stripe_secret_match=yes \|\| echo stripe_secret_match=no; pbcopy </dev/null` (na ekranie tylko `yes`/`no`; sekret nie zostaje w schowku). Końcowy znak nowej linii w schowku da fałszywe `no` — kopiować sam sekret; sprawdzić w próbie; przy `no` powtórzyć kopiowanie, sekretu nie zmieniać | adres na `<domena Vercel Production>` (na `app.nordsignal.cc` dopiero po T8); `stripe_secret_match=yes` — do notatki „równe tak/nie”; przy F7 = brak — „nie dotyczy” |
 | P10 | F1–F8 odczytane, wyniki „do potwierdzenia w próbie” w `docs/drills/` | — | brak decyzji otwartej (F2, F3, F7). W wariancie bez kopii (plan 1.4): F6 i F7 „nie dotyczy”, F2 nie otwiera decyzji (blok na górze), a w notatce wynik sprawdzenia w kodzie, że przycisk Google nie pokazuje się bez `GOOGLE_CLIENT_ID` (L5); przycisk widoczny = okno nie startuje |
-| P11 | Preview i starsze wdrożenia zamknięte (L3) | panel Vercela: Deployment Protection = „Standard Protection”; Environment Variables: `POSTGRES_URL` bez zakresu Preview; `curl -s -o /dev/null -w '%{http_code}\n' "https://<adres wdrożenia Preview>/api/health"` | ustawienie i zakresy jak obok; `401` albo `403` (do potwierdzenia w próbie) |
+| P11 | Preview i starsze wdrożenia zamknięte (L3) | panel Vercela: Deployment Protection = „Standard Protection”; Environment Variables: `POSTGRES_URL` bez zakresu Preview; `curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "https://<adres wdrożenia Preview>/api/health"` | ustawienie i zakresy jak obok; `302 https://vercel.com/sso-api…` (302 z adresem od `https://vercel.com/sso-api`), `401` albo `403` = zamknięte; `200` = okno nie startuje; inny kod (także `302` na inny adres) = okno nie startuje (próba 2026-11-23: `302` do SSO) |
 | P12 | reguła zapory gotowa (L1) | panel Vercela → Firewall: reguła `Deny`, cały projekt, każda ścieżka i metoda | reguła istnieje, **wyłączona**; w wariancie bez kopii (plan 1.4) przy F2 = nie — „nie dotyczy” |
 | P13 | PR K1 gotowy | PR z przekierowaniem w `vercel.json` (sekcja 3, K1) zrecenzowany (1 recenzja — konfiguracja routingu), niescalony | recenzja zatwierdzona, PR otwarty |
 | P14 | scalenie K1 nie wdraża GCP | `deploy-cloud-run.yml` w dniu okna ma tylko wyzwalacz `workflow_dispatch` (odczyt `on:` w pliku na `<sha okna>`) | tylko `workflow_dispatch`; inny wyzwalacz = okno nie startuje (zmiana wyzwalacza przed oknem to osobny krok i nowa decyzja) |
@@ -206,10 +212,10 @@ W0–W4 i W6; W5 i W7 nie obowiązują, a „stop przed 2.2” znaczy „stop pr
 
 | Krok | Działanie | Zgoda (1.2) |
 |---|---|---|
-| W0 | zapis stanu sprzed okna | — (odczyt) |
+| W0 | zapis stanu sprzed okna; przy F3 = nie: kontrola godziny (blok z W3) | — (odczyt) |
 | W1 | reguła zapory Vercela włączona (L1) | „start okna” |
 | W2 | Preview i starsze wdrożenia zamknięte (L3) | — (odczyt; zmiana przed oknem, P11) |
-| W3 | crony Vercela wyłączone (L2) | „start okna” |
+| W3 | crony Vercela wyłączone (L2); przy F3 = nie: kontrola godziny, odczyt | „start okna” |
 | W4 | sha `main` bez zmian (L7) | — (odczyt) |
 | W5 | ingress Cloud Run `internal` | „start okna” |
 | W6 | zadania Scheduler wstrzymane | „start okna” |
@@ -230,28 +236,87 @@ polecenia gcloud do potwierdzenia w próbie (składnia `--format`). Listy zadań
 nie odczytuje się z polem nagłówków (`docs/runbook-krok-d.md` sekcja 4,
 koniec). Zakaz scaleń (L7) ogłoszony przed W0.
 
+W wariancie bez kopii przy F3 = nie: na koniec W0 blok `date -u` z W3;
+wynik poza przedziałem = okno nie startuje.
+
 **W1 — Vercel Production.** Panel Vercela → Firewall: włączyć regułę z P12
-i opublikować. Kontrola (do potwierdzenia w próbie):
+i opublikować. To pierwsze włączenie reguły dla całego projektu (L1); przed
+oknem nie testuje się jej na domenie produkcyjnej. Kontrola (kod na domenie
+produkcyjnej do potwierdzenia w oknie):
 
 ```bash
 set +x
-curl -s -o /dev/null -w '%{http_code}\n' "https://<domena Vercel Production>/api/health"
-curl -s -o /dev/null -w '%{http_code}\n' "https://<adres starszego wdrożenia>/api/health"
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "https://<domena Vercel Production>/api/health"
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "https://<adres starszego wdrożenia>/api/health"
 ```
 
-Oczekiwane: `403`; dla starszego wdrożenia `403` albo `401` (ochrona z L3).
-`200` z któregokolwiek = stop przed 2.2. Główna kontrola: W7 (w wariancie bez
-kopii: te dwa `curl`).
+Pierwszy odczyt do notatki okna. Reguła po `publish` może działać z
+opóźnieniem. Po 60 s ten sam blok `curl` jeszcze raz. Blok z `sleep` wkleja
+się osobno, następny dopiero po jego końcu (`docs/runbook-przelaczenie-bazy.md`
+sekcja 0, „Wklejanie do zsh”):
 
-**W2 — Preview.** Odczyt, bez zmiany: `curl` z P11 → `401` albo `403`, a
-`POSTGRES_URL` w panelu bez zakresu Preview. Inny wynik = stop przed 2.2.
+```bash
+set +x
+sleep 60
+```
+
+```bash
+set +x
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "https://<domena Vercel Production>/api/health"
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "https://<adres starszego wdrożenia>/api/health"
+```
+
+Rozstrzyga drugi odczyt. Oczekiwane: domena produkcyjna `403`. Starsze
+wdrożenie: `302 https://vercel.com/sso-api…` (302 z adresem od
+`https://vercel.com/sso-api`), `401` albo `403` = zamknięte (ochrona z L3);
+`200` = stop przed 2.2; inny kod (także `302` na inny adres) = stop przed
+2.2. Domena produkcyjna z kodem innym niż `403` i `200` = stop przed 2.2
+w obu wariantach. Adres przekierowania SSO odczytany 2026-11-23 na starszym
+wdrożeniu: `302 https://vercel.com/sso-api…`. Próba 2026-11-23 nie rozstrzyga, czy zapora obejmuje adres wdrożenia.
+Reguła `Deny` na hoście starszego wdrożenia nie zmieniła `302`: albo ochrona
+wdrożeń działa przed zaporą, albo zapora nie dopasowuje hosta adresu
+wdrożenia.
+
+W wariancie bez kopii (plan 1.4): domena produkcyjna z `200` w drugim
+odczycie przy F8 = nie — wyłączyć regułę, wpis do notatki okna, dalej jak
+w „Zapora (L1) przy F2 = nie” z bloku na górze. Okna nie przerywać. Przy
+F8 = tak `200` z domeny produkcyjnej = stop przed 2.2. W wariancie z kopią:
+`200` z któregokolwiek adresu = stop przed 2.2. Główna kontrola: W7
+(w wariancie bez kopii: te dwa `curl`).
+
+**W2 — Preview.** Odczyt, bez zmiany: `curl` z P11 →
+`302 https://vercel.com/sso-api…`, `401` albo `403` = zamknięte; `200` =
+stop przed 2.2; inny kod (także `302` na inny adres) = stop przed 2.2.
+`POSTGRES_URL` w panelu bez zakresu Preview, inaczej stop przed 2.2.
 W2 nie jest pełną kontrolą: „Standard Protection” przepuszcza zalogowanych
 członków zespołu Vercela, a istniejące Preview mają wbudowany stary
-`POSTGRES_URL` — w oknie chroni je zapora całego projektu (W1), kontrolą jest W7.
+`POSTGRES_URL`. W oknie chroni je zapora całego projektu (W1) —
+niepotwierdzone w obu wariantach (próba 2026-11-23 tego nie rozstrzyga, W1).
+Kontrolą jest W7 (w wariancie bez kopii: W1 i W2, bo Preview pisze tylko do
+Neona).
 
 **W3 — crony Vercela.** Panel Vercela → Settings → Cron Jobs → „Disable Cron
 Jobs”. Oczekiwane: oba crony w panelu wyłączone. Okno planowane poza
-02:00–03:30 UTC (W7 i tak obowiązuje).
+02:00–03:30 UTC, na planie Hobby 02:00–04:00 UTC (W7 i tak obowiązuje).
+
+W wariancie bez kopii (plan 1.4) przy F3 = nie: W3 = „nie dotyczy (plan
+Hobby, F3 = nie)”, uzasadnienie w L2. Zamiast przełącznika kontrola godziny
+startu i planowanego końca okna (start + planowany czas okna):
+
+```bash
+set +x
+date -u +%H:%M
+date -u -v+'<planowany czas okna w minutach>'M +%H:%M
+```
+
+Oczekiwane: obie godziny poza 02:00–04:00 UTC (plan Hobby: cron startuje
+w dowolnej chwili zadanej godziny, więc `0 3 * * *` może ruszyć do 03:59),
+a przedział nie leży między nimi — także gdy okno przechodzi przez północ
+(np. start 23:30, koniec 04:30 obejmuje przedział); obie do notatki okna.
+Ten blok uruchamia się najpierw na końcu W0, przed W1: inny wynik tam =
+okno nie startuje, start przesunięty poza przedział. W W3 to powtórka;
+inny wynik w W3 = stop przed T1 (sekcja 5). Przy F3 = nie crony i tak działają i piszą tylko do Neona, więc
+to kwestia zgodności z decyzją, nie ochrony danych.
 
 **W4 — `main`.** Scalenia wstrzymane (L7):
 
@@ -477,13 +542,14 @@ po drodze B.
 W wariancie bez kopii (plan 1.4) ta sekcja obowiązuje przy stopie przed 2.9
 (droga A pkt 3, bez pkt 1–2: Neon nie był zamrożony, Cloud SQL bez kopii
 „przed importem”). R4 to sam odczyt `all` (W5 odpada). R1 przy F2 = nie —
-„nie dotyczy”.
+„nie dotyczy”. R3 przy F3 = nie — „nie dotyczy (plan Hobby, F3 = nie)”:
+crony Vercela nie były wyłączone (L2).
 
 | Krok | Działanie | Polecenie | Oczekiwane | Zgoda (1.2) |
 |---|---|---|---|---|
 | R1 | Vercel Production przyjmuje ruch | panel Vercela → Firewall: reguła z L1 **wyłączona** (nie usunięta — zostaje na następne okno) | reguła wyłączona | „start okna” |
-| R2 | Preview | bez zmian (L3 na stałe: ochrona zostaje, `POSTGRES_URL` bez zakresu Preview) | `curl` z P11 → `401` albo `403` | — (odczyt) |
-| R3 | crony Vercela | panel Vercela → Settings → Cron Jobs → „Enable” | oba crony włączone | „start okna” |
+| R2 | Preview | bez zmian (L3 na stałe: ochrona zostaje, `POSTGRES_URL` bez zakresu Preview) | `curl` z P11 → `302 https://vercel.com/sso-api…`, `401` albo `403`; inny wynik = do notatki, wycofanie idzie dalej; Preview z `200` = decyzja właściciela przed końcem wycofania (L3) | — (odczyt) |
+| R3 | crony Vercela | panel Vercela → Settings → Cron Jobs → „Enable” | oba crony włączone; w wariancie bez kopii przy F3 = nie — „nie dotyczy (plan Hobby, F3 = nie)” | „start okna” |
 | R4 | ingress `all` dopiero po kontrolach drogi A pkt 2 | blok T1 | odczyt `all` | „start okna” |
 | R5 | zadania Scheduler jak w W0 | niżej | lista = lista z W0 | „po oknie albo przy wycofaniu (droga A pkt 3) …” |
 | R6 | odpowiada Vercel | `curl -s -o /dev/null -w '%{http_code}\n' "https://<domena Vercel Production>/api/health"` i `curl -sI "https://<domena Vercel Production>/api/health" \| grep -ci '^x-vercel-id:'` | `200` i `1` | — (odczyt) |
@@ -533,7 +599,9 @@ W wariancie bez kopii (plan 1.4) okno kończy się po 2.9, w tej kolejności:
 na K1.1, gdy K1.1 czeka na minimum SOA. Neon nie jest zamrożony: działa
 dalej za zaporą (przy F2 = nie bez niej) i za K1, bez użytkowników. Wyjątek
 „bez K1” jak wyżej; 2.8 z kodem innym niż 0 = stan „bez K1”, bez R5 (L7).
-Crony Vercela wyłączone na stałe (L2), ingress `all`.
+Crony Vercela wyłączone na stałe (L2), ingress `all`. Przy F3 = nie crony
+Vercela działają dalej i piszą tylko do Neona, do usunięcia klucza `crons`
+(sekcja 7 pkt 2).
 
 **Stop w oknie powrotu** — nie obowiązuje w wariancie bez kopii (plan 1.4)
 (3.3 krok 2 „stop” i „Stop w kroku 7 albo 8” — ruch
@@ -551,7 +619,7 @@ kolejności:
    z `vercel.json` (razem ze zmianą z sekcji 7 pkt 1, jeśli scalona);
    oczekiwane: wdrożenie Vercel Production `Ready`;
 2. R1 (reguła zapory wyłączona; przy F2 = nie — „nie dotyczy”), R2, R3
-   (crony Vercela włączone);
+   (crony Vercela włączone; przy F3 = nie — „nie dotyczy”);
 3. B1 i B2 (rekord `app` usunięty), B5 (alert wyłączony);
 4. B4 (ingress `internal`) i zadania Scheduler. Przed R5 zadania są już
    `PAUSED` po W6 — wtedy sam odczyt listy. Po R5 blok W6 dla zadań
@@ -604,7 +672,8 @@ Kolejność:
 2. **Po końcu okresu powrotu:**
    - usunięcie klucza `crons` z `vercel.json` (L2: osobny krok porządkowy po
      oknie). Powrót na Vercela (sekcja 6) wymaga cronów Vercela, więc nie
-     wcześniej. Plik zostaje: bez niego Vercel wdraża każdą gałąź i buduje z
+     wcześniej. Przy F3 = nie crony Vercela działają do tego kroku i piszą
+     tylko do Neona (L2). Plik zostaje: bez niego Vercel wdraża każdą gałąź i buduje z
      migracjami. Zachować `redirects` z K1;
    - pliki z Vercel Blob nie są przenoszone. Przesłanka: F8 = „nie” w notatce
      okna (na produkcji tylko konta testowe); F8 = „tak” otwiera tę decyzję

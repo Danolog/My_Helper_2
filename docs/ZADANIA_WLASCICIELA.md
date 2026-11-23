@@ -36,7 +36,7 @@ zrobić w kodzie.
 5. Sprawdź, czy wersja powstała:
 
    ```bash
-   gcloud --project='<projekt GCP>' secrets versions list <nazwa> --sort-by=~createTime --limit=1 --format='value(name,state)'
+   gcloud --project='<projekt GCP>' secrets versions list <nazwa> --sort-by='~createTime' --limit=1 --format='value(name,state)'
    ```
 
    Ma być nowy numer wersji i `ENABLED`.
