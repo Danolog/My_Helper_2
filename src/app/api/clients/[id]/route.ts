@@ -1,15 +1,18 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { verifyPassword } from "better-auth/crypto";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
+import { healthDataConsentRequiredBody, normalizeAllergies } from "@/lib/health-data-consent";
 import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { findCredentialPasswordHash } from "@/lib/server/system";
 import { isValidUuid } from "@/lib/validations";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 
 // GET /api/clients/[id] - Get a single client by ID
 export const GET = withApiHandler(
@@ -104,17 +107,42 @@ export const PUT = withApiHandler(
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
+    // healthDataConsentAt/By z body celowo nie są czytane — nadaje je serwer.
+    const { firstName, lastName, phone, email, notes, preferences, allergies, healthDataConsent, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
+
+    // Informacja o zdrowiu (DPA §4): pusty napis = brak informacji (NULL, bez zgody).
+    const allergiesValue = normalizeAllergies(allergies);
+    const writesHealthData = typeof allergiesValue === "string";
+    // Cofnięcie zgody z jednoczesnym wpisem alergii jest sprzeczne — odrzucamy.
+    if (writesHealthData && healthDataConsent === false) {
+      return NextResponse.json(healthDataConsentRequiredBody(), { status: 400 });
+    }
+    // Wpis alergii bez zgody w żądaniu wymaga zgody zapisanej wcześniej. Sprawdza
+    // to warunek w samym UPDATE (niżej), więc równoległe cofnięcie zgody nie
+    // przepuści zapisu między odczytem a zmianą.
+    const requiresStoredConsent = writesHealthData && healthDataConsent !== true;
 
     // Build update object with only provided fields
-    const updateData: Record<string, unknown> = {};
+    const updateData: PgUpdateSetSource<typeof clients> = {};
     if (firstName !== undefined) updateData.firstName = firstName;
     if (lastName !== undefined) updateData.lastName = lastName;
     if (phone !== undefined) updateData.phone = phone;
     if (email !== undefined) updateData.email = email;
     if (notes !== undefined) updateData.notes = notes;
     if (preferences !== undefined) updateData.preferences = preferences;
-    if (allergies !== undefined) updateData.allergies = allergies;
+    if (allergiesValue !== undefined) updateData.allergies = allergiesValue;
+    if (healthDataConsent === true) {
+      // Zgoda już zapisana zostaje z pierwotnym czasem i kontem (dowód pierwszej
+      // zgody); nowa dostaje czas bazy i konto z sesji. Prawa strona SET czyta
+      // wiersz sprzed UPDATE, więc oba CASE widzą ten sam stan.
+      updateData.healthDataConsentAt = sql`coalesce(${clients.healthDataConsentAt}, now())`;
+      updateData.healthDataConsentBy = sql`CASE WHEN ${clients.healthDataConsentAt} IS NULL THEN ${ctx.userId} ELSE ${clients.healthDataConsentBy} END`;
+    } else if (healthDataConsent === false) {
+      // Cofnięcie zgody: informacja o zdrowiu znika w tym samym UPDATE.
+      updateData.allergies = null;
+      updateData.healthDataConsentAt = null;
+      updateData.healthDataConsentBy = null;
+    }
     if (favoriteEmployeeId !== undefined) updateData.favoriteEmployeeId = favoriteEmployeeId;
     if (requireDeposit !== undefined) updateData.requireDeposit = requireDeposit;
     if (depositType !== undefined) updateData.depositType = depositType;
@@ -123,14 +151,34 @@ export const PUT = withApiHandler(
     // Tylko nazwy pól — wartości (imię, telefon, e-mail, notatki) nie trafiają do logów.
     logger.info(`[Clients API] Updating client ${id}`, { fields: Object.keys(updateData) });
 
-    const updated = await forSalon(salonId).updateOwned(clients, id, updateData);
+    const outcome = await forSalon(salonId).raw(async (tx) => {
+      const ownClient = and(eq(clients.id, id), eq(clients.salonId, salonId));
+      const [row] = await tx
+        .update(clients)
+        .set(updateData)
+        .where(requiresStoredConsent ? and(ownClient, isNotNull(clients.healthDataConsentAt)) : ownClient)
+        .returning();
+      if (row) return { kind: "updated" as const, row };
+      if (!requiresStoredConsent) return { kind: "not_found" as const };
+      // Zero wierszy przy warunku zgody: odróżnij brak zgody (400) od braku klienta (404).
+      const [existing] = await tx
+        .select({ id: clients.id })
+        .from(clients)
+        .where(ownClient)
+        .limit(1);
+      return existing ? { kind: "consent_required" as const } : { kind: "not_found" as const };
+    });
 
-    if (!updated) {
+    if (outcome.kind === "consent_required") {
+      return NextResponse.json(healthDataConsentRequiredBody(), { status: 400 });
+    }
+    if (outcome.kind === "not_found") {
       return NextResponse.json(
         { success: false, error: "Client not found" },
         { status: 404 }
       );
     }
+    const updated = outcome.row;
 
     logger.info(`[Clients API] Updated client ${id} successfully`);
 

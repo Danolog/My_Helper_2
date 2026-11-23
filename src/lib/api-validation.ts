@@ -155,6 +155,9 @@ export const createClientSchema = z.object({
   notes: z.string().nullable().optional(),
   preferences: z.string().nullable().optional(),
   allergies: z.string().nullable().optional(),
+  // Zgoda na zapis informacji o zdrowiu. Czas i konto zgody nadaje serwer;
+  // pola healthDataConsentAt/By przysłane w body trasa ignoruje (nie czyta ich).
+  healthDataConsent: z.boolean().optional(),
   favoriteEmployeeId: z.string().nullable().optional(),
   requireDeposit: z.boolean().optional(),
   depositType: z.enum(["percentage", "fixed"]).optional(),
@@ -456,6 +459,9 @@ export const updateClientSchema = z.object({
   notes: z.string().nullable().optional(),
   preferences: z.string().nullable().optional(),
   allergies: z.string().nullable().optional(),
+  // true = zaznacz zgodę (czas i konto nadaje serwer), false = cofnij zgodę
+  // (serwer zeruje allergies), brak = bez zmiany zgody.
+  healthDataConsent: z.boolean().optional(),
   favoriteEmployeeId: z.string().nullable().optional(),
   requireDeposit: z.boolean().optional(),
   depositType: z.enum(["percentage", "fixed"]).optional(),

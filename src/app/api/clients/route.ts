@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createClientSchema } from "@/lib/api-validation";
+import { healthDataConsentRequiredBody, normalizeAllergies } from "@/lib/health-data-consent";
 import { logger } from "@/lib/logger";
 import { getSalonContext } from "@/lib/salon-context";
 import { apiRateLimit } from "@/lib/rate-limit";
@@ -134,6 +135,7 @@ export const POST = withApiHandler(
       notes?: string | null;
       preferences?: string | null;
       allergies?: string | null;
+      healthDataConsent?: boolean;
       favoriteEmployeeId?: string | null;
       requireDeposit?: boolean;
       depositType?: "percentage" | "fixed";
@@ -143,7 +145,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create client",
   },
   async ({ body }) => {
-    const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
+    const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, healthDataConsent, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     // Faza 3 (role): dodawanie klientów dla owner/receptionist; employee 403.
     // Recepcja tylko we WŁASNYM salonie (salonId z body musi zgadzać się z sesją).
@@ -164,7 +166,15 @@ export const POST = withApiHandler(
       );
     }
 
-    logger.info(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
+    // Informacja o zdrowiu tylko przy wyraźnej zgodzie (DPA §4). Pusty napis
+    // to brak informacji, więc przechodzi bez zgody i zapisuje się jako NULL.
+    const allergiesValue = normalizeAllergies(allergies) ?? null;
+    const consentGiven = healthDataConsent === true;
+    if (allergiesValue !== null && !consentGiven) {
+      return NextResponse.json(healthDataConsentRequiredBody(), { status: 400 });
+    }
+
+    logger.info(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, health_data_consent_at, health_data_consent_by, favorite_employee_id)`);
     const [newClient] = await forSalon(salonId).raw((tx) =>
       tx
       .insert(clients)
@@ -176,7 +186,10 @@ export const POST = withApiHandler(
         email: email || null,
         notes: notes || null,
         preferences: preferences || null,
-        allergies: allergies || null,
+        allergies: allergiesValue,
+        // Czas bazy i konto z sesji — nigdy wartości z body.
+        healthDataConsentAt: consentGiven ? sql`now()` : null,
+        healthDataConsentBy: consentGiven ? ctx.userId : null,
         favoriteEmployeeId: favoriteEmployeeId || null,
         requireDeposit: requireDeposit || false,
         depositType: depositType || "percentage",
