@@ -622,6 +622,12 @@ export const reviews = pgTable(
     index("reviews_client_id_idx").on(table.clientId),
     index("reviews_employee_id_idx").on(table.employeeId),
     index("reviews_status_idx").on(table.status),
+    // Co najwyzej jedna opinia na wizyte. Indeks czesciowy, bo FK ma ON DELETE SET NULL:
+    // po usunieciu wizyt wiele opinii moze miec appointment_id = NULL.
+    // Trasa klienta zamienia naruszenie (23505) na 409.
+    uniqueIndex("reviews_appointment_id_uq")
+      .on(table.appointmentId)
+      .where(sql`${table.appointmentId} is not null`),
   ]
 );
 
