@@ -111,10 +111,16 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   dotyczy go przy błędzie czasu albo zerwanym terminalu. W każdym z tych
   przypadków polecenia **nie powtarza się**. Czeka się na operację z ID
   z komunikatu, potem idzie blok kontrolny z danego kroku. Bez komunikatu
-  (zerwany terminal) ID bierze się z listy trwających operacji; przy klonie
-  operacja `CLONE` jest na instancji **źródłowej**, więc
-  `CSQL_INSTANCE='<instancja produkcyjna>'` tylko na czas tego odczytu,
-  przy przywróceniu — instancja docelowa:
+  (zerwany terminal) ID bierze się z listy trwających operacji. Przy
+  klonie operacja `CLONE` jest na instancji **źródłowej**; jej nazwę
+  wpisuje się wprost w wierszu, zmiennej `CSQL_INSTANCE` się nie zmienia:
+
+  ```bash
+  set +x
+  gcloud --project='<projekt GCP>' sql operations list --instance='<instancja produkcyjna>' --filter='status!=DONE' --format='value(name,operationType,status)'
+  ```
+
+  Przy przywróceniu — instancja docelowa:
 
   ```bash
   set +x
@@ -123,7 +129,10 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
 
   Oczekiwane: wiersz `<ID> CLONE` albo `<ID> RESTORE_VOLUME` ze statusem
   innym niż `DONE`; pusta lista = operacja już zakończona, od razu blok
-  kontrolny. Potem:
+  kontrolny (przy klonie pusta lista i `describe` inny niż `RUNNABLE` = ten
+  sam odczyt na instancji próbnej). Oba bloki odczytu i blok niżej — do
+  potwierdzenia w próbie, sekcja 0 (w próbie 2026-11-23 nie wykonane).
+  Potem:
 
   ```bash
   set +x
@@ -131,8 +140,7 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   ```
 
   Oczekiwane: polecenie kończy się bez błędu, gdy operacja jest gotowa
-  (`--timeout=unlimited` — bez limitu czasu; domyślnie 300 s). Do
-  potwierdzenia w próbie, sekcja 0 (w próbie 2026-11-23 nie wykonane).
+  (`--timeout=unlimited` — bez limitu czasu; domyślnie 300 s).
 
 ## 1. Warunki przed oknem
 
@@ -518,12 +526,13 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   echo "instance=$CSQL_INSTANCE start=$(date -u +%FT%TZ)"
+   : "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)')
+   echo "instance=$CSQL_INSTANCE prev_restore=${prev_restore:-brak} start=$(date -u +%FT%TZ)"
    : "${CSQL_INSTANCE:?}" && : "${DRILL_BACKUP_ID:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql backups restore "$DRILL_BACKUP_ID" --restore-instance="$CSQL_INSTANCE"
    ```
 
-   Oczekiwane: `instance=<instancja próbna> start=<czas UTC>`, start do
-   notatki; inna nazwa = odpowiedź `n`,
+   Oczekiwane: `instance=<instancja próbna> prev_restore=<ID albo brak>
+   start=<czas UTC>`, cały wiersz do notatki; inna nazwa = odpowiedź `n`,
    stop. Na pytanie gcloud tylko `Y` albo `n`. Przywrócenie trwa długo
    (w próbie ok. 16 min, gcloud czekał do końca); błąd czasu albo zerwany
    terminal = przywrócenia **nie powtarzać**, `sql operations wait`
@@ -531,12 +540,13 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --limit=1 --format='value(operationType,status,startTime,endTime)'
+   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name,operationType,status,startTime,endTime)'
    : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
    ```
 
-   Oczekiwane: przywrócenie bez błędu; `RESTORE_VOLUME DONE <start> <koniec>`,
-   start operacji nie wcześniejszy niż `start=` z notatki; `RUNNABLE`; czas
+   Oczekiwane: przywrócenie bez błędu; `<ID> RESTORE_VOLUME DONE <start>
+   <koniec>`, ID inny niż `prev_restore=` z notatki (kryterium nie zależy
+   od zegara stanowiska; `start=` tylko do zapisu czasu); `RUNNABLE`; czas
    przywrócenia do zapisu. Filtr po typie, nie pozycja na liście: po
    przywróceniu Cloud SQL sam zrobił kopię (w próbie najnowsza operacja to
    `BACKUP_VOLUME DONE`). Wiersz `operations list` z filtrem — do
@@ -1167,12 +1177,13 @@ otwarte połączenia padają.
 
 ```bash
 set +x
-echo "instance=$CSQL_INSTANCE start=$(date -u +%FT%TZ)"
+: "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)')
+echo "instance=$CSQL_INSTANCE prev_restore=${prev_restore:-brak} start=$(date -u +%FT%TZ)"
 : "${CSQL_INSTANCE:?}" && : "${PRE_IMPORT_ID:?}" && gcloud --project='<projekt GCP>' sql backups restore "$PRE_IMPORT_ID" --restore-instance="$CSQL_INSTANCE"
 ```
 
-Oczekiwane: `instance=<instancja produkcyjna> start=<czas UTC>`, start do
-notatki okna; inna nazwa = odpowiedź `n`, stop. Na pytanie gcloud tylko `Y`
+Oczekiwane: `instance=<instancja produkcyjna> prev_restore=<ID albo brak>
+start=<czas UTC>`, cały wiersz do notatki okna; inna nazwa = odpowiedź `n`, stop. Na pytanie gcloud tylko `Y`
 albo `n`. Błąd czasu albo zerwany
 terminal = przywrócenia **nie powtarzać**, `sql operations wait`
 (sekcja 0, „Długie operacje Cloud SQL”; w próbie
@@ -1180,12 +1191,13 @@ przywrócenie trwało ok. 16 min). Potem:
 
 ```bash
 set +x
-: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --limit=1 --format='value(operationType,status,startTime,endTime)'
+: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name,operationType,status,startTime,endTime)'
 : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
 ```
 
-Oczekiwane: przywrócenie bez błędu; `RESTORE_VOLUME DONE <start> <koniec>`,
-start operacji nie wcześniejszy niż `start=` z notatki okna (filtr po
+Oczekiwane: przywrócenie bez błędu; `<ID> RESTORE_VOLUME DONE <start> <koniec>`,
+ID inny niż `prev_restore=` z notatki okna (kryterium nie zależy od zegara
+stanowiska; filtr po
 typie: po przywróceniu Cloud SQL sam robi kopię `BACKUP_VOLUME`); stan
 `RUNNABLE`. Wiersz `operations list` z filtrem — do potwierdzenia w próbie,
 sekcja 0. Kontrola
