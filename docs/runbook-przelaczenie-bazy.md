@@ -103,10 +103,13 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   bloki mają dopisek „(do potwierdzenia w próbie, sekcja 0)”. Bloki wykonane
   w próbie 2026-11-23 mają zamiast niego „potwierdzone w próbie 2026-11-23”.
 - **Długie operacje Cloud SQL** (`sql instances clone`, `sql backups
-  restore`). W próbie klon trwał ok. 22 min, przywrócenie ok. 16 min. Po ok.
-  10 min gcloud może wypisać, że operacja trwa dłużej niż oczekiwano, i
-  zakończyć się błędem (`failed`), choć operacja w Cloud SQL nadal trwa.
-  Wtedy polecenia **nie powtarza się**. Czeka się na operację z ID
+  restore`). W próbie klon trwał ok. 22 min, przywrócenie ok. 16 min.
+  `sql instances clone` po ok. 10 min wypisuje, że operacja trwa dłużej niż
+  oczekiwano, i kończy się błędem (`failed`), choć operacja w Cloud SQL
+  nadal trwa. `sql backups restore` czeka domyślnie 3600 s (własna flaga
+  `--timeout`), w próbie skończył się bez tego komunikatu; ta sama zasada
+  dotyczy go przy błędzie czasu albo zerwanym terminalu. W każdym z tych
+  przypadków polecenia **nie powtarza się**. Czeka się na operację z ID
   z komunikatu, potem idzie blok kontrolny z danego kroku:
 
   ```bash
@@ -305,6 +308,12 @@ set +x
 CSQL_INSTANCE='<instancja próbna>'
 [[ -n "$CSQL_INSTANCE" && "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && echo drill_instance_ok=yes || echo drill_instance_ok=no
 : "${CSQL_INSTANCE:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql instances clone '<instancja produkcyjna>' "$CSQL_INSTANCE"
+```
+
+Po zakończeniu klonu, osobno:
+
+```bash
+set +x
 : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state,databaseVersion,settings.tier)'
 ```
 
@@ -502,20 +511,22 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    Oczekiwane: `instance=<instancja próbna>`; inna nazwa = odpowiedź `n`,
    stop. Na pytanie gcloud tylko `Y` albo `n`. Przywrócenie trwa długo
-   (w próbie ok. 16 min); komunikat o przekroczonym czasie z `failed` =
-   przywrócenia **nie powtarzać**, `sql operations wait` z ID z komunikatu
+   (w próbie ok. 16 min, gcloud czekał do końca); błąd czasu albo zerwany
+   terminal = przywrócenia **nie powtarzać**, `sql operations wait` z ID z komunikatu
    (sekcja 0, „Długie operacje Cloud SQL”). Potem:
 
    ```bash
    set +x
-   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --limit=2 --format='value(operationType,status)'
+   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --limit=1 --format='value(operationType,status,endTime)'
    : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
    ```
 
-   Oczekiwane: przywrócenie bez błędu; na liście dwóch ostatnich operacji
-   wiersz `RESTORE_VOLUME DONE` (Cloud SQL po przywróceniu sam robi kopię,
-   więc najnowszy wiersz może być `BACKUP_VOLUME DONE`); `RUNNABLE`; czas
-   przywrócenia do zapisu. Po przywróceniu:
+   Oczekiwane: przywrócenie bez błędu; `RESTORE_VOLUME DONE <czas końca>`,
+   czas końca późniejszy niż start przywrócenia; `RUNNABLE`; czas
+   przywrócenia do zapisu. Filtr po typie, nie pozycja na liście: po
+   przywróceniu Cloud SQL sam zrobił kopię (w próbie najnowsza operacja to
+   `BACKUP_VOLUME DONE`). Wiersz `operations list` z filtrem — do
+   potwierdzenia w próbie, sekcja 0. Po przywróceniu:
 
    ```bash
    set +x
@@ -768,7 +779,9 @@ instancji, czyli identyfikator projektu — nie mogą mieszać się z ekranem).
 Potwierdzone w próbie 2026-11-23. Flaga `--gcloud-auth` jest konieczna: bez
 niej proxy szuka domyślnych poświadczeń aplikacji (ADC), nie znajduje ich
 i kończy się kodem 1 (`could not find default credentials`); z flagą używa
-logowania `gcloud` właściciela. Blok z `sleep` wkleja się sam (sekcja 0):
+logowania `gcloud` właściciela. `--help` opisuje tę flagę jako starszą
+(zaleca ADC); wybór jest świadomy: `gcloud auth application-default login`
+zostawiłby na dysku plik z tokenem odświeżania. Blok z `sleep` wkleja się sam (sekcja 0):
 
 ```bash
 set +x
@@ -1145,20 +1158,20 @@ echo "instance=$CSQL_INSTANCE"
 ```
 
 Oczekiwane: `instance=<instancja produkcyjna>`; inna nazwa = odpowiedź `n`,
-stop. Na pytanie gcloud tylko `Y` albo `n`. Komunikat o przekroczonym
-czasie z `failed` = przywrócenia **nie powtarzać**, `sql operations wait`
+stop. Na pytanie gcloud tylko `Y` albo `n`. Błąd czasu albo zerwany
+terminal = przywrócenia **nie powtarzać**, `sql operations wait`
 z ID z komunikatu (sekcja 0, „Długie operacje Cloud SQL”; w próbie
 przywrócenie trwało ok. 16 min). Potem:
 
 ```bash
 set +x
-: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --limit=2 --format='value(operationType,status)'
+: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --limit=1 --format='value(operationType,status,endTime)'
 : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
 ```
 
-Oczekiwane: przywrócenie bez błędu; na liście dwóch ostatnich operacji
-wiersz `RESTORE_VOLUME DONE` (najnowszy może być `BACKUP_VOLUME DONE` —
-kopia, którą Cloud SQL robi sam po przywróceniu); stan `RUNNABLE`. Kontrola
+Oczekiwane: przywrócenie bez błędu; `RESTORE_VOLUME DONE <czas końca>`,
+czas końca późniejszy niż start przywrócenia (filtr po typie: po
+przywróceniu Cloud SQL sam robi kopię `BACKUP_VOLUME`); stan `RUNNABLE`. Kontrola
 po przywróceniu, oba wyniki w notatce okna:
 
 1. `compare.sh --expect-empty` (blok 2.3) = `exit=0`;
