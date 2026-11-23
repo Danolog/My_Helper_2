@@ -285,7 +285,7 @@ export function BlikDepositSection() {
             role="alert"
             className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
           >
-            <span>Treść zgody została zaktualizowana. Odśwież stronę.</span>
+            <span>Treść potwierdzenia została zaktualizowana. Odśwież stronę.</span>
             <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
               Odśwież stronę
             </Button>
@@ -300,7 +300,7 @@ export function BlikDepositSection() {
                 {settings.blikPhone}
               </p>
               {consentDate && settings.consentCurrent && (
-                <p className="text-sm text-muted-foreground">Zgoda udzielona: {consentDate}</p>
+                <p className="text-sm text-muted-foreground">Potwierdzono: {consentDate}</p>
               )}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -391,7 +391,7 @@ export function BlikDepositSection() {
             className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>Treść zgody się zmieniła. Przeczytaj ją i zaznacz zgodę ponownie.</span>
+            <span>Treść potwierdzenia się zmieniła. Przeczytaj ją i zaznacz pole ponownie.</span>
           </div>
         )}
 

@@ -318,31 +318,42 @@ describe("PUT /api/salon/blik-deposit (zapis numeru zamknięty — adres polityk
     expect(h.setArgs).toEqual([]);
   });
 
+  // Komunikat własny pada przy braku pola lub `consent: false`; błędny typ
+  // albo długość zwraca domyślny komunikat schematu (bez słowa „zgoda”).
+  const CONSENT_MESSAGE = "Zaznacz potwierdzenie, aby włączyć wpłaty BLIK na ten numer";
+  const CONSENT_VERSION_MESSAGE = "Brak wersji treści potwierdzenia. Odśwież stronę";
+
   it.each([
-    ["brak consent", { blikPhone: MOBILE_INPUT, consentVersion: BLIK_CONSENT_VERSION }],
-    ["consent false", { blikPhone: MOBILE_INPUT, consent: false, consentVersion: BLIK_CONSENT_VERSION }],
-    ["consent jako napis", { blikPhone: MOBILE_INPUT, consent: "true", consentVersion: BLIK_CONSENT_VERSION }],
-  ])("400: numer bez zgody — %s", async (_label, payload) => {
+    ["brak consent", { blikPhone: MOBILE_INPUT, consentVersion: BLIK_CONSENT_VERSION }, CONSENT_MESSAGE],
+    ["consent false", { blikPhone: MOBILE_INPUT, consent: false, consentVersion: BLIK_CONSENT_VERSION }, CONSENT_MESSAGE],
+    ["consent jako napis", { blikPhone: MOBILE_INPUT, consent: "true", consentVersion: BLIK_CONSENT_VERSION }, null],
+  ])("400: numer bez zgody — %s", async (_label, payload, message) => {
     m.asOwnerOf(SALON_A);
 
     const res = await put(payload);
 
     expect(res.status).toBe(400);
-    expect((await res.json()).details).toHaveProperty("consent");
+    const details = (await res.json()).details;
+    expect(details).toHaveProperty("consent");
+    if (message !== null) expect(details.consent).toBe(message);
+    expect(details.consent).not.toMatch(/zgod/i);
     expect(h.setArgs).toEqual([]);
   });
 
   it.each([
-    ["brak consentVersion", { blikPhone: MOBILE_INPUT, consent: true }],
-    ["consentVersion jako liczba", { blikPhone: MOBILE_INPUT, consent: true, consentVersion: 20261121 }],
-    ["consentVersion dłuższy niż 32 znaki", { blikPhone: MOBILE_INPUT, consent: true, consentVersion: "x".repeat(33) }],
-  ])("400: numer z błędną wersją zgody — %s", async (_label, payload) => {
+    ["brak consentVersion", { blikPhone: MOBILE_INPUT, consent: true }, CONSENT_VERSION_MESSAGE],
+    ["consentVersion jako liczba", { blikPhone: MOBILE_INPUT, consent: true, consentVersion: 20261121 }, null],
+    ["consentVersion dłuższy niż 32 znaki", { blikPhone: MOBILE_INPUT, consent: true, consentVersion: "x".repeat(33) }, null],
+  ])("400: numer z błędną wersją zgody — %s", async (_label, payload, message) => {
     m.asOwnerOf(SALON_A);
 
     const res = await put(payload);
 
     expect(res.status).toBe(400);
-    expect((await res.json()).details).toHaveProperty("consentVersion");
+    const details = (await res.json()).details;
+    expect(details).toHaveProperty("consentVersion");
+    if (message !== null) expect(details.consentVersion).toBe(message);
+    expect(details.consentVersion).not.toMatch(/zgod/i);
     expect(h.setArgs).toEqual([]);
   });
 
@@ -505,6 +516,7 @@ describe("PUT /api/salon/blik-deposit (zapis numeru otwarty — stała podmienio
 
   it.each([
     ["stara wersja", "2026-01-01"],
+    ["poprzednia wersja treści", "2026-11-21"],
     ["pusty napis", ""],
   ])("409 BLIK_CONSENT_VERSION_STALE: %s — brak zapisu, numer poza odpowiedzią i logiem", async (_label, consentVersion) => {
     m.asOwnerOf(SALON_A);
@@ -515,6 +527,8 @@ describe("PUT /api/salon/blik-deposit (zapis numeru otwarty — stała podmienio
 
     expect(res.status).toBe(409);
     expect(body).toMatchObject({ success: false, code: BLIK_CONSENT_VERSION_STALE });
+    expect(body.error).toBe("Treść potwierdzenia została zaktualizowana. Odśwież stronę");
+    expect(body.error).not.toMatch(/zgod/i);
     expect(h.setArgs).toEqual([]);
     expect(JSON.stringify(body)).not.toMatch(/600[\s-]?100[\s-]?200/);
     expect(loggedText()).not.toMatch(/600[\s-]?100[\s-]?200/);
