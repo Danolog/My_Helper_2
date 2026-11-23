@@ -345,6 +345,38 @@ export const depositStatusEvents = pgTable(
   ]
 );
 
+/**
+ * Akceptacje regulaminu i umowy powierzenia (DPA) przez salon: dokument, wersja
+ * treści, czas, konto i salon. Dowód akceptacji ma przetrwać salon i konto
+ * (umowa powierzenia każe go trzymać po zakończeniu umowy), więc `salon_id`
+ * i `user_id` są bez FK, a nowa wersja dokumentu to nowy wiersz, nie zmiana
+ * starego. Dla roli aplikacji tylko do dopisywania (migracja odbiera
+ * UPDATE/DELETE); RLS i uprawnienia są w migracji 0015 (Drizzle ich nie wyraża).
+ * Wpisy z trasy dodaje tylko `recordLegalAcceptances`.
+ */
+export const LEGAL_ACCEPTANCE_DOCUMENTS = ["terms", "dpa"] as const;
+export const LEGAL_ACCEPTANCE_SOURCES = ["registration", "create_salon", "email_pilot"] as const;
+export const legalAcceptances = pgTable(
+  "legal_acceptances",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id").notNull(),
+    userId: text("user_id").notNull(),
+    document: text("document").notNull(),
+    version: text("version").notNull(),
+    source: text("source").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("legal_acceptances_salon_accepted_idx").on(table.salonId, table.acceptedAt),
+    index("legal_acceptances_user_accepted_idx").on(table.userId, table.acceptedAt),
+    check("legal_acceptances_document_valid", sql`${table.document} IN ('terms', 'dpa')`),
+    check("legal_acceptances_source_valid", sql`${table.source} IN ('registration', 'create_salon', 'email_pilot')`),
+    check("legal_acceptances_version_nonempty", sql`length(${table.version}) BETWEEN 1 AND 64`),
+    check("legal_acceptances_user_nonempty", sql`length(${table.userId}) > 0`),
+  ]
+);
+
 // Time blocks - for blocking time (breaks, vacations, etc.)
 export const timeBlocks = pgTable(
   "time_blocks",
