@@ -529,7 +529,7 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   : "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)' </dev/null) || prev_restore='BLAD'
+   : "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by='~startTime' --limit=1 --format='value(name)' </dev/null) || prev_restore='BLAD'
    echo "instance=$CSQL_INSTANCE prev_restore=${prev_restore:-brak} start=$(date -u +%FT%TZ)"
    : "${CSQL_INSTANCE:?}" && : "${DRILL_BACKUP_ID:?}" && [[ "$CSQL_INSTANCE" != '<instancja produkcyjna>' ]] && gcloud --project='<projekt GCP>' sql backups restore "$DRILL_BACKUP_ID" --restore-instance="$CSQL_INSTANCE"
    ```
@@ -544,7 +544,7 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
 
    ```bash
    set +x
-   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name,operationType,status,startTime,endTime)'
+   : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by='~startTime' --limit=1 --format='value(name,operationType,status,startTime,endTime)'
    : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
    ```
 
@@ -659,8 +659,8 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    : "${PRE_RETURN_ID:?}" && DRILL_BACKUP_ID="$PRE_RETURN_ID" && echo "drill_backup=$DRILL_BACKUP_ID"
    ```
 
-   Oczekiwane: ID równe `pre-return-<RRRRMMDD>` z notatki próby; inne =
-   stop. Po tym przywróceniu, przed przywróceniem z pkt 4, zmienna wraca na
+   Oczekiwane: ID równe `pre-return-<RRRRMMDD>` z notatki próby; inne ID
+   albo błąd = stop. Po tym przywróceniu, przed przywróceniem z pkt 4, zmienna wraca na
    ID „przed importem” (blok wyżej, z `PRE_IMPORT_ID`). Po przywróceniu
    „przed powrotem” kontrola z pkt 4 (`psql_csql_app`,
    `default_transaction_read_only`), oczekiwane **`on`** — kopia „przed
@@ -1204,7 +1204,7 @@ otwarte połączenia padają.
 
 ```bash
 set +x
-: "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name)' </dev/null) || prev_restore='BLAD'
+: "${CSQL_INSTANCE:?}" && prev_restore=$(gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by='~startTime' --limit=1 --format='value(name)' </dev/null) || prev_restore='BLAD'
 echo "instance=$CSQL_INSTANCE prev_restore=${prev_restore:-brak} start=$(date -u +%FT%TZ)"
 : "${CSQL_INSTANCE:?}" && : "${PRE_IMPORT_ID:?}" && gcloud --project='<projekt GCP>' sql backups restore "$PRE_IMPORT_ID" --restore-instance="$CSQL_INSTANCE"
 ```
@@ -1220,7 +1220,7 @@ przywrócenie trwało ok. 16 min). Potem:
 
 ```bash
 set +x
-: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by=~startTime --limit=1 --format='value(name,operationType,status,startTime,endTime)'
+: "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql operations list --instance="$CSQL_INSTANCE" --filter='operationType=RESTORE_VOLUME' --sort-by='~startTime' --limit=1 --format='value(name,operationType,status,startTime,endTime)'
 : "${CSQL_INSTANCE:?}" && gcloud --project='<projekt GCP>' sql instances describe "$CSQL_INSTANCE" --format='value(state)'
 ```
 
