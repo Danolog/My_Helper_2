@@ -473,7 +473,8 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    Obowiązuje także w wariancie bez kopii i nie zależy od sekcji 2 i 3.
    Kolejność: znacznik → kopia → usunięcie znacznika → przywrócenie →
    znacznik obecny → kontrole. Polecenia gcloud potwierdzone w próbie
-   2026-11-23.
+   2026-11-23, poza wierszami `operations list` z filtrem (do
+   potwierdzenia, sekcja 0).
 
    Znacznik — wiersz testowy w osobnym schemacie, poza `public` (nie
    zmienia wyników 1.0 pkt 2 ani `--expect-empty`), `psql_csql_admin`:
