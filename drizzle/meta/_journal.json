@@ -120,6 +120,13 @@
       "when": 1795472523099,
       "tag": "0016_reviews_appointment_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795473694314,
+      "tag": "0017_clients_health_data_consent",
+      "breakpoints": true
     }
   ]
 }

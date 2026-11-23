@@ -150,6 +150,13 @@ export const clients = pgTable(
     notes: text("notes"),
     preferences: text("preferences"),
     allergies: text("allergies"),
+    // Wyraźna zgoda klienta na zapis informacji o zdrowiu (`allergies`).
+    // Oba pola nadaje wyłącznie serwer (czas bazy i konto personelu z sesji);
+    // NULL = brak zgody, a wtedy `allergies` musi być NULL (reguła w trasach
+    // POST/PUT /api/clients). `consent_by` bez FK: dowód zgody ma przetrwać
+    // usunięcie konta personelu.
+    healthDataConsentAt: timestamp("health_data_consent_at", { withTimezone: true }),
+    healthDataConsentBy: text("health_data_consent_by"),
     favoriteEmployeeId: text("favorite_employee_id"),
     birthday: text("birthday"), // ISO date string "YYYY-MM-DD" for birthday
     requireDeposit: boolean("require_deposit").default(false),
@@ -166,6 +173,10 @@ export const clients = pgTable(
     index("clients_email_idx").on(table.email),
     index("clients_phone_idx").on(table.phone),
     index("clients_birthday_idx").on(table.birthday),
+    // Druga tama pod regułą tras: informacja o zdrowiu tylko przy zapisanej
+    // zgodzie, a czas i konto zgody występują wyłącznie razem.
+    check("clients_allergies_require_consent", sql`${table.allergies} IS NULL OR ${table.healthDataConsentAt} IS NOT NULL`),
+    check("clients_health_consent_pair", sql`(${table.healthDataConsentAt} IS NULL) = (${table.healthDataConsentBy} IS NULL)`),
   ]
 );
 
