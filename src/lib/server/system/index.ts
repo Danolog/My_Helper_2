@@ -22,6 +22,8 @@ export type { SalonContext, SalonContextResolution, SalonRole } from "./session"
 export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
 export { clearSignInFailures, consumeAuthRateLimit, reserveAccountSignInAttempt } from "./auth-throttle";
+export { cleanupExpiredAuthRecords } from "./auth-retention";
+export type { ExpiredAuthCleanupResult } from "./auth-retention";
 export { findCredentialPasswordHash } from "./credentials";
 export {
   findAccountForEmployeeLink,

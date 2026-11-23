@@ -38,6 +38,8 @@ const SESSION_EXPORTS = [
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
+/** Retencja tabel auth: wygasłe sesje i rekordy weryfikacji (cron, wszystkie konta). */
+const AUTH_RETENTION_EXPORTS = ["cleanupExpiredAuthRecords"];
 /** #193: hash hasła konta `credential` (potwierdzenie hasłem usunięcia klienta). */
 const CREDENTIALS_EXPORTS = ["findCredentialPasswordHash"];
 /**
@@ -89,12 +91,14 @@ const REGISTRY_SOURCES = [
   "notifications.ts",
   "waiting-list.ts",
   "auth-throttle.ts",
+  "auth-retention.ts",
   "credentials.ts",
   "staff-access.ts",
   "client-portal.ts",
 ];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
+  "auth-retention.ts": AUTH_RETENTION_EXPORTS,
   "auth-throttle.ts": AUTH_THROTTLE_EXPORTS,
   "catalog.ts": CATALOG_EXPORTS,
   "client-portal.ts": CLIENT_PORTAL_EXPORTS,
@@ -114,6 +118,7 @@ const SNAPSHOT: Record<string, string[]> = {
     ...NOTIFICATIONS_EXPORTS,
     ...WAITING_LIST_EXPORTS,
     ...AUTH_THROTTLE_EXPORTS,
+    ...AUTH_RETENTION_EXPORTS,
     ...CREDENTIALS_EXPORTS,
     ...STAFF_ACCESS_EXPORTS,
     ...CLIENT_PORTAL_EXPORTS,
