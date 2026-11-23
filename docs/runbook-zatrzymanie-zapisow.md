@@ -35,7 +35,7 @@
 >   L1 wraca do nowej decyzji przed oknem.
 > - **Fakty z próby 2026-11-23:** F2 = tak, F3 = nie (tabela 0.2). L2, W3
 >   i R3 = „nie dotyczy (plan Hobby, F3 = nie)”; W3 to kontrola godziny
->   startu okna.
+>   startu i planowanego końca okna, pierwszy raz na koniec W0.
 > - **Konta:** na GCP nie ma kont ani danych z Vercela. Każdy zakłada konto
 >   od nowa.
 > - **Powrót bez danych** jest ważny do pierwszego prawdziwego salonu na GCP
@@ -212,7 +212,7 @@ W0–W4 i W6; W5 i W7 nie obowiązują, a „stop przed 2.2” znaczy „stop pr
 
 | Krok | Działanie | Zgoda (1.2) |
 |---|---|---|
-| W0 | zapis stanu sprzed okna | — (odczyt) |
+| W0 | zapis stanu sprzed okna; przy F3 = nie: kontrola godziny (blok z W3) | — (odczyt) |
 | W1 | reguła zapory Vercela włączona (L1) | „start okna” |
 | W2 | Preview i starsze wdrożenia zamknięte (L3) | — (odczyt; zmiana przed oknem, P11) |
 | W3 | crony Vercela wyłączone (L2); przy F3 = nie: kontrola godziny, odczyt | „start okna” |
@@ -235,6 +235,9 @@ Oczekiwane: ingress `all` (`docs/runbook-krok-d.md` sekcja 10a); lista zadań
 polecenia gcloud do potwierdzenia w próbie (składnia `--format`). Listy zadań
 nie odczytuje się z polem nagłówków (`docs/runbook-krok-d.md` sekcja 4,
 koniec). Zakaz scaleń (L7) ogłoszony przed W0.
+
+W wariancie bez kopii przy F3 = nie: na koniec W0 blok `date -u` z W3;
+wynik poza przedziałem = okno nie startuje.
 
 **W1 — Vercel Production.** Panel Vercela → Firewall: włączyć regułę z P12
 i opublikować. To pierwsze włączenie reguły dla całego projektu (L1); przed
