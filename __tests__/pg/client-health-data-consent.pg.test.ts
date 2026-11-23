@@ -16,7 +16,7 @@
  *    (`SELECT … FOR UPDATE`) i czeka, aż oba UPDATE staną w kolejce
  *    (`pg_stat_activity` w bieżącej bazie).
  *
- * Mocki: kontekst salonu (`getSalonContext`), logger. `@/lib/db` → pula testu.
+ * Mocki: sesja (`requireAuth`), kontekst salonu (`getSalonContext`), logger. `@/lib/db` → pula testu.
  * Dane: użytkownicy `it-t3-hconsent-…`; reszta kaskadą z salonu w `afterAll`.
  * Uruchomienie: `INTEGRATION_POSTGRES_URL=<lokalna baza testowa> pnpm test:pg -- __tests__/pg/client-health-data-consent.pg.test.ts`.
  * Wymaga bazy po `pnpm db:migrate` (RLS, rola aplikacji, migracja 0017).
@@ -37,6 +37,12 @@ vi.mock("@/lib/db", () => ({
     if (!h) throw new Error("INTEGRATION_POSTGRES_URL not set");
     return h.db;
   },
+}));
+// PUT idzie przez withApiHandler({ auth: "user" }) → requireAuth(), które poza
+// żądaniem Next.js rzuca wyjątek (500). Sesja = bieżący użytkownik testu.
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: async () => ({ user: { id: ctl.userId } }),
+  isAuthError: () => false,
 }));
 vi.mock("@/lib/salon-context", () => ({
   getSalonContext: async () => ({ salonId: ctl.salonId, role: "owner", employeeId: null, userId: ctl.userId }),
