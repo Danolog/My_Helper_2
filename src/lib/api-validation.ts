@@ -688,8 +688,10 @@ export function isPolishMobileNumber(e164: string): boolean {
 
 const BLIK_PHONE_FORMAT_MESSAGE = "Podaj prawidlowy numer telefonu (9 cyfr, opcjonalnie +48)";
 const BLIK_PHONE_MOBILE_MESSAGE = "Numer BLIK musi byc numerem komorkowym";
-const BLIK_CONSENT_MESSAGE = "Zaznacz zgode na pokazywanie numeru klientom";
-const BLIK_CONSENT_VERSION_MESSAGE = "Brak wersji tresci zgody. Odswiez strone";
+// Pole jest potwierdzeniem włączenia funkcji, nie zgodą — teksty dla
+// użytkownika nie używają słowa „zgoda” (nazwy w kodzie zostają).
+const BLIK_CONSENT_MESSAGE = "Zaznacz potwierdzenie, aby włączyć wpłaty BLIK na ten numer";
+const BLIK_CONSENT_VERSION_MESSAGE = "Brak wersji treści potwierdzenia. Odśwież stronę";
 
 /**
  * Numer BLIK salonu: ta sama normalizacja co `guestPhone` (spacje, myślniki,
