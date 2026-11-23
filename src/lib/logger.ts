@@ -59,6 +59,9 @@ export const PII_LOG_KEYS: readonly string[] = [
   // (personalize, categorize, insights, auto-summary).
   "rawText",
   "responseText",
+  // Kartoteka klienta: informacje o zdrowiu i wolny tekst preferencji.
+  "allergies",
+  "preferences",
 ];
 
 /**
