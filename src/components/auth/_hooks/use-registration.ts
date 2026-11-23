@@ -6,6 +6,15 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { mutationFetch } from "@/lib/api-client";
 import { signUp } from "@/lib/auth-client";
 import { sanitizeAuthError } from "@/lib/error-messages";
+import {
+  LEGAL_ACCEPTANCE_REQUIRED_CODE,
+  LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
+  isLegalAcceptanceComplete,
+  legalAcceptanceForm,
+  legalAcceptanceRequestFields,
+  type LegalAcceptanceChecks,
+  type LegalAcceptanceForm,
+} from "@/lib/legal/documents";
 import { PLANS_ON_SALE, isPlanOnSale, planOnSaleOr } from "@/lib/plan-catalog";
 
 export type Plan = {
@@ -26,7 +35,39 @@ function hasFormData(
   return !!state.name || !!state.email || (!singlePlanOnSale && !!state.selectedPlan);
 }
 
-export function useRegistration(preselectedPlan: string | null) {
+const SALON_SETUP_FALLBACK_ERROR =
+  "Nie udało się założyć salonu. Po zalogowaniu załóż go w panelu.";
+
+/**
+ * Komunikat dla użytkownika po odpowiedzi trasy zakładającej salon; `null`, gdy
+ * nie ma czego pokazywać:
+ * - 2xx: salon założony;
+ * - 401: konto czeka na potwierdzenie e-maila, salon powstanie w panelu;
+ * - 409: konto ma już salon z subskrypcją.
+ * Każdy inny wynik (w tym 400 przy braku akceptacji dokumentów) jest widoczny.
+ */
+async function salonSetupErrorMessage(res: Response): Promise<string | null> {
+  if (res.ok || res.status === 401 || res.status === 409) return null;
+  const body: unknown = await res.json().catch(() => null);
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    (body as { code?: unknown }).code === LEGAL_ACCEPTANCE_REQUIRED_CODE
+  ) {
+    return LEGAL_ACCEPTANCE_REQUIRED_MESSAGE;
+  }
+  return SALON_SETUP_FALLBACK_ERROR;
+}
+
+/**
+ * @param legalForm pola akceptacji regulaminu i DPA; domyślnie stan z rejestru
+ * dokumentów (przed publikacją `null`: bez pól i bez dodatkowych danych w żądaniu).
+ * Parametr istnieje, żeby test sprawdzał oba stany bez atrapy modułu.
+ */
+export function useRegistration(
+  preselectedPlan: string | null,
+  legalForm: LegalAcceptanceForm | null = legalAcceptanceForm()
+) {
   const router = useRouter();
 
   // Step management: 1 = plan selection, 2 = account details
@@ -49,6 +90,13 @@ export function useRegistration(preselectedPlan: string | null) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isPending, setIsPending] = useState(false);
   const [showVerificationMessage, setShowVerificationMessage] = useState(false);
+  const [legalChecks, setLegalChecks] = useState<LegalAcceptanceChecks>({
+    terms: false,
+    dpa: false,
+  });
+  // Konto powstało, ale salonu nie udało się założyć: pokazywane na ekranie potwierdzenia.
+  const [salonSetupError, setSalonSetupError] = useState("");
+  const legalAcceptanceComplete = isLegalAcceptanceComplete(legalForm, legalChecks);
 
   // Form recovery after page refresh
   const {
@@ -158,6 +206,10 @@ export function useRegistration(preselectedPlan: string | null) {
     } else if (password !== confirmPassword) {
       errors.confirmPassword = "Hasla nie sa identyczne. Upewnij sie, ze oba pola zawieraja to samo haslo";
     }
+    if (!legalAcceptanceComplete) {
+      errors.legalAcceptance =
+        "Zaznacz akceptację regulaminu i umowy powierzenia przetwarzania danych";
+    }
 
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
@@ -184,19 +236,25 @@ export function useRegistration(preselectedPlan: string | null) {
       if (result.error) {
         setError(sanitizeAuthError(result.error.message, "Nie udalo sie utworzyc konta"));
       } else {
-        // After signup, create salon subscription with planOnSaleOr(selectedPlan)
+        // Po rejestracji zakładamy salon z planem planOnSaleOr(selectedPlan).
+        // Konto już istnieje, więc błąd salonu nie cofa rejestracji: przechodzimy
+        // do potwierdzenia i tam go pokazujemy (salon można założyć w panelu).
         if (selectedPlan) {
+          setSalonSetupError("");
           try {
-            await mutationFetch("/api/register-subscription", {
+            const res = await mutationFetch("/api/register-subscription", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 planSlug: planOnSaleOr(selectedPlan),
                 email,
+                ...legalAcceptanceRequestFields(legalForm, legalChecks, "registration"),
               }),
             });
+            const message = await salonSetupErrorMessage(res);
+            if (message) setSalonSetupError(message);
           } catch {
-            // Non-critical — subscription can be set up later
+            setSalonSetupError(SALON_SETUP_FALLBACK_ERROR);
           }
         }
 
@@ -236,6 +294,13 @@ export function useRegistration(preselectedPlan: string | null) {
     fieldErrors,
     isPending,
     showVerificationMessage,
+    salonSetupError,
+
+    // Akceptacja regulaminu i DPA (przed publikacją dokumentów legalForm = null)
+    legalForm,
+    legalChecks,
+    setLegalChecks,
+    legalAcceptanceComplete,
 
     // Form recovery
     wasRecovered: recoveredWithData,
