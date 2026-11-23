@@ -14,7 +14,13 @@ import {
   BLIK_CONSENT_VERSION_STALE,
   BLIK_PRIVACY_POLICY_HREF,
   BLIK_SETTINGS_NOT_AVAILABLE,
+  blikPrivacyPolicyHref,
 } from "@/lib/blik-consent";
+import {
+  LEGAL_DOCS_PUBLISHED,
+  LEGAL_DOCUMENTS,
+  type LegalDocuments,
+} from "@/lib/legal/documents";
 
 const CONTENT_SHA256_BY_VERSION: Record<string, string> = {
   "2026-11-21": "9e41127a955cc8dc6910064cbcf828e475c0b244117703b407fa47f9553aecf9",
@@ -75,6 +81,33 @@ describe("blik-consent", () => {
 
   it("adres polityki prywatności to null — zapis numeru zamknięty", () => {
     expect(BLIK_PRIVACY_POLICY_HREF === null).toBe(true);
+    expect(LEGAL_DOCS_PUBLISHED).toBe(false);
+  });
+
+  describe("adres polityki z rejestru dokumentów", () => {
+    const withPrivacyVersion = (version: string | null): LegalDocuments => ({
+      ...LEGAL_DOCUMENTS,
+      privacy: { ...LEGAL_DOCUMENTS.privacy, version },
+    });
+
+    it("flaga wyłączona: null, także przy ustalonej wersji polityki", () => {
+      expect(blikPrivacyPolicyHref(false, withPrivacyVersion("2026-11-23"))).toBeNull();
+    });
+
+    it("flaga włączona, polityka bez wersji: null (strona nadal 404)", () => {
+      expect(blikPrivacyPolicyHref(true, withPrivacyVersion(null))).toBeNull();
+    });
+
+    it("flaga włączona i wersja polityki: adres strony polityki z rejestru", () => {
+      expect(blikPrivacyPolicyHref(true, withPrivacyVersion("2026-11-23"))).toBe(
+        LEGAL_DOCUMENTS.privacy.href
+      );
+      expect(LEGAL_DOCUMENTS.privacy.href).toBe("/privacy");
+    });
+
+    it("bez argumentów odpowiada stałej modułu", () => {
+      expect(blikPrivacyPolicyHref()).toBe(BLIK_PRIVACY_POLICY_HREF);
+    });
   });
 
   it("kody odpowiedzi 409", () => {
