@@ -783,7 +783,7 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     expect(lines[vapidAt + 2]).toBe("  | add vapid-private-key");
     expect(lines[vapidAt + 3]).toBe("vapid_check");
     expect(lines[vapidAt + 4]).toBe(
-      "gcloud --project=$P secrets versions list vapid-private-key --sort-by=~createTime --limit=1 --format='value(name,state,createTime)'",
+      "gcloud --project=$P secrets versions list vapid-private-key --sort-by='~createTime' --limit=1 --format='value(name,state,createTime)'",
     );
     expect(lines.some((l) => /^gh variable get/.test(l))).toBe(false);
   });

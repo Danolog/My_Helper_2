@@ -355,29 +355,36 @@ produkcyjny.
 Osobna gałąź w projekcie Neona z własnym endpointem;
 nigdy gałąź produkcyjna. Zmienna `NEON_BRANCH` ma w terminalu próby wyłącznie
 nazwę gałęzi próbnej (blok „Tylko w oknie” z 1.5 w próbie się nie wkleja).
-Dowód, że `<neon-admin>` z 1.6 jest endpointem gałęzi próbnej, a nie
+Tak samo zmienne endpointu: `NEON_ADMIN` i `NEON_POOLER` mają w terminalu
+próby wyłącznie `<neon-admin próby>` i `<neon-pooler próby>`; wartości
+`<neon-admin okna>` i `<neon-pooler okna>` wkleja tylko blok „Tylko w oknie”.
+Dowód, że `NEON_ADMIN` jest endpointem gałęzi próbnej, a nie
 produkcyjnej — przed 2.2 (do potwierdzenia w próbie, sekcja 0: flagi
 `endpoints list --branch --output json` i obecność hosta w wyniku):
 
 ```bash
 set +x
 NEON_BRANCH='<gałąź próbna Neona>'
+NEON_ADMIN='<neon-admin próby>'
+NEON_POOLER='<neon-pooler próby>'
 [[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' ]] && echo drill_branch_ok=yes || echo drill_branch_ok=no
-: "${NEON_BRANCH:?}" && [[ "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' ]] && neonctl endpoints list --project-id '<projekt Neona>' --branch "$NEON_BRANCH" --output json | grep -qF -- '<neon-admin>' && NEON_PROD_EP="$(neonctl endpoints list --project-id '<projekt Neona>' --branch '<gałąź produkcyjna Neona>' --output json)" && [[ -n "$NEON_PROD_EP" ]] && ! printf '%s' "$NEON_PROD_EP" | grep -qF -- '<neon-admin>' && DRILL_NEON_OK=yes || DRILL_NEON_OK=no
+[[ -n "$NEON_ADMIN" && -n "$NEON_POOLER" && "$NEON_ADMIN" != '<neon-admin okna>' && "$NEON_POOLER" != '<neon-pooler okna>' ]] && echo drill_endpoint_ok=yes || echo drill_endpoint_ok=no
+: "${NEON_BRANCH:?}" && : "${NEON_ADMIN:?}" && [[ "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' ]] && neonctl endpoints list --project-id '<projekt Neona>' --branch "$NEON_BRANCH" --output json | grep -qF -- "$NEON_ADMIN" && NEON_PROD_EP="$(neonctl endpoints list --project-id '<projekt Neona>' --branch '<gałąź produkcyjna Neona>' --output json)" && [[ -n "$NEON_PROD_EP" ]] && ! printf '%s' "$NEON_PROD_EP" | grep -qF -- "$NEON_ADMIN" && DRILL_NEON_OK=yes || DRILL_NEON_OK=no
 unset NEON_PROD_EP
 echo "drill_neon_ok=$DRILL_NEON_OK"
-drill_neon_guard() { [[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' && "$DRILL_NEON_OK" == yes ]]; }
+drill_neon_guard() { [[ -n "$NEON_BRANCH" && "$NEON_BRANCH" != '<gałąź produkcyjna Neona>' && -n "$NEON_ADMIN" && "$NEON_ADMIN" != '<neon-admin okna>' && "$DRILL_NEON_OK" == yes ]]; }
 ```
 
-Oczekiwane: `drill_branch_ok=yes`, `drill_neon_ok=yes`. `no` = stop próby.
+Oczekiwane: `drill_branch_ok=yes`, `drill_endpoint_ok=yes`,
+`drill_neon_ok=yes`. `no` = stop próby.
 Wynik `endpoints list` nie trafia na ekran (`grep -q`, zmienna bez `echo`).
 Część negatywna (host nie jest endpointem produkcji) rozróżnia „brak hosta
 w wyniku” od „błędu polecenia”: wynik dla gałęzi produkcyjnej trafia najpierw
 do zmiennej, więc błąd `neonctl` (kod ≠ 0) albo pusty wynik daje
 `drill_neon_ok=no`, a nie fałszywe `yes`. Głównym dowodem jest część
 pozytywna (host na liście gałęzi próbnej); negatywna jest pomocnicza.
-`<neon-pooler>` musi
-wskazywać ten sam endpoint co `<neon-admin>`, inaczej skrypty dają kod 2
+`NEON_POOLER` musi
+wskazywać ten sam endpoint co `NEON_ADMIN`, inaczej skrypty dają kod 2
 (`freeze-neon.sh:22-25`, `:131-144`).
 
 **Strażnik Neona w próbie** — nie obowiązuje w wariancie bez kopii (plan
@@ -394,9 +401,10 @@ prefiksu się nie wkleja.
 |---|---|
 | `<port tunelu>` | port tunelu próby |
 | `CSQL_INSTANCE` | instancja próbna (blok wyżej) |
-| `<neon-admin>`, `<neon-pooler>` | endpoint gałęzi próbnej (bez i z `-pooler.`) |
+| `NEON_ADMIN`, `NEON_POOLER` | `<neon-admin próby>`, `<neon-pooler próby>` — endpoint gałęzi próbnej, bez i z `-pooler.` (blok wyżej) |
 | `NEON_BRANCH` | gałąź próbna (blok wyżej) |
 | `<gałąź produkcyjna Neona>` | **bez podmiany** — prawdziwa nazwa produkcji, tylko w strażnikach |
+| `<neon-admin okna>`, `<neon-pooler okna>` | **bez podmiany** — prawdziwy endpoint produkcji, tylko w strażnikach |
 
 Na końcu próby, przed zamknięciem terminala (po usunięciu instancji próbnej
 i po końcu tunelu i haseł z 1.5 i 1.6 — kolejność w 3.3 krok 11; w wariancie
@@ -404,7 +412,7 @@ bez kopii: po pkt 4 i usunięciu instancji próbnej):
 
 ```bash
 set +x
-unset NEON_BRANCH DRILL_NEON_OK DRILL_BACKUP_ID
+unset NEON_BRANCH NEON_ADMIN NEON_POOLER DRILL_NEON_OK DRILL_BACKUP_ID
 unset -f drill_neon_guard
 ```
 
@@ -591,8 +599,8 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    : "${PRE_IMPORT_ID:?}" && DRILL_BACKUP_ID="$PRE_IMPORT_ID" && echo "drill_backup=$DRILL_BACKUP_ID"
    ```
 
-   Oczekiwane: `drill_backup=<ID>` równe ID `pre-import-<RRRRMMDD>`
-   z notatki próby (lista 2.4); inne ID albo błąd = stop. Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
+   Oczekiwane: `drill_backup=<ID>` równe ID kopii z opisem
+   `pre-import-<RRRRMMDD>` z notatki próby (lista 2.4); inne ID albo błąd = stop. Przywrócenie **zdejmuje zamrożenie Cloud SQL**: ustawienie z
    `ALTER DATABASE … SET` siedzi w `pg_db_role_setting`, czyli w kopii
    instancji (`freeze-neon.sh:37-38`). Próba przywraca kopię **na końcu
    próby, po 3.3 kroku 11** (wcześniej przywrócenie opróżniłoby instancję
@@ -644,7 +652,7 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    „Stop w kroku 7 albo 8”, z prefiksem `drill_neon_guard &&`) na gałęzi
    próbnej. Miejsce w próbie: po 3.4 z kodem 0 — przywrócenie gałęzi
    z kontrolami po nim, potem 3.4 jeszcze raz (Neon nadal zamrożony) i dalej
-   3.3 krok 8. Po przywróceniu: host endpointu bez zmian (`<neon-admin>` z 1.6
+   3.3 krok 8. Po przywróceniu: host endpointu bez zmian (`NEON_ADMIN` z 1.1
    łączy się bez zmiany zmiennych), hasła ról bez zmian, baza nadal
    zamrożona. Do sprawdzenia w próbie: czy Neon pozwala przywrócić gałąź
    z gałęzi, która jest jej własnym dzieckiem (`pre-return` jest dzieckiem
@@ -659,7 +667,8 @@ pkt 4; pkt 1–3 i 5–8 nie obowiązują):
    : "${PRE_RETURN_ID:?}" && DRILL_BACKUP_ID="$PRE_RETURN_ID" && echo "drill_backup=$DRILL_BACKUP_ID"
    ```
 
-   Oczekiwane: ID równe `pre-return-<RRRRMMDD>` z notatki próby; inne ID
+   Oczekiwane: `drill_backup=<ID>` równe ID kopii z opisem
+   `pre-return-<RRRRMMDD>` z notatki próby; inne ID
    albo błąd = stop. Po tym przywróceniu, przed przywróceniem z pkt 4, zmienna wraca na
    ID „przed importem” (blok wyżej, z `PRE_IMPORT_ID`). Po przywróceniu
    „przed powrotem” kontrola z pkt 4 (`psql_csql_app`,
@@ -822,6 +831,8 @@ wkleja:
 set +x
 CSQL_INSTANCE='<instancja produkcyjna>'
 NEON_BRANCH='<gałąź produkcyjna Neona>'
+NEON_ADMIN='<neon-admin okna>'
+NEON_POOLER='<neon-pooler okna>'
 ```
 
 Blok z sekcji 9 kończy proxy zaraz po `psql`, więc na czas okna proxy startuje
@@ -854,7 +865,7 @@ Koniec tunelu (koniec okna albo stop okna):
 ```bash
 set +x
 kill "$CSQL_PROXY_PID"
-unset CSQL_PROXY_PID CSQL_INSTANCE NEON_BRANCH
+unset CSQL_PROXY_PID CSQL_INSTANCE NEON_BRANCH NEON_ADMIN NEON_POOLER
 ```
 
 ### 1.6 Hasła tylko w środowisku procesu
@@ -907,8 +918,8 @@ z hasłem tylko w środowisku `psql`; zapytanie idzie ze strumienia
 
 ```bash
 set +x
-psql_neon_owner() { PGHOST='<neon-admin>' PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
-psql_neon_app() { PGHOST='<neon-pooler>' PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola aplikacji Neona>' PGPASSWORD="$NEON_APP_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
+psql_neon_owner() { PGHOST="$NEON_ADMIN" PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
+psql_neon_app() { PGHOST="$NEON_POOLER" PGPORT=5432 PGDATABASE='<baza>' PGUSER='<rola aplikacji Neona>' PGPASSWORD="$NEON_APP_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_csql_admin() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=postgres PGPASSWORD="$CSQL_ADMIN_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_csql_app() { PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER=myhelper_svc PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable PGPASSFILE=/dev/null psql -X -A -t -w -v ON_ERROR_STOP=1; }
 psql_neon_owner <<'SQL'
@@ -931,8 +942,8 @@ CA 1.4, hasła wyżej). W wariancie bez kopii tylko wiersze Cloud SQL
 
 | Funkcja | Adres | Rola i hasło |
 |---|---|---|
-| `psql_neon_owner` | `<neon-admin>`, `verify-full` | rola właściciela Neona, `$NEON_OWNER_PW` |
-| `psql_neon_app` | `<neon-pooler>`, `verify-full` | rola aplikacji Neona, `$NEON_APP_PW` |
+| `psql_neon_owner` | `$NEON_ADMIN`, `verify-full` | rola właściciela Neona, `$NEON_OWNER_PW` |
+| `psql_neon_app` | `$NEON_POOLER`, `verify-full` | rola aplikacji Neona, `$NEON_APP_PW` |
 | `psql_csql_admin` | tunel 127.0.0.1, `disable` | `postgres`, `$CSQL_ADMIN_PW` |
 | `psql_csql_app` | tunel 127.0.0.1, `disable` | `myhelper_svc`, `$CSQL_OWNER_PW` |
 
@@ -947,10 +958,15 @@ unset -f psql_neon_owner psql_neon_app psql_csql_admin psql_csql_app
 
 Dalej w blokach (symbole zastępcze):
 
-- `<neon-admin>` — pełna nazwa endpointu Neona **bez** `-pooler.` (rola
-  właściciela); `<neon-pooler>` — ta sama nazwa z `-pooler.` (rola logowania
+- `NEON_ADMIN` — pełna nazwa endpointu Neona **bez** `-pooler.` (rola
+  właściciela); `NEON_POOLER` — ta sama nazwa z `-pooler.` (rola logowania
   aplikacji). Oba muszą wskazywać ten sam endpoint, inaczej kod 2
-  (`freeze-neon.sh:22-25`, `:131-144`).
+  (`freeze-neon.sh:22-25`, `:131-144`). Dwa różne symbole, żeby w próbie nie
+  dało się wkleić adresu produkcji: w oknie `<neon-admin okna>`
+  i `<neon-pooler okna>` (blok „Tylko w oknie”, 1.5), w próbie `<neon-admin
+  próby>` i `<neon-pooler próby>` (1.1 „Gałąź próbna Neona”, ze strażnikiem).
+  Pusta zmienna = skrypty kończą się kodem 2 bez połączenia (np.
+  `compare.sh:106`, `freeze-neon.sh:128-129`).
 - `<baza>`, `<rola właściciela Neona>`, `<rola aplikacji Neona>`,
   `<baza Cloud SQL>`, `<rola właściciela Cloud SQL>` = `myhelper_svc`
   z hasłem `$CSQL_OWNER_PW` (dla kopii w przód rola właściciela bazy celu —
@@ -1053,7 +1069,7 @@ bo ingress Cloud Run `internal` od 2.1):
 
    ```bash
    set +x
-   PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/unfreeze-neon.sh --dry-run
+   PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST="$NEON_POOLER" VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/unfreeze-neon.sh --dry-run
    ```
 
    Potem ten sam wiersz bez `--dry-run` (w próbie z prefiksem
@@ -1118,7 +1134,7 @@ nie zamrażać. Ingress `internal` nie obowiązuje w wariancie bez kopii
 
 ```bash
 set +x
-PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/freeze-neon.sh --dry-run
+PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST="$NEON_POOLER" VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/freeze-neon.sh --dry-run
 ```
 
 W próbie: przed tym blokiem `drill_neon_ok=yes` (1.1), a wiersz bez
@@ -1257,7 +1273,7 @@ ponownie sprawdza pustość celu (`:229-232`).
 
 ```bash
 set +x
-PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' TARGET_PGHOST=127.0.0.1 TARGET_PGPORT='<port tunelu>' TARGET_PGDATABASE='<baza Cloud SQL>' TARGET_PGUSER=myhelper_svc TARGET_PGPASSWORD="$CSQL_OWNER_PW" TARGET_PGSSLMODE=disable infra/db/cutover/copy-neon-to-cloudsql.sh --dry-run
+PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' TARGET_PGHOST=127.0.0.1 TARGET_PGPORT='<port tunelu>' TARGET_PGDATABASE='<baza Cloud SQL>' TARGET_PGUSER=myhelper_svc TARGET_PGPASSWORD="$CSQL_OWNER_PW" TARGET_PGSSLMODE=disable infra/db/cutover/copy-neon-to-cloudsql.sh --dry-run
 ```
 
 Potem bez `--dry-run`. Oczekiwane: `target_nonempty_tables=0`,
@@ -1326,7 +1342,7 @@ zapisach w tle liczby różniłyby się bez błędu. Obie bazy są zamrożone (2
 
 ```bash
 set +x
-PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/compare.sh > "$HOME/secure/cutover-cmp-neon.txt"
+PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/compare.sh > "$HOME/secure/cutover-cmp-neon.txt"
 NEON_SCHEMA="$(ls -t "$HOME"/secure/cutover-compare-*.schema.sql | head -n 1)"
 PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER='<rola właściciela Cloud SQL>' PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable infra/db/cutover/compare.sh --schema-baseline="$NEON_SCHEMA" > "$HOME/secure/cutover-cmp-csql.txt"
 tail -n 1 "$HOME/secure/cutover-cmp-neon.txt" "$HOME/secure/cutover-cmp-csql.txt"
@@ -1523,7 +1539,7 @@ luzujemy na potrzeby powrotu.
 - Źródło `PG*` = Cloud SQL, **dokładnie** `PGHOST=127.0.0.1`
   (`copy-cloudsql-to-neon.sh:36-38`, `:143-144`).
 - Cel `TARGET_PG*` = Neon: **`TARGET_PGHOST` = pełna nazwa endpointu Neona**
-  (`<neon-admin>`, bez `-pooler.`), `TARGET_PGSSLMODE=verify-full`
+  (`NEON_ADMIN`, bez `-pooler.`), `TARGET_PGSSLMODE=verify-full`
   (`:145-150`). `localhost` jest dopuszczony wyłącznie dla testu CI (`:46-47`) —
   w oknie nigdy: `localhost` trafia w tunel Cloud SQL i omija wymóg
   `verify-full`.
@@ -1612,7 +1628,7 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
 
    ```bash
    set +x
-   PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/compare.sh --schema-baseline="$CSQL_SCHEMA" > "$HOME/secure/cutover-cmp-neon-r.txt"
+   PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/compare.sh --schema-baseline="$CSQL_SCHEMA" > "$HOME/secure/cutover-cmp-neon-r.txt"
    tail -n 1 "$HOME/secure/cutover-cmp-neon-r.txt"
    ```
 
@@ -1625,7 +1641,7 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
 
    ```bash
    set +x
-   PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/freeze-neon.sh --dry-run
+   PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST="$NEON_POOLER" VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/freeze-neon.sh --dry-run
    ```
 
    Potem ten sam wiersz bez `--dry-run` (w próbie z prefiksem
@@ -1641,7 +1657,7 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
    set +x
    PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER='<rola właściciela Cloud SQL>' PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable infra/db/cutover/compare.sh > "$HOME/secure/cutover-cmp-csql-r2.txt"
    CSQL_SCHEMA_R2="$(ls -t "$HOME"/secure/cutover-compare-*.schema.sql | head -n 1)"
-   PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/compare.sh --schema-baseline="$CSQL_SCHEMA_R2" > "$HOME/secure/cutover-cmp-neon-r2.txt"
+   PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/compare.sh --schema-baseline="$CSQL_SCHEMA_R2" > "$HOME/secure/cutover-cmp-neon-r2.txt"
    tail -n 1 "$HOME/secure/cutover-cmp-csql-r2.txt" "$HOME/secure/cutover-cmp-neon-r2.txt"
    diff "$HOME/secure/cutover-cmp-csql-r2.txt" "$HOME/secure/cutover-cmp-neon-r2.txt"
    ```
@@ -1662,7 +1678,7 @@ Przygotowanie terminala jak w sekcji 1 (1.7 → 1.5 → 1.6).
 
    ```bash
    set +x
-   PGHOST='<neon-admin>' PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST='<neon-pooler>' VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/unfreeze-neon.sh --dry-run
+   PGHOST="$NEON_ADMIN" PGDATABASE='<baza>' PGUSER='<rola właściciela Neona>' PGPASSWORD="$NEON_OWNER_PW" PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' VERIFY_PGHOST="$NEON_POOLER" VERIFY_PGDATABASE='<baza>' VERIFY_PGUSER='<rola aplikacji Neona>' VERIFY_PGPASSWORD="$NEON_APP_PW" VERIFY_PGSSLMODE=verify-full infra/db/cutover/unfreeze-neon.sh --dry-run
    ```
 
    Potem ten sam wiersz bez `--dry-run` (w próbie z prefiksem
@@ -1692,8 +1708,8 @@ set +x
 : "${NEON_BRANCH:?}" && neonctl branches restore "$NEON_BRANCH" 'pre-return-<RRRRMMDD>' --project-id '<projekt Neona>' --preserve-under-name 'pre-restore-<RRRRMMDD>'
 ```
 
-Przywrócenie zostawia endpoint gałęzi `NEON_BRANCH` (ten sam `<neon-admin>`
-i `<neon-pooler>`), zrywa otwarte połączenia, a role i hasła wracają do stanu
+Przywrócenie zostawia endpoint gałęzi `NEON_BRANCH` (ten sam `NEON_ADMIN`
+i `NEON_POOLER`), zrywa otwarte połączenia, a role i hasła wracają do stanu
 z chwili utworzenia gałęzi (te same, jeśli w międzyczasie ich nie zmieniano).
 Stan sprzed przywrócenia zostaje pod nazwą `pre-restore-<RRRRMMDD>`. Kontrola
 po przywróceniu:
@@ -1727,7 +1743,7 @@ wierszy i `last_value` równe źródłu), `COMMIT` jako ostatnia instrukcja
 
 ```bash
 set +x
-PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER='<rola właściciela Cloud SQL>' PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable TARGET_PGHOST='<neon-admin>' TARGET_PGDATABASE='<baza>' TARGET_PGUSER='<rola właściciela Neona>' TARGET_PGPASSWORD="$NEON_OWNER_PW" TARGET_PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/copy-cloudsql-to-neon.sh --dry-run
+PGHOST=127.0.0.1 PGPORT='<port tunelu>' PGDATABASE='<baza Cloud SQL>' PGUSER='<rola właściciela Cloud SQL>' PGPASSWORD="$CSQL_OWNER_PW" PGSSLMODE=disable TARGET_PGHOST="$NEON_ADMIN" TARGET_PGDATABASE='<baza>' TARGET_PGUSER='<rola właściciela Neona>' TARGET_PGPASSWORD="$NEON_OWNER_PW" TARGET_PGSSLMODE=verify-full PGSSLROOTCERT='<plik CA>' infra/db/cutover/copy-cloudsql-to-neon.sh --dry-run
 ```
 
 Potem bez `--dry-run` (w próbie z prefiksem `drill_neon_guard &&`, 1.1).

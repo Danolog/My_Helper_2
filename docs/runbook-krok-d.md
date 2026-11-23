@@ -489,7 +489,7 @@ node -e 'const k=require("web-push").generateVAPIDKeys(); require("fs").writeSyn
   3> >(gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp) \
   | add vapid-private-key
 vapid_check
-gcloud --project=$P secrets versions list vapid-private-key --sort-by=~createTime --limit=1 --format='value(name,state,createTime)'
+gcloud --project=$P secrets versions list vapid-private-key --sort-by='~createTime' --limit=1 --format='value(name,state,createTime)'
 
 add stripe-secret-key < "$HOME/secure/stripe-secret-key" && rm "$HOME/secure/stripe-secret-key"
 add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret" && rm "$HOME/secure/stripe-webhook-secret"
