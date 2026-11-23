@@ -12,6 +12,8 @@ import { createMockRequest, parseResponse } from "./helpers";
 const mockSelect = vi.fn();
 const mockInsertValues = vi.fn();
 let selectQueue: unknown[][] = [];
+/** Wynik INSERT: wiersze albo błąd (np. 23505 z indeksu reviews_appointment_id_uq). */
+let insertResult: () => unknown[] = () => [{ id: "review-1" }];
 
 function chain(result: () => unknown[]) {
   const c: Record<string, unknown> = {};
@@ -20,7 +22,13 @@ function chain(result: () => unknown[]) {
     mockInsertValues(v);
     return c;
   });
-  c.then = (resolve: (v: unknown[]) => unknown) => resolve(result());
+  c.then = (resolve: (v: unknown[]) => unknown, reject: (e: unknown) => unknown) => {
+    try {
+      return resolve(result());
+    } catch (e) {
+      return reject(e);
+    }
+  };
   return c;
 }
 
@@ -30,7 +38,7 @@ vi.mock("@/lib/db", () => ({
       mockSelect(...args);
       return chain(() => selectQueue.shift() ?? []);
     },
-    insert: () => chain(() => [{ id: "review-1" }]),
+    insert: () => chain(() => insertResult()),
   },
 }));
 
@@ -79,6 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // 1) wizyta klienta (zakończona), 2) brak istniejącej opinii
   selectQueue = [[completedAppointment], []];
+  insertResult = () => [{ id: "review-1" }];
 });
 
 describe("POST /api/client/appointments/[id]/review — kontrakt z UI", () => {
@@ -112,5 +121,45 @@ describe("POST /api/client/appointments/[id]/review — kontrakt z UI", () => {
     const { status } = await post({ rating: 5, comment: null });
     expect(status).toBe(404);
     expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/client/appointments/[id]/review — jedna opinia na wizytę", () => {
+  const ALREADY_EXISTS = { success: false, error: "Opinia dla tej wizyty zostala juz wystawiona" };
+
+  it("409 z szybkiej ścieżki SELECT, bez INSERT", async () => {
+    selectQueue = [[completedAppointment], [{ id: "existing-review" }]];
+    const { status, body } = await post({ rating: 5, comment: null });
+    expect(status).toBe(409);
+    expect(body).toEqual(ALREADY_EXISTS);
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("409 z tym samym komunikatem, gdy INSERT trafia w indeks unikalny (23505, wyścig)", async () => {
+    insertResult = () => {
+      throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+    };
+    const { status, body } = await post({ rating: 5, comment: null });
+    expect(status).toBe(409);
+    expect(body).toEqual(ALREADY_EXISTS);
+    expect(mockInsertValues).toHaveBeenCalledTimes(1);
+  });
+
+  it("409 także gdy 23505 jest w `cause` (opakowanie błędu przez sterownik/ORM)", async () => {
+    insertResult = () => {
+      throw new Error("Failed query", { cause: { code: "23505" } });
+    };
+    const { status, body } = await post({ rating: 5, comment: null });
+    expect(status).toBe(409);
+    expect(body).toEqual(ALREADY_EXISTS);
+  });
+
+  it("500 dla innego błędu INSERT (np. 23503), nie 409", async () => {
+    insertResult = () => {
+      throw Object.assign(new Error("foreign key violation"), { code: "23503" });
+    };
+    const { status, body } = await post({ rating: 5, comment: null });
+    expect(status).toBe(500);
+    expect(body).toEqual({ success: false, error: "Nie udalo sie dodac opinii" });
   });
 });

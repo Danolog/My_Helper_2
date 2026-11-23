@@ -6,6 +6,16 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { appointments, reviews } from "@/lib/schema";
+import { isUniqueViolation } from "@/lib/subscription-predicates";
+
+/** One review per appointment: same 409 for the SELECT fast path and the unique-index race. */
+function reviewAlreadyExists() {
+  return NextResponse.json(
+    { success: false, error: "Opinia dla tej wizyty zostala juz wystawiona" },
+    { status: 409 }
+  );
+}
+
 // GET /api/client/appointments/[id]/review - Check if a review exists for this appointment
 export async function GET(
   _request: Request,
@@ -125,7 +135,7 @@ export async function POST(
       );
     }
 
-    // Check if a review already exists for this appointment
+    // Fast path: a review already exists for this appointment
     const existingReview = await db
       .select()
       .from(reviews)
@@ -133,25 +143,32 @@ export async function POST(
       .limit(1);
 
     if (existingReview[0]) {
-      return NextResponse.json(
-        { success: false, error: "Opinia dla tej wizyty zostala juz wystawiona" },
-        { status: 409 }
-      );
+      return reviewAlreadyExists();
     }
 
-    // Insert the new review with salonId and employeeId from the appointment
-    const [newReview] = await db
-      .insert(reviews)
-      .values({
-        salonId: appointment.salonId,
-        employeeId: appointment.employeeId,
-        appointmentId: appointment.id,
-        clientId: appointment.clientId,
-        rating: hasRating ? rating : null,
-        comment: hasComment ? comment.trim() : null,
-        status: "pending",
-      })
-      .returning();
+    // Insert the new review with salonId and employeeId from the appointment.
+    // Two concurrent requests can both pass the SELECT above; the partial unique
+    // index reviews_appointment_id_uq rejects the second INSERT (23505) → 409.
+    let newReview: typeof reviews.$inferSelect | undefined;
+    try {
+      [newReview] = await db
+        .insert(reviews)
+        .values({
+          salonId: appointment.salonId,
+          employeeId: appointment.employeeId,
+          appointmentId: appointment.id,
+          clientId: appointment.clientId,
+          rating: hasRating ? rating : null,
+          comment: hasComment ? comment.trim() : null,
+          status: "pending",
+        })
+        .returning();
+    } catch (insertError) {
+      if (isUniqueViolation(insertError)) {
+        return reviewAlreadyExists();
+      }
+      throw insertError;
+    }
 
     logger.info(`[Client Review API] User ${userId} submitted review for appointment ${id}`,
       { rating: hasRating ? rating : null, hasComment, reviewId: newReview?.id });
