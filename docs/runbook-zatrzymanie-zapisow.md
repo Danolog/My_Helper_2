@@ -215,7 +215,7 @@ W0–W4 i W6; W5 i W7 nie obowiązują, a „stop przed 2.2” znaczy „stop pr
 | W0 | zapis stanu sprzed okna | — (odczyt) |
 | W1 | reguła zapory Vercela włączona (L1) | „start okna” |
 | W2 | Preview i starsze wdrożenia zamknięte (L3) | — (odczyt; zmiana przed oknem, P11) |
-| W3 | crony Vercela wyłączone (L2) | „start okna” |
+| W3 | crony Vercela wyłączone (L2); przy F3 = nie: kontrola godziny, odczyt | „start okna” |
 | W4 | sha `main` bez zmian (L7) | — (odczyt) |
 | W5 | ingress Cloud Run `internal` | „start okna” |
 | W6 | zadania Scheduler wstrzymane | „start okna” |
@@ -287,9 +287,10 @@ stop przed 2.2; inny kod (także `302` na inny adres) = stop przed 2.2.
 `POSTGRES_URL` w panelu bez zakresu Preview, inaczej stop przed 2.2.
 W2 nie jest pełną kontrolą: „Standard Protection” przepuszcza zalogowanych
 członków zespołu Vercela, a istniejące Preview mają wbudowany stary
-`POSTGRES_URL`. W oknie chroni je zapora całego projektu (W1) — w wariancie
-z kopią niepotwierdzone (próba 2026-11-23 tego nie rozstrzyga, W1). Kontrolą
-jest W7.
+`POSTGRES_URL`. W oknie chroni je zapora całego projektu (W1) —
+niepotwierdzone w obu wariantach (próba 2026-11-23 tego nie rozstrzyga, W1).
+Kontrolą jest W7 (w wariancie bez kopii: W1 i W2, bo Preview pisze tylko do
+Neona).
 
 **W3 — crony Vercela.** Panel Vercela → Settings → Cron Jobs → „Disable Cron
 Jobs”. Oczekiwane: oba crony w panelu wyłączone. Okno planowane poza
@@ -308,8 +309,10 @@ date -u -v+'<planowany czas okna w minutach>'M +%H:%M
 Oczekiwane: obie godziny poza 02:00–04:00 UTC (plan Hobby: cron startuje
 w dowolnej chwili zadanej godziny, więc `0 3 * * *` może ruszyć do 03:59),
 a przedział nie leży między nimi — także gdy okno przechodzi przez północ
-(np. start 23:30, koniec 04:30 obejmuje przedział); obie do notatki okna. Inny wynik = start okna przesunięty poza
-przedział. Przy F3 = nie crony i tak działają i piszą tylko do Neona, więc
+(np. start 23:30, koniec 04:30 obejmuje przedział); obie do notatki okna.
+Ten blok uruchamia się najpierw na końcu W0, przed W1: inny wynik tam =
+okno nie startuje, start przesunięty poza przedział. W W3 to powtórka;
+inny wynik w W3 = stop przed T1 (sekcja 5). Przy F3 = nie crony i tak działają i piszą tylko do Neona, więc
 to kwestia zgodności z decyzją, nie ochrony danych.
 
 **W4 — `main`.** Scalenia wstrzymane (L7):
@@ -542,7 +545,7 @@ crony Vercela nie były wyłączone (L2).
 | Krok | Działanie | Polecenie | Oczekiwane | Zgoda (1.2) |
 |---|---|---|---|---|
 | R1 | Vercel Production przyjmuje ruch | panel Vercela → Firewall: reguła z L1 **wyłączona** (nie usunięta — zostaje na następne okno) | reguła wyłączona | „start okna” |
-| R2 | Preview | bez zmian (L3 na stałe: ochrona zostaje, `POSTGRES_URL` bez zakresu Preview) | `curl` z P11 → `302 https://vercel.com/sso-api…`, `401` albo `403`; inny wynik = do notatki, decyzja | — (odczyt) |
+| R2 | Preview | bez zmian (L3 na stałe: ochrona zostaje, `POSTGRES_URL` bez zakresu Preview) | `curl` z P11 → `302 https://vercel.com/sso-api…`, `401` albo `403`; inny wynik = do notatki, wycofanie idzie dalej; Preview z `200` = decyzja właściciela przed końcem wycofania (L3) | — (odczyt) |
 | R3 | crony Vercela | panel Vercela → Settings → Cron Jobs → „Enable” | oba crony włączone; w wariancie bez kopii przy F3 = nie — „nie dotyczy (plan Hobby, F3 = nie)” | „start okna” |
 | R4 | ingress `all` dopiero po kontrolach drogi A pkt 2 | blok T1 | odczyt `all` | „start okna” |
 | R5 | zadania Scheduler jak w W0 | niżej | lista = lista z W0 | „po oknie albo przy wycofaniu (droga A pkt 3) …” |
