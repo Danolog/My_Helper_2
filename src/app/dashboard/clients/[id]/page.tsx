@@ -17,6 +17,10 @@ import { ClientInsightsTab } from "@/components/clients/client-insights-tab";
 import { ClientLoyaltyTab } from "@/components/clients/client-loyalty-tab";
 import { ClientProfileHeader } from "@/components/clients/client-profile-header";
 import { ClientProfileTab } from "@/components/clients/client-profile-tab";
+import {
+  buildHealthDataPatch,
+  describeConsentAuthor,
+} from "@/components/clients/health-data-consent-form";
 import type { ClientData, Employee } from "@/components/clients/types";
 import {
   parseCommaSeparated,
@@ -27,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { HEALTH_DATA_CONSENT_REQUIRED } from "@/lib/health-data-consent";
 import { validatePhone } from "@/lib/validations";
 
 export default function ClientProfilePage() {
@@ -55,6 +60,10 @@ export default function ClientProfilePage() {
   // Editable form fields
   const [formNotes, setFormNotes] = useState("");
   const [allergiesList, setAllergiesList] = useState<string[]>([]);
+  // Pole zgody na informacje o zdrowiu. Stan wczytany z serwera (baza do
+  // porównania przy zapisie) to `client.healthDataConsentAt`.
+  const [healthConsentChecked, setHealthConsentChecked] = useState(false);
+  const [healthConsentError, setHealthConsentError] = useState<string | null>(null);
   const [preferencesList, setPreferencesList] = useState<string[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedFavoriteEmployeeId, setSelectedFavoriteEmployeeId] = useState<string>("");
@@ -84,6 +93,7 @@ export default function ClientProfilePage() {
         setFormEmail(clientData.email || "");
         setFormNotes(clientData.notes || "");
         setAllergiesList(parseCommaSeparated(clientData.allergies));
+        setHealthConsentChecked(Boolean(clientData.healthDataConsentAt));
         setPreferencesList(parseCommaSeparated(clientData.preferences));
         setSelectedFavoriteEmployeeId(clientData.favoriteEmployeeId || "");
         setFormBirthday(clientData.birthday || "");
@@ -144,6 +154,14 @@ export default function ClientProfilePage() {
     });
   };
 
+  const handleHealthConsentChange = (checked: boolean) => {
+    setHealthConsentChecked(checked);
+    setHealthConsentError(null);
+    // Odznaczenie (po potwierdzeniu w karcie) usuwa alergie z formularza;
+    // serwer wyzeruje je przy zapisie cofnięcia zgody.
+    if (!checked) setAllergiesList([]);
+  };
+
   const handleSave = async () => {
     if (!client) return;
 
@@ -170,7 +188,17 @@ export default function ClientProfilePage() {
       return;
     }
 
+    // Zgoda i alergie tylko wtedy, gdy personel je zmienił w tej sesji edycji —
+    // nieaktualna karta nie nada zgody na nowo ani nie przywróci alergii.
+    const healthDataPatch = buildHealthDataPatch({
+      storedConsent: Boolean(client.healthDataConsentAt),
+      consentChecked: healthConsentChecked,
+      storedAllergies: serializeCommaSeparated(parseCommaSeparated(client.allergies)),
+      allergies: serializeCommaSeparated(allergiesList),
+    });
+
     setSaving(true);
+    setHealthConsentError(null);
     try {
       const res = await mutationFetch(`/api/clients/${clientId}`, {
         method: "PUT",
@@ -182,7 +210,7 @@ export default function ClientProfilePage() {
           email: formEmail.trim() || null,
           notes: formNotes.trim() || null,
           preferences: serializeCommaSeparated(preferencesList),
-          allergies: serializeCommaSeparated(allergiesList),
+          ...healthDataPatch,
           favoriteEmployeeId: selectedFavoriteEmployeeId || null,
           birthday: formBirthday || null,
           requireDeposit: formRequireDeposit,
@@ -201,11 +229,18 @@ export default function ClientProfilePage() {
         setFormLastName(updatedClient.lastName);
         setFormPhone(updatedClient.phone || "");
         setFormEmail(updatedClient.email || "");
+        setAllergiesList(parseCommaSeparated(updatedClient.allergies));
+        setHealthConsentChecked(Boolean(updatedClient.healthDataConsentAt));
         setFormBirthday(updatedClient.birthday || "");
         setFormRequireDeposit(updatedClient.requireDeposit ?? false);
         setFormDepositType(updatedClient.depositType || "percentage");
         setFormDepositValue(updatedClient.depositValue || "");
         toast.success("Dane klienta zostaly zapisane");
+      } else if (data.code === HEALTH_DATA_CONSENT_REQUIRED) {
+        // Np. zgodę cofnięto w innej karcie: komunikat przy polu alergii.
+        const message = `${data.error} Jeśli zgodę zmieniono w innym oknie, odśwież stronę.`;
+        setHealthConsentError(message);
+        toast.error(data.error);
       } else {
         toast.error(data.error || "Nie udalo sie zapisac danych klienta");
       }
@@ -330,6 +365,20 @@ export default function ClientProfilePage() {
             formNotes={formNotes}
             allergiesList={allergiesList}
             preferencesList={preferencesList}
+            healthConsentChecked={healthConsentChecked}
+            savedHealthConsent={
+              client.healthDataConsentAt
+                ? {
+                    at: client.healthDataConsentAt,
+                    byLabel: describeConsentAuthor(
+                      client.healthDataConsentBy,
+                      session.user.id,
+                      employees
+                    ),
+                  }
+                : null
+            }
+            healthConsentError={healthConsentError}
             employees={employees}
             selectedFavoriteEmployeeId={selectedFavoriteEmployeeId}
             formRequireDeposit={formRequireDeposit}
@@ -342,6 +391,7 @@ export default function ClientProfilePage() {
             onBirthdayChange={setFormBirthday}
             onClearFieldError={clearFieldError}
             onNotesChange={setFormNotes}
+            onHealthConsentChange={handleHealthConsentChange}
             onAllergiesChange={setAllergiesList}
             onPreferencesChange={setPreferencesList}
             onFavoriteEmployeeChange={setSelectedFavoriteEmployeeId}
