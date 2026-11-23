@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { isGoogleAuthConfigured } from "@/lib/google-auth"
+import { clientAccountLegalNotice } from "@/lib/legal/documents"
 import { hasActiveSession } from "@/lib/session"
 
 /**
@@ -52,6 +53,7 @@ export default async function ClientLoginPage({
             defaultRedirect="/salons"
             registerHref="/portal/register"
             googleEnabled={isGoogleAuthConfigured()}
+            googleLegalNotice={clientAccountLegalNotice()}
           />
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Prowadzisz salon?{" "}

@@ -4,10 +4,16 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signUp } from "@/lib/auth-client"
 import { sanitizeAuthError } from "@/lib/error-messages"
+import {
+  clientAccountLegalNotice,
+  isClientAccountAcceptanceComplete,
+  type ClientAccountLegalNotice,
+} from "@/lib/legal/documents"
 import { validatePhone } from "@/lib/validations"
 
 interface SignUpFormProps {
@@ -17,12 +23,19 @@ interface SignUpFormProps {
   showPhone?: boolean
   /** Link for "Already have an account?" */
   loginHref?: string
+  /**
+   * Akceptacja regulaminu i polityki prywatności przy koncie klienta; domyślnie
+   * stan z rejestru dokumentów. Przy `null` (przed publikacją) bez pola wyboru
+   * i bez blokady przycisku. Akceptacja nie trafia do bazy.
+   */
+  legalNotice?: ClientAccountLegalNotice | null
 }
 
 export function SignUpForm({
   redirectTo = "/dashboard",
   showPhone = false,
   loginHref = "/login",
+  legalNotice = clientAccountLegalNotice(),
 }: SignUpFormProps = {}) {
   const router = useRouter()
   const [name, setName] = useState("")
@@ -34,6 +47,8 @@ export function SignUpForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [isPending, setIsPending] = useState(false)
   const [showVerificationMessage, setShowVerificationMessage] = useState(false)
+  const [legalAccepted, setLegalAccepted] = useState(false)
+  const legalAcceptanceComplete = isClientAccountAcceptanceComplete(legalNotice, legalAccepted)
 
   const clearFieldError = (field: string) => {
     setFieldErrors((prev) => {
@@ -46,6 +61,11 @@ export function SignUpForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+
+    // Przycisk jest wtedy zablokowany; warunek chroni przed wysłaniem formularza klawiszem Enter.
+    if (!legalAcceptanceComplete) {
+      return
+    }
 
     // Validate required fields
     const errors: Record<string, string> = {}
@@ -244,10 +264,43 @@ export function SignUpForm({
           <p className="text-sm text-destructive">{fieldErrors.confirmPassword}</p>
         )}
       </div>
+      {legalNotice && (
+        <div className="flex items-start gap-2" data-testid="client-account-legal-acceptance">
+          <Checkbox
+            id="client-accept-terms"
+            checked={legalAccepted}
+            onCheckedChange={(checked) => setLegalAccepted(checked === true)}
+            disabled={isPending}
+            required
+            className="mt-0.5"
+          />
+          <label htmlFor="client-accept-terms" className="text-sm leading-snug">
+            Akceptuję{" "}
+            {/* Nowa karta: przejście do dokumentu nie kasuje wypełnionego formularza. */}
+            <Link
+              href={legalNotice.terms.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              regulamin
+            </Link>{" "}
+            i{" "}
+            <Link
+              href={legalNotice.privacy.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              politykę prywatności
+            </Link>
+          </label>
+        </div>
+      )}
       {error && (
         <p className="text-sm text-destructive">{error}</p>
       )}
-      <Button type="submit" className="w-full" disabled={isPending}>
+      <Button type="submit" className="w-full" disabled={isPending || !legalAcceptanceComplete}>
         {isPending ? "Tworzenie konta..." : "Utworz konto"}
       </Button>
       <div className="text-center text-sm text-muted-foreground">

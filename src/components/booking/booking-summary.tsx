@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef } from "react";
+import Link from "next/link";
 import {
   ArrowLeft,
   CalendarPlus,
@@ -22,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { isBlikDepositFlow } from "@/lib/features";
+import { bookingLegalNotice, type BookingLegalNotice } from "@/lib/legal/documents";
 import { formatDuration, formatDateDisplay, calcEndTime } from "./types";
 import type { AssignedEmployee, ServiceItem, ServiceVariant } from "./types";
 
@@ -91,6 +93,12 @@ interface BookingSummaryProps {
   payment: PaymentInfo;
   onBackToDateTime: () => void;
   onBook: () => void;
+  /**
+   * Informacja o regulaminie i polityce prywatności przy rezerwacji gościa;
+   * domyślnie stan z rejestru dokumentów (przed publikacją `null`: bez zdania
+   * i bez odnośników do stron 404).
+   */
+  legalNotice?: BookingLegalNotice | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +127,7 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
       payment,
       onBackToDateTime,
       onBook,
+      legalNotice = bookingLegalNotice(),
     },
     ref
   ) {
@@ -392,6 +401,29 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
                       <p className="text-xs text-destructive mt-1">Podaj poprawny adres email.</p>
                     )}
                   </div>
+                  {legalNotice && (
+                    <p className="text-xs text-muted-foreground" data-testid="booking-legal-notice">
+                      Rezerwując, akceptujesz{" "}
+                      <Link
+                        href={legalNotice.terms.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline-offset-2 hover:underline"
+                      >
+                        regulamin
+                      </Link>
+                      . Informacje o przetwarzaniu danych:{" "}
+                      <Link
+                        href={legalNotice.privacy.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline-offset-2 hover:underline"
+                      >
+                        polityka prywatności
+                      </Link>
+                      .
+                    </p>
+                  )}
                 </div>
               )}
 

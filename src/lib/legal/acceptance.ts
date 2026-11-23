@@ -13,7 +13,12 @@
  * Moduł nie otwiera transakcji i nie importuje `@/lib/db`; zapis biegnie w transakcji
  * wołającego, razem z założeniem salonu.
  */
-import { LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS, type LegalDocuments } from "@/lib/legal/documents";
+import {
+  LEGAL_ACCEPTANCE_REQUIRED_CODE,
+  LEGAL_DOCS_PUBLISHED,
+  LEGAL_DOCUMENTS,
+  type LegalDocuments,
+} from "@/lib/legal/documents";
 import { legalAcceptances, type LEGAL_ACCEPTANCE_SOURCES } from "@/lib/schema";
 import type { DbTx } from "@/lib/server/repository";
 
@@ -41,7 +46,8 @@ export type AcceptedLegalDocuments = {
   readonly source: FormLegalAcceptanceSource;
 };
 
-export const LEGAL_ACCEPTANCE_REQUIRED_CODE = "LEGAL_ACCEPTANCE_REQUIRED";
+// Stała żyje w rejestrze dokumentów (bez importów), bo czyta ją też formularz w przeglądarce.
+export { LEGAL_ACCEPTANCE_REQUIRED_CODE };
 
 export type LegalAcceptanceErrorBody = {
   success: false;

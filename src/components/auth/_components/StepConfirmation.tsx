@@ -21,6 +21,8 @@ interface StepConfirmationProps {
   email: string;
   selectedPlan: string | null;
   selectedPlanData: Plan | undefined;
+  /** Konto powstało, ale salon nie (np. brak akceptacji dokumentów); pusty = brak błędu. */
+  salonSetupError?: string;
   onNavigateToDashboard: () => void;
   onSetError: (error: string) => void;
 }
@@ -29,6 +31,7 @@ export function StepConfirmation({
   email,
   selectedPlan,
   selectedPlanData,
+  salonSetupError = "",
   onNavigateToDashboard,
   onSetError,
 }: StepConfirmationProps) {
@@ -49,6 +52,15 @@ export function StepConfirmation({
             aktywowac konto.
           </p>
         </div>
+
+        {salonSetupError && (
+          <div
+            role="alert"
+            className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+          >
+            {salonSetupError}
+          </div>
+        )}
 
         {selectedPlanData && (
           <div className="rounded-lg border p-4 text-center">

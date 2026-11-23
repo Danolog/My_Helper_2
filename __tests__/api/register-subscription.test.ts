@@ -509,6 +509,32 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
     expect(dbOutsideTx.insert).not.toHaveBeenCalled();
   });
 
+  it("(c) opublikowane, istniejący salon bez subskrypcji → trial i dwa wpisy z id istniejącego salonu, bez drugiego salonu", async () => {
+    publish();
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+
+    const { status } = await post({ planSlug: "basic", ...ACCEPTED, acceptanceSource: "create_salon" });
+
+    expect(status).toBe(200);
+    expect(opLog).toEqual([
+      "select:subscriptionPlans",
+      "tx:start",
+      "lock_timeout",
+      "select:salons",
+      `lock:salon:${SALON_B}`,
+      "select:salonSubscriptions",
+      "insert:salonSubscriptions",
+      "insert:legalAcceptances",
+      "commit",
+    ]);
+    expect(mockInsert).not.toHaveBeenCalledWith("salons");
+    expect(mockInsertValues).toHaveBeenCalledWith([
+      { salonId: SALON_B, userId: USER_A.id, document: "terms", version: TERMS_V, source: "create_salon" },
+      { salonId: SALON_B, userId: USER_A.id, document: "dpa", version: DPA_V, source: "create_salon" },
+    ]);
+    expect(dbOutsideTx.insert).not.toHaveBeenCalled();
+  });
+
   it("(c) błąd zapisu akceptacji → rollback salonu i triala, 500", async () => {
     publish();
     tableRows = { subscriptionPlans: [PLAN_BASIC] };

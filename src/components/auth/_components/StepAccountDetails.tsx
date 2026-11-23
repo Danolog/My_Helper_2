@@ -9,6 +9,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
+import { LegalAcceptanceFields } from "@/components/legal/legal-acceptance-fields";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { LegalAcceptanceChecks, LegalAcceptanceForm } from "@/lib/legal/documents";
 import { planPriceText } from "@/lib/plan-price";
 import type { Plan } from "../_hooks/use-registration";
 
@@ -33,6 +35,12 @@ interface StepAccountDetailsProps {
   fieldErrors: Record<string, string>;
   isPending: boolean;
   wasRecovered: boolean;
+  /** Pola akceptacji regulaminu i DPA; `null` przed publikacją dokumentów (bez pól). */
+  legalForm: LegalAcceptanceForm | null;
+  legalChecks: LegalAcceptanceChecks;
+  /** Przycisk rejestracji jest zablokowany, dopóki pola akceptacji nie są zaznaczone. */
+  legalAcceptanceComplete: boolean;
+  onLegalChecksChange: (checks: LegalAcceptanceChecks) => void;
   onNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
@@ -55,6 +63,10 @@ export function StepAccountDetails({
   fieldErrors,
   isPending,
   wasRecovered,
+  legalForm,
+  legalChecks,
+  legalAcceptanceComplete,
+  onLegalChecksChange,
   onNameChange,
   onEmailChange,
   onPasswordChange,
@@ -195,6 +207,19 @@ export function StepAccountDetails({
               <p className="text-sm text-destructive">{fieldErrors.confirmPassword}</p>
             )}
           </div>
+          <LegalAcceptanceFields
+            form={legalForm}
+            checks={legalChecks}
+            onChange={(checks) => {
+              onLegalChecksChange(checks);
+              onClearFieldError("legalAcceptance");
+            }}
+            idPrefix="registration"
+            disabled={isPending}
+          />
+          {fieldErrors.legalAcceptance && (
+            <p className="text-sm text-destructive">{fieldErrors.legalAcceptance}</p>
+          )}
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
@@ -211,7 +236,7 @@ export function StepAccountDetails({
             <Button
               type="submit"
               className="flex-1"
-              disabled={isPending}
+              disabled={isPending || !legalAcceptanceComplete}
             >
               {isPending ? (
                 <>
