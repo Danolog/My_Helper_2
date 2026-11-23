@@ -222,6 +222,44 @@ export function bookingLegalNotice(
   published: boolean = LEGAL_DOCS_PUBLISHED,
   documents: LegalDocuments = LEGAL_DOCUMENTS,
 ): BookingLegalNotice | null {
+  return termsAndPrivacyLinks(published, documents);
+}
+
+// ---------------------------------------------------------------------------
+// Akceptacja przy zakładaniu konta klienta (UI, bez zapisu w bazie)
+// ---------------------------------------------------------------------------
+
+/** Odnośniki przy zakładaniu konta klienta: pole wyboru i zdanie przy Google. */
+export type ClientAccountLegalNotice = {
+  readonly terms: LegalLink;
+  readonly privacy: LegalLink;
+};
+
+/**
+ * Akceptacja regulaminu i polityki prywatności przy zakładaniu konta klienta
+ * (formularz e-mailowy i przycisk Google). Nic nie trafia do bazy.
+ * `null`, dopóki któraś z tych stron nie jest opublikowana: bez pola wyboru,
+ * bez zdania i bez blokady rejestracji.
+ */
+export function clientAccountLegalNotice(
+  published: boolean = LEGAL_DOCS_PUBLISHED,
+  documents: LegalDocuments = LEGAL_DOCUMENTS,
+): ClientAccountLegalNotice | null {
+  return termsAndPrivacyLinks(published, documents);
+}
+
+/** Czy formularz konta klienta może wysłać żądanie: bez pola zawsze, z polem po zaznaczeniu. */
+export function isClientAccountAcceptanceComplete(
+  notice: ClientAccountLegalNotice | null,
+  accepted: boolean,
+): boolean {
+  return notice === null || accepted;
+}
+
+function termsAndPrivacyLinks(
+  published: boolean,
+  documents: LegalDocuments,
+): { terms: LegalLink; privacy: LegalLink } | null {
   if (
     !isLegalPagePublished("terms", published, documents) ||
     !isLegalPagePublished("privacy", published, documents)
