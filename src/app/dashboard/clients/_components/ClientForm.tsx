@@ -180,8 +180,17 @@ export function ClientForm({
               value={formNotes}
               onChange={(e) => onNotesChange(e.target.value)}
               rows={3}
+              aria-describedby="client-notes-draft-hint"
               data-testid="client-notes-input"
             />
+            {/* Notes are excluded from the local form draft (NEVER_PERSIST_KEYS). */}
+            <p
+              id="client-notes-draft-hint"
+              className="text-xs text-muted-foreground"
+              data-testid="client-notes-draft-hint"
+            >
+              Notatki nie sa zapisywane w szkicu formularza.
+            </p>
           </div>
         </div>
         <DialogFooter>
