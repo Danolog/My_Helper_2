@@ -7,12 +7,26 @@ import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { healthDataConsentRequiredBody, normalizeAllergies } from "@/lib/health-data-consent";
 import { logger } from "@/lib/logger";
+import { isRetryableLockFailure } from "@/lib/pg-lock-failure";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import {
+  anonymizeClientData,
+  countClientRemovalBlockers,
+  lockClientForRemoval,
+} from "@/lib/server/retention/anonymize-client";
 import { findCredentialPasswordHash } from "@/lib/server/system";
 import { isValidUuid } from "@/lib/validations";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
+
+/** 409 przy usuwaniu klienta: przyszłe wizyty albo zadatek do zwrotu. */
+const CLIENT_HAS_PENDING_OBLIGATIONS = "CLIENT_HAS_PENDING_OBLIGATIONS";
+/** 503 przy usuwaniu klienta: konflikt blokad (lock_timeout albo zakleszczenie). */
+const CLIENT_DELETE_RETRY = "CLIENT_DELETE_RETRY";
+/** Po ilu sekundach UI może ponowić usunięcie po konflikcie blokad. */
+const LOCK_RETRY_AFTER_SECONDS = 2;
 
 // GET /api/clients/[id] - Get a single client by ID
 export const GET = withApiHandler(
@@ -288,15 +302,47 @@ export async function DELETE(
       );
     }
 
-    // 5. Password verified - proceed with deletion (scoped to caller's salon)
-    const deleted = await forSalon(salonId).deleteOwned(clients, id);
+    // 5. Hasło potwierdzone. Jedna transakcja salonu: blokady → sprawdzenie
+    // zobowiązań → anonimizacja → DELETE. Sprawdzenie idzie PO blokadach, więc
+    // rezerwacja zatwierdzona w międzyczasie albo czeka na blokadę klienta
+    // (i po usunięciu dostaje błąd klucza obcego), albo jest już widoczna
+    // w liczeniu i daje 409. PRZED anonimizacją — 409 nie zapisuje nic.
+    const outcome = await forSalon(salonId).raw(async (tx) => {
+      if (!(await lockClientForRemoval(tx, salonId, id))) {
+        return { kind: "not_found" as const };
+      }
+      const blockers = await countClientRemovalBlockers(tx, salonId, id);
+      if (blockers.futureAppointments > 0 || blockers.depositsToRefund > 0) {
+        return { kind: "blocked" as const, blockers };
+      }
+      await anonymizeClientData(tx, salonId, id);
+      const [row] = await tx
+        .delete(clients)
+        .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
+        .returning();
+      return row ? { kind: "deleted" as const, row } : { kind: "not_found" as const };
+    });
 
-    if (!deleted) {
+    if (outcome.kind === "blocked") {
+      // Same liczby, bez danych klienta.
+      return NextResponse.json(
+        {
+          success: false,
+          code: CLIENT_HAS_PENDING_OBLIGATIONS,
+          error: "Klient ma przyszłe wizyty albo zadatek do zwrotu",
+          futureAppointments: outcome.blockers.futureAppointments,
+          depositsToRefund: outcome.blockers.depositsToRefund,
+        },
+        { status: 409 }
+      );
+    }
+    if (outcome.kind === "not_found") {
       return NextResponse.json(
         { success: false, error: "Client not found" },
         { status: 404 }
       );
     }
+    const deleted = outcome.row;
 
     logger.info(`[Clients API] Deleted client: ${deleted.id} by user ${session.user.id} after password verification`);
 
@@ -305,6 +351,16 @@ export async function DELETE(
       data: deleted,
     });
   } catch (error) {
+    if (isRetryableLockFailure(error)) {
+      // Równoległy zapis trzyma klienta albo jego wizyty. Transakcja wycofana,
+      // nic nie zapisane; ponowienie zostawiamy użytkownikowi (hasło już
+      // sprawdzone, ukryta pętla w serwerze tylko wydłużyłaby blokady).
+      logger.warn("[Clients API] DELETE: konflikt blokad", { code: toErrorIdentity(error).errorCode });
+      return NextResponse.json(
+        { success: false, code: CLIENT_DELETE_RETRY, error: "Spróbuj ponownie za chwilę" },
+        { status: 503, headers: { "Retry-After": String(LOCK_RETRY_AFTER_SECONDS) } }
+      );
+    }
     logger.error("[Clients API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete client" },
