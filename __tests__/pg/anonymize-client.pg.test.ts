@@ -16,9 +16,15 @@
  *    więc nowa kolumna tych typów trafia do sprawdzenia bez zmiany testu;
  * b) biała lista: liczba wizyt, suma zadatków i rabatów, statusy, pracownik,
  *    usługa i oceny bez zmian; liczniki zwrócone przez funkcję;
- * c) rozdzielenie: wiersze wartownika salonu B są identyczne przed i po;
+ * c) rozdzielenie: wiersze wartownika salonu B są identyczne przed i po,
+ *    także opinia salonu B przypięta do wizyty salonu A;
  * d) wywołanie z salonem B i klientem A (kontekst salonu B) nic nie zmienia
- *    i zwraca zera.
+ *    i zwraca zera;
+ * e) to samo wywołanie na połączeniu testu, które omija RLS: zera i dane A
+ *    bez zmian — same jawne warunki `salon_id`, bez pomocy RLS;
+ * f) każdy klucz obcy do `clients` i `appointments` z `pg_constraint` ma
+ *    przypisaną obsługę w przypiętej mapie; nowa tabela z takim kluczem
+ *    wywraca test, dopóki ktoś nie zdecyduje, co z jej danymi.
  *
  * Mocki: `@/lib/db` → pula testu, logger. Dane: użytkownicy `it-t3-anon-…`;
  * reszta kaskadą z salonów w `afterAll`. Dane kontaktowe w domenie example.invalid.
@@ -87,6 +93,37 @@ const SCANNED_TABLES = [
   "clients",
 ] as const;
 
+/**
+ * Obsługa każdego klucza obcego do `clients` i `appointments` przy usunięciu
+ * kartoteki (klucz: `tabela(kolumny)`). Nowy klucz spoza mapy = czerwony (f).
+ * - anonymized: `anonymizeClientData` zeruje wolny tekst (tabela w `SCANNED_TABLES`);
+ * - cascade: wiersze znikają kaskadą razem z kartoteką albo wizytą;
+ * - billing: dokumenty rozliczeniowe przechowywane z przepisów podatkowych;
+ * - deposit: płatności i historia zadatku, obsługiwane osobno;
+ * - noClientText: tabela bez danych osobowych klienta (kwoty, ilości).
+ */
+const CLIENT_FK_HANDLING: Record<string, "anonymized" | "cascade" | "billing" | "deposit" | "noClientText"> = {
+  "appointments(client_id)": "anonymized",
+  "notifications(client_id)": "anonymized",
+  "ai_conversations(client_id)": "anonymized",
+  "reviews(client_id)": "anonymized",
+  "reviews(appointment_id)": "anonymized",
+  "treatment_history(appointment_id)": "anonymized",
+  "appointment_materials(appointment_id)": "anonymized",
+  "waiting_list(client_id)": "cascade",
+  "waiting_list(existing_appointment_id)": "cascade",
+  "loyalty_points(client_id)": "cascade",
+  "loyalty_transactions(appointment_id)": "cascade",
+  "marketing_consents(client_id)": "cascade",
+  "invoices(client_id)": "billing",
+  "invoices(appointment_id)": "billing",
+  "fiscal_receipts(appointment_id)": "billing",
+  "deposit_payments(appointment_id)": "deposit",
+  "deposit_status_events(appointment_id,salon_id)": "deposit",
+  "employee_commissions(appointment_id)": "noClientText",
+  "product_usage(appointment_id)": "noClientText",
+};
+
 type SalonFixture = {
   salonId: string;
   clientId: string;
@@ -94,9 +131,19 @@ type SalonFixture = {
   reviewIds: string[];
 };
 
-const fx: { a: SalonFixture; b: SalonFixture } = {
+const fx: { a: SalonFixture; b: SalonFixture; foreignReviewId: string } = {
   a: { salonId: "", clientId: "", appointmentIds: [], reviewIds: [] },
   b: { salonId: "", clientId: "", appointmentIds: [], reviewIds: [] },
+  foreignReviewId: "",
+};
+
+const ZERO_COUNTS = {
+  appointments: 0,
+  treatmentHistory: 0,
+  appointmentMaterials: 0,
+  notifications: 0,
+  aiConversations: 0,
+  reviews: 0,
 };
 
 /** Salon z klientem-wartownikiem i pełnym zestawem powiązanych wierszy. */
@@ -164,6 +211,16 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
         notes: `Odwolala ${SENTINEL.firstName}`,
         depositAmount: "30.00",
         depositPaid: false,
+      },
+      // Bez opinii własnego salonu — pod opinię drugiego salonu (c).
+      {
+        salonId,
+        clientId,
+        employeeId: employee!.id,
+        serviceId: service!.id,
+        startTime: new Date(base + 48 * hour),
+        endTime: new Date(base + 49 * hour),
+        status: "scheduled",
       },
     ])
     .returning({ id: appointments.id });
@@ -347,6 +404,21 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
     );
     fx.a = await seedSalon(OWNER_A);
     fx.b = await seedSalon(OWNER_B);
+    // Opinia salonu B przypięta do wizyty klienta w salonie A (spójności salonu
+    // opinii i wizyty nie pilnuje żaden klucz). Anonimizacja w A ma jej nie ruszyć.
+    const [foreign] = await h!.db
+      .insert(reviews)
+      .values({
+        salonId: fx.b.salonId,
+        clientId: null,
+        appointmentId: fx.a.appointmentIds[2]!,
+        rating: 3,
+        comment: `Obcy salon, ${FULL_NAME}`,
+        status: "pending",
+      })
+      .returning({ id: reviews.id });
+    fx.foreignReviewId = foreign!.id;
+    fx.b.reviewIds.push(foreign!.id);
   });
 
   afterAll(async () => {
@@ -388,15 +460,44 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
   it("d) salon B wołający dla klienta A (kontekst B): zera, dane A bez zmian", async () => {
     const before = await salonSnapshot(fx.a);
     const counts = await forSalon(fx.b.salonId).raw((tx) => anonymizeClientData(tx, fx.b.salonId, fx.a.clientId));
-    expect(counts).toEqual({
-      appointments: 0,
-      treatmentHistory: 0,
-      appointmentMaterials: 0,
-      notifications: 0,
-      aiConversations: 0,
-      reviews: 0,
-    });
+    expect(counts).toEqual(ZERO_COUNTS);
     expect(await salonSnapshot(fx.a)).toEqual(before);
+  });
+
+  it("e) salon B dla klienta A na połączeniu z obejściem RLS: zera, dane A bez zmian", async () => {
+    const before = await salonSnapshot(fx.a);
+    const counts = await h!.db.transaction(async (tx) => {
+      // Dowód, że RLS niczego tu nie filtruje: bez kontekstu salonu klient A
+      // jest widoczny, więc zera dają wyłącznie jawne warunki `salon_id`.
+      const visible = await tx.select({ id: clients.id }).from(clients).where(eq(clients.id, fx.a.clientId));
+      expect(visible).toHaveLength(1);
+      return anonymizeClientData(tx, fx.b.salonId, fx.a.clientId);
+    });
+    expect(counts).toEqual(ZERO_COUNTS);
+    expect(await salonSnapshot(fx.a)).toEqual(before);
+  });
+
+  it("f) każdy klucz obcy do clients i appointments ma przypisaną obsługę", async () => {
+    const rows = await h!.observer<{ fk: string }[]>`
+      select c.conrelid::regclass::text || '(' || string_agg(a.attname, ',' order by k.ord) || ')' as fk
+      from pg_constraint c
+      cross join lateral unnest(c.conkey) with ordinality as k(attnum, ord)
+      join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+      where c.contype = 'f'
+        and c.confrelid in ('public.clients'::regclass, 'public.appointments'::regclass)
+        and c.connamespace = 'public'::regnamespace
+      group by c.oid, c.conrelid
+      order by 1
+    `;
+    const found = rows.map((r) => r.fk).sort();
+    expect(found, "klucz obcy bez decyzji w CLIENT_FK_HANDLING (albo wpis mapy bez klucza)").toEqual(
+      Object.keys(CLIENT_FK_HANDLING).sort()
+    );
+    for (const [fk, handling] of Object.entries(CLIENT_FK_HANDLING)) {
+      if (handling !== "anonymized") continue;
+      const table = fk.slice(0, fk.indexOf("("));
+      expect(SCANNED_TABLES as readonly string[], `${fk}: tabela anonimizowana poza skanem`).toContain(table);
+    }
   });
 
   it("a–c) anonimizacja i DELETE w jednej transakcji salonu A: brak danych wartownika, biała lista i salon B bez zmian", async () => {
@@ -415,7 +516,7 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
     });
 
     expect(counts).toEqual({
-      appointments: 2,
+      appointments: 3,
       treatmentHistory: 1,
       appointmentMaterials: 1,
       notifications: 2,
@@ -436,7 +537,7 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
     // b) biała lista: wizyty, kwoty, statusy, pracownik, usługa, oceny
     const whitelistAfter = await appointmentWhitelist(fx.a.appointmentIds);
     expect(whitelistAfter).toEqual(whitelistBefore);
-    expect(whitelistAfter.agg).toEqual({ count: 2, deposits: "75.00", discounts: "10.00" });
+    expect(whitelistAfter.agg).toEqual({ count: 3, deposits: "75.00", discounts: "10.00" });
     const ratingsAfter = await h!.db
       .select({ id: reviews.id, rating: reviews.rating, status: reviews.status, employeeId: reviews.employeeId })
       .from(reviews)
@@ -444,8 +545,13 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
       .orderBy(reviews.rating);
     expect(ratingsAfter).toEqual(ratingsBefore);
 
-    // c) salon B: te same dane wartownika nietknięte
+    // c) salon B: te same dane wartownika nietknięte, także opinia B przy wizycie A
     expect(await salonSnapshot(fx.b)).toEqual(snapshotB);
+    const [foreign] = await h!.db
+      .select({ comment: reviews.comment })
+      .from(reviews)
+      .where(eq(reviews.id, fx.foreignReviewId));
+    expect(foreign?.comment).toContain(SENTINEL.firstName);
     expect((await sentinelHits(fx.b.salonId)).length).toBeGreaterThan(0);
   });
 });
