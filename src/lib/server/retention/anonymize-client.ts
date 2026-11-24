@@ -24,6 +24,10 @@
  * bez BYPASSRLS i kontekst salonu), a każde zapytanie ma dodatkowo jawny
  * warunek `salon_id` — bezpośrednio albo przez wizytę tego salonu w tabelach
  * bez własnej kolumny `salon_id`.
+ *
+ * Blokady wierszy i `lock_timeout` ustawione tutaj obowiązują do końca
+ * transakcji wołającego (`SET LOCAL`, `FOR UPDATE`), nie tylko do powrotu
+ * z funkcji — także dla jego późniejszego `DELETE clients`.
  */
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import {
@@ -69,12 +73,19 @@ const ZERO_COUNTS: ClientAnonymizationCounts = {
 /**
  * Zeruje dane osobowe klienta w tabelach powiązanych z jego kartoteką.
  *
- * Najpierw blokuje wiersz klienta (`FOR UPDATE`). Wstawienie wizyty,
- * powiadomienia, rozmowy albo opinii z `client_id` tego klienta wymaga
- * blokady `FOR KEY SHARE` na tym wierszu, więc do końca transakcji nikt nie
- * dopisze nowych danych, które ominęłyby anonimizację przed `DELETE clients`.
- * `SET LOCAL lock_timeout` obowiązuje do końca transakcji wołającego, także
- * dla jego późniejszego `DELETE`.
+ * Blokady, zanim padnie pierwszy `UPDATE`:
+ * 1. wiersz klienta `FOR UPDATE` — chroni tabele z `client_id`
+ *    (`appointments`, `notifications`, `ai_conversations`, `reviews`):
+ *    wstawienie albo przepięcie wiersza na tego klienta sprawdza klucz obcy
+ *    blokadą `FOR KEY SHARE` na kliencie i czeka do końca transakcji;
+ * 2. wizyty klienta w tym salonie `FOR UPDATE` — chroni tabele powiązane
+ *    tylko przez `appointment_id` (`treatment_history`,
+ *    `appointment_materials`, `reviews` bez `client_id`): ich wstawienie bierze
+ *    `FOR KEY SHARE` na wizycie, a ta wyklucza się z `FOR UPDATE`. Sam
+ *    `UPDATE appointments` niżej nie wystarczy — zmienia kolumny niekluczowe,
+ *    więc bierze tylko `FOR NO KEY UPDATE`, zgodne z `FOR KEY SHARE`.
+ * Obie blokady czekają najwyżej `LOCK_TIMEOUT`; po nim Postgres zgłasza
+ * 55P03 i transakcja wołającego się wycofuje.
  *
  * Klient spoza `salonId` (albo nieistniejący) → nic się nie zmienia, wynik
  * z samymi zerami. Wołający rozpoznaje brak klienta wcześniej (404).
@@ -101,11 +112,19 @@ export async function anonymizeClientData(
     return { ...ZERO_COUNTS };
   }
 
+  const isClientAppointment = and(
+    eq(appointments.clientId, clientId),
+    eq(appointments.salonId, salonId)
+  );
+
+  // Pełna blokada wizyt klienta (patrz JSDoc, punkt 2).
+  await tx.select({ id: appointments.id }).from(appointments).where(isClientAppointment).for("update");
+
   // Wizyty klienta w tym salonie — źródło dla tabel bez własnego `salon_id`.
   const clientAppointmentIds = tx
     .select({ id: appointments.id })
     .from(appointments)
-    .where(and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId)));
+    .where(isClientAppointment);
 
   // `materials_json` (lista materiałów zapisywana przez salon dowolnym JSON-em)
   // wraca do pustej listy — tę samą wartość zapisuje UI i zakończenie wizyty.
@@ -124,7 +143,7 @@ export async function anonymizeClientData(
   const appointmentRows = await tx
     .update(appointments)
     .set({ guestName: null, guestPhone: null, guestEmail: null, notes: null })
-    .where(and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId)))
+    .where(isClientAppointment)
     .returning({ id: appointments.id });
 
   const notificationRows = await tx
