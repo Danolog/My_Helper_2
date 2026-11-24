@@ -750,7 +750,7 @@ type SameDbCase = [string, string, string];
  * Każde późniejsze dopuszczenie w tej regule idzie przez recenzję jako wyjątek.
  */
 const SAME_DB_ALLOWED = { job: "e2e-smoke", run: "pnpm test:pg", key: "INTEGRATION_POSTGRES_URL" } as const;
-const ONE_DB = "w CI jedna baza; nowe dopuszczenie akceptuje CTO (#193)";
+const ONE_DB = "w CI jedna baza; nowe dopuszczenie wymaga recenzji (#193)";
 
 /**
  * Jedna baza w CI (drzewo YAML z #201):
