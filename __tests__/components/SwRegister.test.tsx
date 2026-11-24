@@ -124,4 +124,42 @@ describe("SwRegister", () => {
 
     expect(mockReload).not.toHaveBeenCalled();
   });
+
+  it("sweeps legacy form drafts on start, also outside production", () => {
+    // Przeglad szkicow nie moze zalezec od service workera ani srodowiska.
+    vi.stubEnv("NODE_ENV", "test");
+    installServiceWorkerMock(null);
+    const store = new Map<string, string>([
+      ["form_recovery_sweep-on-start", JSON.stringify({ name: "x" })],
+      ["unrelated-key", "keep"],
+    ]);
+    const storageMock = {
+      get length() {
+        return store.size;
+      },
+      key: (index: number) => [...store.keys()][index] ?? null,
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => store.clear(),
+    } as Storage;
+    const originalLocalStorage = window.localStorage;
+    Object.defineProperty(window, "localStorage", {
+      value: storageMock,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      render(<SwRegister />);
+
+      expect([...store.keys()]).toEqual(["unrelated-key"]);
+    } finally {
+      Object.defineProperty(window, "localStorage", {
+        value: originalLocalStorage,
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
 });

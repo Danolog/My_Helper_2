@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { sweepExpiredDrafts } from "@/hooks/use-form-recovery";
 
 /** Interval between service worker update checks (60 minutes). */
 const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
@@ -17,9 +18,17 @@ const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
  *   (`controllerchange`) -- but never on the first install, when the page
  *   had no controller yet (see `onControllerChange`).
  *
+ * - Once per application start, removes expired and legacy form drafts from
+ *   localStorage. This runs in every environment and without service worker
+ *   support, so it lives in its own effect before the service worker guard.
+ *
  * Renders nothing -- this is a side-effect-only component.
  */
 export function SwRegister() {
+  useEffect(() => {
+    sweepExpiredDrafts();
+  }, []);
+
   useEffect(() => {
     if (
       !("serviceWorker" in navigator) ||
