@@ -911,15 +911,21 @@ describe("DELETE /api/clients/[id]", () => {
         order.push("anonymize");
         return {};
       });
+      const deletedRow = makeClient({ allergies: "Uczulenie na lateks" });
       mockDbDelete.mockImplementation(() => {
         order.push("delete");
-        return chainMock([makeClient()]);
+        return chainMock([deletedRow]);
       });
 
-      const { status, body } = await parseResponse(await deleteWithPassword());
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
 
       expect(status).toBe(200);
-      expect(body.success).toBe(true);
+      // Minimalizacja: sam identyfikator, bez danych usuwanej kartoteki.
+      expect(body).toEqual({ success: true, data: { id: deletedRow.id } });
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain(deletedRow.firstName as string);
+      expect(raw).not.toContain("allergies");
+      expect(raw).not.toContain("Uczulenie na lateks");
       expect(order).toEqual(["lock", "count", "anonymize", "delete"]);
       for (const fn of [
         retentionMocks.lockClientForRemoval,

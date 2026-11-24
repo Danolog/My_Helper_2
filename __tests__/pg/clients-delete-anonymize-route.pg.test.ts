@@ -272,6 +272,9 @@ suite("DELETE /api/clients/[id]: anonimizacja, 409 i wyścig z rezerwacją, praw
     const { status, body } = await parseResponse(await deleteClientRoute(clientId));
 
     expect(status, JSON.stringify(body)).toBe(200);
+    // Odpowiedź niesie sam identyfikator — żadnej wartości wartownika.
+    expect(body).toEqual({ success: true, data: { id: clientId } });
+    for (const value of Object.values(s)) expect(JSON.stringify(body)).not.toContain(value);
     expect(await clientExists(clientId)).toBe(false);
     for (const value of Object.values(s)) {
       expect(await rowsContaining("appointments", "id", apptIds, value), `wizyty: ${value}`).toBe(0);

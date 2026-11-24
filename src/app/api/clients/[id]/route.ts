@@ -319,7 +319,7 @@ export async function DELETE(
       const [row] = await tx
         .delete(clients)
         .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
-        .returning();
+        .returning({ id: clients.id });
       return row ? { kind: "deleted" as const, row } : { kind: "not_found" as const };
     });
 
@@ -346,9 +346,11 @@ export async function DELETE(
 
     logger.info(`[Clients API] Deleted client: ${deleted.id} by user ${session.user.id} after password verification`);
 
+    // Tylko identyfikator: usuwanej kartoteki (z alergiami) nie wysyłamy
+    // ponownie — panel czyta wyłącznie `success`.
     return NextResponse.json({
       success: true,
-      data: deleted,
+      data: { id: deleted.id },
     });
   } catch (error) {
     if (isRetryableLockFailure(error)) {
