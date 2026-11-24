@@ -1,5 +1,5 @@
 /**
- * Niezmiennik zakresu salonu z query (#94, Ethan; po wycieku #73 i #94):
+ * Niezmiennik zakresu salonu z query (#94, recenzja; po wycieku #73 i #94):
  *
  *   każdy handler trasy API, który czyta `salonId` z query, przekazuje go
  *   strażnikowi porównującemu z salonem z sesji — `requireSalonStaff({
@@ -15,7 +15,7 @@
  * która usunie dowód, wywraca test; wyjątek, który przestał być potrzebny
  * (trasa spełnia regułę ogólną albo nie czyta już salonId), też.
  *
- * Granice skanera (nazwane, nie ukryte — Ethan, recenzja #99; „pilnuje” =
+ * Granice skanera (nazwane, nie ukryte — recenzja #99; „pilnuje” =
  * osobny test niżej, „poza zasięgiem” = świadomie nie sprawdzane):
  *
  *   1. Tylko query i tylko nazwa `salonId`. Inna nazwa tego samego parametru

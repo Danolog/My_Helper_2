@@ -1,6 +1,6 @@
 /**
  * #193 P5a-2: `cleanupStaleDepositBookings()` (system/deposits-cleanup.ts) na
- * PRAWDZIWYM Postgresie — niezmiennik z decyzji CTO:
+ * PRAWDZIWYM Postgresie — niezmiennik z decyzji z recenzji:
  *
  *   wizyta jest anulowana tylko wtedy, gdy nie ma żywej płatności;
  *   żywa = płatność tej wizyty o statusie innym niż `failed` albo utworzona

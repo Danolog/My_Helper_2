@@ -484,7 +484,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(isAppointmentSlotTaken(caught)).toBe(true);
     });
 
-    // Deterministyczne zakleszczenie (przepis Olivera): dwie transakcje przenoszą
+    // Deterministyczne zakleszczenie (przepis z decyzji produktowej): dwie transakcje przenoszą
     // wizyty „na krzyż” na terminy X i Y. A: a→X, B: b→Y, potem A: c→Y (czeka na
     // B), B: d→X (czeka na A). Po deadlock_timeout baza wycofuje jedną z 40P01 i
     // CONTEXT „while checking exclusion constraint … in relation "appointments"”.

@@ -1,5 +1,5 @@
 /**
- * POST /api/promotions — izolacja salonu (P0 z przeglądu Ryana).
+ * POST /api/promotions — izolacja salonu (P0 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą warunek `ctx.role !== "owner" && salonId !== ctx.salonId`
  * zwalniał KAŻDEGO właściciela z kontroli salonu: owner salonu A tworzył

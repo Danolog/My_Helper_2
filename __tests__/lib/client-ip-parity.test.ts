@@ -9,7 +9,7 @@
  *
  * Świadome rozbieżności (poza tym testem, opisane w PR):
  *  - pusta lista + łańcuch XFF poza Vercelem: Better Auth → null (wspólny
- *    kubełek), my → prawy wpis (zatwierdzone przez Ethana: błąd w stronę
+ *    kubełek), my → prawy wpis (zatwierdzone w recenzji: błąd w stronę
  *    „surowiej", nie „obejście");
  *
  * Normalizacja klucza jest wspólna: IPv6 → /64 w pełnym zapisie,
@@ -73,7 +73,7 @@ const nonVercelCases: Case[] = [
   ["brak nagłówków", {}],
   ["łańcuch przez LB z listy", { "x-forwarded-for": `6.6.6.6, 203.0.113.50, ${LB}` }],
   ["sam LB (cały łańcuch zaufany → brak IP)", { "x-forwarded-for": LB }],
-  // N1 (Ryan, #55): niepoprawny hop → brak IP w obu warstwach.
+  // N1 (audyt bezpieczeństwa, #55): niepoprawny hop → brak IP w obu warstwach.
   ["niepoprawny pojedynczy XFF", { "x-forwarded-for": "garbage" }],
   ["XFF z portem", { "x-forwarded-for": "203.0.113.50:1234" }],
   ["IPv6 ze strefą", { "x-forwarded-for": "fe80::1%eth0" }],

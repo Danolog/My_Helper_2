@@ -1,5 +1,5 @@
 /**
- * #193 P5a-2, decyzja CTO D1: `notifications/{birthday,low-stock,we-miss-you}`
+ * #193 P5a-2, decyzja z recenzji D1: `notifications/{birthday,low-stock,we-miss-you}`
  * działają na jednym salonie z obowiązkowym `salonId` (wołający z sekretem
  * crona), więc idą przez `forSalon(salonId)`, nie przez pulę `db` ani `system/`.
  *

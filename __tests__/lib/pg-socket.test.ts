@@ -17,7 +17,7 @@ const SECRET_URL =
   "postgresql://myhelper_owner:pw@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg";
 
 describe("pg-socket: socketAwareConnection", () => {
-  it("format sekretu Ethana → gniazdo Cloud SQL, adres bez host", () => {
+  it("format sekretu z recenzji → gniazdo Cloud SQL, adres bez host", () => {
     expect(socketAwareConnection(SECRET_URL)).toEqual({
       url: "postgresql://myhelper_owner:pw@localhost/myhelper",
       path: "/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg/.s.PGSQL.5432",
@@ -81,7 +81,7 @@ describe("pg-socket: migrate.mjs", () => {
     expect(r.stdout + r.stderr).toContain("[migrate] failed");
   });
 
-  // Zachowanie, nie tekst (Leo, #151 pkt 1): adres z `host=/…` musi pójść
+  // Zachowanie, nie tekst (recenzja, #151 pkt 1): adres z `host=/…` musi pójść
   // gniazdem (ENOENT — gniazda nie ma), a nie TCP na localhost.
   // Kontrola: adres TCP na zamknięty port daje ECONNREFUSED.
   it.each([

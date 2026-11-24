@@ -1,7 +1,7 @@
 /**
  * Portal klienta: /api/client/waiting-list i /api/client/waiting-list/[id].
  *
- * P1 (Ryan, ocena w #29): dopasowanie konta z sesji do rekordu `clients` po
+ * P1 (audyt bezpieczeństwa, ocena w #29): dopasowanie konta z sesji do rekordu `clients` po
  * e-mailu dziala tylko dla zweryfikowanego e-maila. Konto z niezweryfikowanym
  * e-mailem rownym e-mailowi klienta B nie moze widziec ani zmieniac wpisow B
  * na liscie oczekujacych (we wszystkich salonach).

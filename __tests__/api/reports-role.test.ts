@@ -1,5 +1,5 @@
 /**
- * Raporty — rola, nie tylko salon (P1 z przeglądu Ethana).
+ * Raporty — rola, nie tylko salon (P1 z recenzji).
  *
  * requireReportSalon sprawdzał wyłącznie, czy salonId z query = salon sesji.
  * Każdy aktywny pracownik (rola employee/receptionist) dostawał więc

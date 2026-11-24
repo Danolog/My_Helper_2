@@ -62,7 +62,7 @@ const REMOVED_PATHS = [
 /**
  * Pakiety usunięte z zależności. `@elevenlabs/elevenlabs-js` to obecna nazwa
  * SDK (stary `elevenlabs` jest „deprecated: moved to …”) — przywrócenie
- * głosu pod nową nazwą też ma paść (Leo, #109).
+ * głosu pod nową nazwą też ma paść (recenzja, #109).
  */
 const REMOVED_PACKAGES = ["twilio", "elevenlabs", "@elevenlabs/elevenlabs-js"];
 
@@ -72,7 +72,7 @@ function escapeRegExp(text: string): string {
 
 /**
  * Import pakietu w każdej formie: `from "x"`, `import "x"`, `require("x")`,
- * dynamiczny `import("x")` (Leo/Ryan, #109) — także podścieżki `x/…`.
+ * dynamiczny `import("x")` (recenzja/audyt bezpieczeństwa, #109) — także podścieżki `x/…`.
  */
 function importOf(pkg: string): RegExp {
   const name = escapeRegExp(pkg);
@@ -92,10 +92,10 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   ["trasa /api/ai/content/social-post", /\/api\/ai\/content\/social-post(\/|["'`?]|$)/m],
   ["trasa /api/cron/publish-scheduled-posts", /\/api\/cron\/publish-scheduled-posts(\/|["'`?]|$)/m],
   ["usunięte moduły wideo i social", /google-veo|video-generator|story-generator|testimonial-template|image-generator/],
-  // Cena video:google_veo w COST_MAP to tylko dane historyczne (decyzja Olivera,
+  // Cena video:google_veo w COST_MAP to tylko dane historyczne (decyzja produktowa,
   // #114) — żaden kod nie może zapisać nowego użycia wideo.
   ["zapis nowego użycia wideo (type video / provider google_veo)", /\btype:\s*["'`]video["'`]|\bprovider:\s*["'`]google_veo["'`]/],
-  // Veo pod inną nazwą trasy albo przez re-eksport klienta Google (Ryan #114,
+  // Veo pod inną nazwą trasy albo przez re-eksport klienta Google (audyt bezpieczeństwa #114,
   // V8/V9): metoda SDK i identyfikatory modeli wideo nie wracają do src.
   ["wywołanie generateVideos (Veo)", /\bgenerateVideos\b/],
   ["identyfikator modelu veo-*", /["'`]veo-/i],
@@ -121,7 +121,7 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   ...REMOVED_PACKAGES.map((pkg): [string, RegExp] => [`import ${pkg}`, importOf(pkg)]),
 ];
 
-/** Zmienne środowiskowe usuniętych funkcji — nigdzie w `src` ani w `env.example` (Ryan, #109). */
+/** Zmienne środowiskowe usuniętych funkcji — nigdzie w `src` ani w `env.example` (audyt bezpieczeństwa, #109). */
 const REMOVED_ENV = [
   // B3
   "TWILIO_ACCOUNT_SID",
@@ -134,7 +134,7 @@ const REMOVED_ENV = [
 
 /**
  * Prefiksy zmiennych usuniętych dostawców — żadna zmienna o tym prefiksie
- * (także nowa, np. `ELEVENLABS_VOICE_ID`) nie wraca do src ani env.example (Ryan, #109).
+ * (także nowa, np. `ELEVENLABS_VOICE_ID`) nie wraca do src ani env.example (audyt bezpieczeństwa, #109).
  */
 const REMOVED_ENV_PREFIXES = ["TWILIO_", "ELEVENLABS_"];
 
@@ -145,7 +145,7 @@ const REMOVED_PROVIDER_HOSTS = /twilio|elevenlabs/i;
  * Pliki kodu skanowane przez G6: TS i JS we wszystkich wariantach modułów
  * (.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs). Wcześniejszy filtr `.ts|.tsx`
  * przepuszczał trasę `route.js` z Veo albo odczytem `fiscalReceipts`
- * (recenzja Ryana #117, J1–J3).
+ * (recenzja z audytu bezpieczeństwa #117, J1–J3).
  */
 const CODE_FILE = /\.(m|c)?[jt]sx?$/;
 
@@ -153,7 +153,7 @@ const CODE_FILE = /\.(m|c)?[jt]sx?$/;
 const JS_FILE = /\.(m|c)?jsx?$/;
 
 /**
- * Obejścia zawężenia typów przy zapisie użycia AI (Ryan #117, T1–T3):
+ * Obejścia zawężenia typów przy zapisie użycia AI (audyt bezpieczeństwa #117, T1–T3):
  * rzutowanie `as any` / `as never` / `as unknown` w argumentach wywołania
  * `trackAIUsage(...)` albo dyrektywa `@ts-*` tuż nad wywołaniem. Zapis
  * i tak zatrzyma allowlista w czasie wykonania; reguła robi z obejścia
@@ -168,7 +168,7 @@ const TRACK_USAGE_TYPE_BYPASS: Array<[string, RegExp]> = [
 ];
 
 /**
- * Jedyny plik, który zapisuje do `aiGeneratedMedia` (Ryan #117, N6).
+ * Jedyny plik, który zapisuje do `aiGeneratedMedia` (audyt bezpieczeństwa #117, N6).
  * Kolumna `type` to `text`, więc bezpośredni insert z `"vid" + "eo"` omija
  * allowlistę `trackAIUsage`, regułę G6 na literały i tsc.
  */
@@ -214,7 +214,7 @@ describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social, 
     expect(SRC_FILES.length).toBeGreaterThan(500);
   });
 
-  it("w src nie ma plików .js/.jsx/.mjs/.cjs (omijają tsc i zawężenie typów, Ryan #117 J1–J3)", () => {
+  it("w src nie ma plików .js/.jsx/.mjs/.cjs (omijają tsc i zawężenie typów, audyt bezpieczeństwa #117 J1–J3)", () => {
     const hits = SRC_FILES.filter((f) => JS_FILE.test(f.path)).map((f) => f.path);
     expect(hits).toEqual([]);
   });
@@ -388,7 +388,7 @@ describe("G6 — dane fiskalne zostają w bazie, kod nie (B5)", () => {
   });
 });
 
-describe("G6 — nagłówki bezpieczeństwa po usunięciu głosu (Ryan, #109)", () => {
+describe("G6 — nagłówki bezpieczeństwa po usunięciu głosu (audyt bezpieczeństwa, #109)", () => {
   it("Permissions-Policy: microphone=() (i kamera, geolokalizacja) dla wszystkich ścieżek", async () => {
     const rules = (await nextConfig.headers?.()) ?? [];
     const all = rules.find((r) => r.source === "/(.*)");

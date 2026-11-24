@@ -1,5 +1,5 @@
 /**
- * refund-fix RF3 — teksty okna odwołania i toastów (Sophia, dosłownie)
+ * refund-fix RF3 — teksty okna odwołania i toastów (dosłownie)
  * oraz wybór wariantu. Wariant zadatku: `depositVariantFor` (wspólny dla
  * DELETE i cancel-info).
  */

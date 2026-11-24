@@ -284,7 +284,7 @@ describe("POST /api/deposits/create-session — Stripe configured", () => {
     expect(mockDbInsert).not.toHaveBeenCalled();
   });
 
-  // P1 (Ryan): klient portalu nie podpina rekordu klienta — clientId z body
+  // P1 (audyt bezpieczeństwa): klient portalu nie podpina rekordu klienta — clientId z body
   // jest ignorowany (null do assertSalonRefs i do wizyty).
   it("ignores a clientId sent by a portal client (non-staff)", async () => {
     const response = await createSession(

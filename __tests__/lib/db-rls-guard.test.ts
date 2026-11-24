@@ -3,7 +3,7 @@
  * #190: strażnik RLS z migracji 0005 (`scripts/db-rls-guard.ts`) — parser pliku
  * migracji, decyzja na wierszach katalogu, odczyt przez klienta i wywołanie z
  * wiersza poleceń (bez bazy). Bloki „lista RLS” i „decyzja” odpowiadają blokom
- * z testu #188 (Max), żeby #188 mógł je przenieść na ten moduł.
+ * z testu #188, żeby #188 mógł je przenieść na ten moduł.
  * Na prawdziwym Postgresie: `__tests__/pg/rls-guard.pg.test.ts`.
  */
 import { spawnSync } from "node:child_process";

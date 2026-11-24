@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * #193 P0b: mock `system/db-system` w pliku testu nadpisuje globalny
- * bezpiecznik z __tests__/setup.ts (warunek Ethana 16.11).
+ * bezpiecznik z __tests__/setup.ts (warunek z recenzji 16.11).
  */
 import { describe, expect, it, vi } from "vitest";
 

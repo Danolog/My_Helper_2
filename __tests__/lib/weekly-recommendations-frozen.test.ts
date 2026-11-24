@@ -1,6 +1,6 @@
 /**
- * Zamrożony typ promocji nie istnieje dla modelu (B2.1, Sophia wiersz 17,
- * Leo N1): rekomendacje tygodniowe nie liczą ani nie wymieniają promocji
+ * Zamrożony typ promocji nie istnieje dla modelu (B2.1, wiersz 17,
+ * Recenzja N1): rekomendacje tygodniowe nie liczą ani nie wymieniają promocji
  * pakietowych, 2+1, happy hours ani pierwszej wizyty. Filtr jest w SQL
  * (żeby zamrożone nie zajmowały miejsc w limit(5)) i w JS (druga linia).
  * Kontrola: po odmrożeniu w rejestrze filtr znika, a promocje wracają.

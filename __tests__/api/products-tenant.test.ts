@@ -1,5 +1,5 @@
 /**
- * POST + GET /api/products — izolacja salonu (P1 z przeglądu Ryana).
+ * POST + GET /api/products — izolacja salonu (P1 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą kontrola salonu była warunkowana `ctx.role !== "owner"`:
  * KAŻDY właściciel był z niej zwolniony — owner salonu A dodawał produkt

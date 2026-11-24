@@ -448,7 +448,7 @@ describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; cance
   // Bliźniak: lokalne canceled bez potwierdzenia w Stripe (dryf — np. dawne
   // anulowanie mimo błędu Stripe — albo wznowienie w panelu Stripe). Stripe
   // dalej pobiera opłaty, więc stan ze Stripe wygrywa + manual handling
-  // (Ethan, przegląd #62 §2b, reguła 2).
+  // (recenzja, przegląd #62 §2b, reguła 2).
   it.each([
     ["customer.subscription.updated", { id: "sub_1", status: "active" }, []],
     ["invoice.paid", INVOICE_PAID, [[PLAN_PRO]]],

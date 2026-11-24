@@ -3,7 +3,7 @@
  * bez szczegółów.
  *
  * Przed poprawką trasa brała `select id from salons limit 1` — pierwszy salon
- * z bazy, czyli zapis do cudzego tenanta (P2, Ryan). Odpowiedź zwracała cały
+ * z bazy, czyli zapis do cudzego tenanta (P2, audyt bezpieczeństwa). Odpowiedź zwracała cały
  * PushResult, w tym `error` z treścią wyjątku i `notificationId`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";

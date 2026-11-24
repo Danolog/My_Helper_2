@@ -747,7 +747,7 @@ type SameDbCase = [string, string, string];
  * Jedyne miejsce, gdzie krok może dostać zmienną bazy (#193): job e2e-smoke, krok z
  * `run: pnpm test:pg`, klucz `INTEGRATION_POSTGRES_URL`, wartość DOSŁOWNIE równa `POSTGRES_URL`
  * joba (porównanie tekstu wartości `===`, bez normalizacji).
- * Każde późniejsze dopuszczenie w tej regule idzie przez recenzję CTO jako wyjątek.
+ * Każde późniejsze dopuszczenie w tej regule idzie przez recenzję jako wyjątek.
  */
 const SAME_DB_ALLOWED = { job: "e2e-smoke", run: "pnpm test:pg", key: "INTEGRATION_POSTGRES_URL" } as const;
 const ONE_DB = "w CI jedna baza; nowe dopuszczenie akceptuje CTO (#193)";

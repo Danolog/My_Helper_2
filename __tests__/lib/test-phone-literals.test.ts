@@ -8,7 +8,7 @@ import { isTestPhoneNumber } from "@/lib/test-phone";
  *
  * E2E tworzące wizytę wołają SMS potwierdzenia na telefon klientki z seeda.
  * Z ustawionym SMSAPI_TOKEN numer spoza listy oznaczałby prawdziwą próbę
- * wysyłki (Ryan, recenzja #107). `sendSms` blokuje tylko numery z listy.
+ * wysyłki (audyt bezpieczeństwa, recenzja #107). `sendSms` blokuje tylko numery z listy.
  *
  * Pliki czytamy jako tekst: `scripts/seed-test.ts` po imporcie łączy się z bazą
  * (ten sam powód co w seed-ids.test.ts).

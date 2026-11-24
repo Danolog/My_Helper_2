@@ -64,7 +64,7 @@ type ApiAppointment = { id: string; status: string; startTime: string; endTime: 
 /**
  * Anuluje aktywne wizyty pracownika nachodzace na [startIso, endIso) —
  * pozostalosc po przerwanym przebiegu (afterEach sie nie wykonal) dawalaby
- * 409 przy kolejnym zapisie w tym terminie (uwaga Leo do #107).
+ * 409 przy kolejnym zapisie w tym terminie (uwaga z recenzji do #107).
  */
 async function cancelActiveInSlot(page: Page, employeeId: string, startIso: string, endIso: string) {
   const params = new URLSearchParams({ salonId: SALON_ID, startDate: startIso, endDate: endIso, employeeId });
@@ -238,7 +238,7 @@ test.describe('Flow 4: Appointment System', () => {
       await saveBtn.click();
       const res = await responsePromise;
       const body = await res.text();
-      // Status przed parsowaniem (uwaga Leo do #107): odpowiedz 500 w HTML ma
+      // Status przed parsowaniem (uwaga z recenzji do #107): odpowiedz 500 w HTML ma
       // pokazac tresc, a nie blad JSON.parse.
       expect(res.status(), `POST /api/appointments: ${body}`).toBe(201);
       const appointmentId = (JSON.parse(body) as { data: { id: string } }).data.id;

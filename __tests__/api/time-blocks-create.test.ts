@@ -5,8 +5,8 @@
  *   { employeeId, startTime: ISO, endTime: ISO, blockType, reason|null }
  *
  * Przed poprawką schemat wymagał salonId, którego UI nie wysyła (trasa bierze
- * salon z sesji), więc przerwa i urlop kończyły się 400 (potwierdzone przez
- * Quinn żądaniami HTTP: req-3a / req-3b).
+ * salon z sesji), więc przerwa i urlop kończyły się 400 (potwierdzone testem
+ * żądaniami HTTP: req-3a / req-3b).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRequest, parseResponse } from "./helpers";
@@ -187,7 +187,7 @@ describe("POST /api/time-blocks — kontrakt z UI", () => {
   });
 });
 
-// Uwaga Leo F2 (#32): bez refine'a w isoDateTime `new Date("x")` daje Invalid
+// Uwaga z recenzji F2 (#32): bez refine'a w isoDateTime `new Date("x")` daje Invalid
 // Date, `start >= end` jest wtedy fałszywe i insert leci do Postgresa (500).
 // Każde z pól osobno i oba naraz muszą dać 400 jeszcze przed bazą.
 describe("POST /api/time-blocks — nieparsowalna data -> 400 (F2)", () => {

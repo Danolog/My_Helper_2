@@ -1,5 +1,5 @@
 /**
- * POST + GET /api/product-categories — izolacja salonu (P1/P2 z przeglądu Ryana).
+ * POST + GET /api/product-categories — izolacja salonu (P1/P2 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą obie metody brały salonId z żądania (body / query) i wołały
  * forSalon(salonId): zalogowane konto czytało i zapisywało kategorie

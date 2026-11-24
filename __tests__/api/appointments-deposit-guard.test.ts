@@ -397,7 +397,7 @@ describe("#69: usługa usunięta lub wyłączona (portal z nieaktualnej pamięci
   });
 });
 
-describe("#66: walidacja dat i uwag w POST /api/appointments (P3 Ryana)", () => {
+describe("#66: walidacja dat i uwag w POST /api/appointments (P3 z audytu bezpieczeństwa)", () => {
   it.each([
     ["startTime", "jutro o 10"],
     ["endTime", "December 1, 2026 11:00"],

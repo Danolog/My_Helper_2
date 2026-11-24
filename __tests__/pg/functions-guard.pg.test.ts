@@ -21,7 +21,7 @@
  * daje więc ten test stanu bazy.
  *
  * Reguła dla przyszłych migracji: migracja z CREATE FUNCTION w `public` albo
- * z CREATE / ALTER EXTENSION zmienia odpowiednią listę w tym pliku, z akceptacją CTO i CRCO
+ * z CREATE / ALTER EXTENSION zmienia odpowiednią listę w tym pliku, z akceptacją recenzji i przeglądu zgodności
  * w recenzji.
  *
  * Sondy powstają w transakcji, która jest wycofywana — test niczego trwale nie zmienia.
@@ -42,7 +42,7 @@ const APP_ROLE = "myhelper_app";
 const LOGIN_ROLE = "myhelper_app_login";
 
 /**
- * (a) Rozszerzenia jako `nazwa@schemat`, posortowane. Zmiana = recenzja CTO i CRCO
+ * (a) Rozszerzenia jako `nazwa@schemat`, posortowane. Zmiana = recenzja i przegląd zgodności
  * (stan po db:migrate, odczyt katalogu 16.11).
  */
 const EXPECTED_EXTENSIONS: readonly string[] = ["btree_gist@public", "plpgsql@pg_catalog"];
@@ -53,7 +53,7 @@ type FunctionException = ExceptionEntry;
 
 /**
  * (b) ZAMKNIĘTA lista funkcji własnych w `public` (format #230). Dopisanie pozycji = recenzja
- * CTO i CRCO w tym PR.
+ * recenzja i przegląd zgodności w tym PR.
  */
 const FUNCTION_EXCEPTIONS: FunctionException[] = [];
 
@@ -189,7 +189,7 @@ describe("lista FUNCTION_EXCEPTIONS: format (#193)", () => {
   };
   const noAccepted = Object.fromEntries(Object.entries(OK).filter(([k]) => k !== "acceptedBy")) as unknown as FunctionException;
 
-  it("FUNCTION_EXCEPTIONS: pełna sygnatura, jednozdaniowe uzasadnienie, akceptacja CTO i CRCO, numer PR", () => {
+  it("FUNCTION_EXCEPTIONS: pełna sygnatura, jednozdaniowe uzasadnienie, akceptacja recenzji i przeglądu zgodności, numer PR", () => {
     expect(exceptionFormatViolations(FUNCTION_EXCEPTIONS, SIGNATURE_NAME)).toEqual([]);
   });
 

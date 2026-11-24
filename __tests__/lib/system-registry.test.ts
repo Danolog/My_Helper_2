@@ -2,12 +2,12 @@
 /**
  * #193 P0b: rejestr wyjść systemowych `src/lib/server/system/**`.
  *
- * - R-Z1 (Ryan (c)): migawka plików i eksportów `system/`. Każde nowe wyjście
+ * - R-Z1 (audyt bezpieczeństwa, pkt c): migawka plików i eksportów `system/`. Każde nowe wyjście
  *   zmienia migawkę, więc jest widoczne w diffie.
  * - Z7 + W2: każdy eksport `system/**` to funkcja async zwracająca dane; bez
  *   puli, bez obiektu z `.select`/`.transaction`/`.execute`, bez nazw
  *   raw/tx/getDb/withTx i bez parametrów-funkcji (zakaz callbacków).
- *   Wyjątki: zamknięta lista przypięta `toEqual` (decyzja Ethana 16.11).
+ *   Wyjątki: zamknięta lista przypięta `toEqual` (decyzja z recenzji 16.11).
  * - `system/index.ts` = rejestr: re-eksportuje dokładnie wyjścia plików z
  *   `REGISTRY_SOURCES`, bez wyjątków (pula i adapter nie wychodzą przez rejestr).
  * - Adapter Better Auth: importuje go wyłącznie `src/lib/auth.ts`.
@@ -52,7 +52,7 @@ const STAFF_ACCESS_EXPORTS = [
   "listSalonGrants",
   "revokeTemporaryAccess",
 ];
-/** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
+/** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja z recenzji 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = [
   // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
   "countPushSubscriptions",
@@ -67,9 +67,9 @@ const NOTIFICATIONS_EXPORTS = [
   "markAppointmentRemindersSent",
   "markCronRemindersSent",
 ];
-/** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja CTO 4). */
+/** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja z recenzji 4). */
 const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
-/** #193 P5a-2: cron martwych rezerwacji z zadatkiem (decyzja CTO D2: lista DOKŁADNIE w L7). */
+/** #193 P5a-2: cron martwych rezerwacji z zadatkiem (decyzja z recenzji D2: lista DOKŁADNIE w L7). */
 const DEPOSITS_CLEANUP_EXPORTS = ["cleanupStaleDepositBookings"];
 /** #193 P5b: globalny cennik planów z dosiewaniem (bez danych najemcy). */
 const PLANS_EXPORTS = ["ensurePlansExist"];
@@ -131,7 +131,7 @@ const SNAPSHOT: Record<string, string[]> = {
   "waiting-list.ts": WAITING_LIST_EXPORTS,
 };
 
-/** Zamknięta lista wyjątków od Z7/W2 (Ethan 16.11). */
+/** Zamknięta lista wyjątków od Z7/W2 (recenzja 16.11). */
 const W2_EXCEPTIONS: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "db-system.ts": ["dbSystem"],
@@ -179,7 +179,7 @@ describe("R-Z1: migawka plików i eksportów system/", () => {
     expect(got).toEqual(SNAPSHOT);
   }, 60_000);
 
-  it("warunki Ryana z #206: isSalonOwner w session.ts, cleanupExpiredTemporaryAccess w cron.ts", () => {
+  it("warunki z audytu bezpieczeństwa z #206: isSalonOwner w session.ts, cleanupExpiredTemporaryAccess w cron.ts", () => {
     expect(SNAPSHOT["session.ts"]).toContain("isSalonOwner");
     expect(SNAPSHOT["cron.ts"]).toContain("cleanupExpiredTemporaryAccess");
     expect(SNAPSHOT).not.toHaveProperty("identity.ts"); // P3: identity.ts dopiero w P2

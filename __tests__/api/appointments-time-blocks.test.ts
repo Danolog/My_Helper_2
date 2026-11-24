@@ -1,7 +1,7 @@
 /**
  * #168: blokady czasu pracownika (urlop, przerwa…) przy zapisie wizyty.
  * - PUT /api/appointments/[id]: nowe sprawdzenie (wcześniej tylko kolizja z wizytami).
- * - POST /api/appointments (Q8 Quinn): blokada INNEGO pracownika nie blokuje.
+ * - POST /api/appointments (Q8): blokada INNEGO pracownika nie blokuje.
  *
  * Wiersze-fikstury przechodzą przez WHERE trasy (prawdziwy drizzle, `sqlMatches`),
  * więc test pilnuje znaczenia predykatu: pracownik, przedział półotwarty [start, end).

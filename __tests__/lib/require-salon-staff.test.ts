@@ -1,5 +1,5 @@
 /**
- * requireSalonStaff — bramka tras salon-scoped (P0 z przeglądu Ryana).
+ * requireSalonStaff — bramka tras salon-scoped (P0 z przeglądu bezpieczeństwa).
  *
  * Salon pochodzi WYŁĄCZNIE z sesji (salons.ownerId / employees.userId);
  * salonId z żądania jest tylko porównywany. Mocki jak w salon-context.test.ts

@@ -1,5 +1,5 @@
 /**
- * GET /api/notifications — izolacja salonu (P0 z przeglądu Ryana).
+ * GET /api/notifications — izolacja salonu (P0 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą trasa brała salonId z query i od razu forSalon(salonId):
  * każde zalogowane konto czytało log SMS/e-maili (treść + telefony klientów)

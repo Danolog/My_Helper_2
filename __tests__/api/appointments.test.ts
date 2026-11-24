@@ -217,7 +217,7 @@ vi.mock("@/lib/salon-context", () => ({
   hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
 }));
 
-// P1 (Ryan): przynależność clientId/employeeId/serviceId do salonu.
+// P1 (audyt bezpieczeństwa): przynależność clientId/employeeId/serviceId do salonu.
 // Helper ma własne testy (__tests__/lib/salon-refs.test.ts) — tu sprawdzamy,
 // że trasa go woła z właściwymi id i honoruje odrzucenie. Domyślnie: OK (null).
 const mockAssertSalonRefs = vi.fn(async (..._args: unknown[]): Promise<Response | null> => null);
@@ -1359,7 +1359,7 @@ describe("POST /api/appointments", () => {
 });
 
 // -------------------------------------------------------
-// P1 (Ryan): rabat wizyty liczy serwer, nie klient.
+// P1 (audyt bezpieczeństwa): rabat wizyty liczy serwer, nie klient.
 // Publiczny POST zapisywal discountAmount prosto z zadania, a promoCodeId
 // szukal bez zawezenia do salonu wizyty. Kwota rabatu wplywa na punkty
 // lojalnosciowe przy zakonczeniu wizyty i na statystyki przychodu.
@@ -1597,7 +1597,7 @@ describe("POST /api/appointments — rabat liczony przez serwer (P1)", () => {
 });
 
 // -------------------------------------------------------
-// P1 (Ryan): clientId/employeeId/serviceId z body POST musza nalezec do
+// P1 (audyt bezpieczeństwa): clientId/employeeId/serviceId z body POST musza nalezec do
 // salonu wizyty; gosc nie podpina cudzego klienta; depositAmount z body
 // ignorowany (zadatek tylko przez /api/deposits/create-session).
 // -------------------------------------------------------
@@ -1972,7 +1972,7 @@ describe("PUT /api/appointments/[id]", () => {
     expect(body.message).toContain("rescheduled");
   });
 
-  // Ryan (hotfix P1, dane osobowe w logach): PUT logował cały updateData —
+  // Audyt bezpieczeństwa (hotfix P1, dane osobowe w logach): PUT logował cały updateData —
   // z wolnym tekstem notatki o kliencie — do logów produkcyjnych.
   it("PII: log aktualizacji wizyty nie zawiera treści notatki, tylko nazwy pól", async () => {
     const PII_NOTE = "Anna Kowalska, tel. 600123456, alergia na lateks";
@@ -2002,7 +2002,7 @@ describe("PUT /api/appointments/[id]", () => {
     }
   });
 
-  // Ryan (przegląd #90): zapis czyta sparsowane dane, nie surowe body —
+  // Audyt bezpieczeństwa (przegląd #90): zapis czyta sparsowane dane, nie surowe body —
   // preprocess schematu zamienia same spacje na null.
   it.each([
     ["same spacje", "   ", null],
@@ -2099,7 +2099,7 @@ describe("PUT /api/appointments/[id]", () => {
 });
 
 // -------------------------------------------------------
-// P1 (Ryan): PUT — clientId/employeeId/serviceId z body musza nalezec do
+// P1 (audyt bezpieczeństwa): PUT — clientId/employeeId/serviceId z body musza nalezec do
 // salonu; depositAmount/depositPaid zmienia tylko wlasciciel (pracownik nie
 // "oplaca" zadatku recznie; normalnie ustawia go potwierdzenie platnosci).
 // -------------------------------------------------------
@@ -2462,7 +2462,7 @@ describe("DELETE /api/appointments/[id]", () => {
     expect(smsInserts()).toHaveLength(1);
   });
 
-  // Leo (blokada #98): toast po nieudanym zwrocie pokazuje kwotę, która NIE
+  // Recenzja (blokada #98): toast po nieudanym zwrocie pokazuje kwotę, która NIE
   // wróciła — liczoną z odpowiedzi serwera (refund.failedAmount), nie sumę
   // udanych zwrotów (`amount`, przy pełnej porażce 0).
   it.each([
@@ -2481,7 +2481,7 @@ describe("DELETE /api/appointments/[id]", () => {
       refund: { success: false, refunded: false, refundId: "re_1", amount: 30, failedAmount: 20, error: "stripe_refund_failed", paymentCount: 2 },
       expected: "Zadatek 20.00 PLN nie wrócił",
     },
-  ])("RF3 + Leo: $name → odpowiedź niesie failedAmount, toast z tej odpowiedzi pokazuje kwotę niezwróconą", async ({ refund, expected }) => {
+  ])("RF3 + recenzja: $name → odpowiedź niesie failedAmount, toast z tej odpowiedzi pokazuje kwotę niezwróconą", async ({ refund, expected }) => {
     const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: true });
     queueSalonCancel({ appointment, paidMethods: ["stripe"] });
     mockProcessAutomaticRefund.mockResolvedValueOnce({ ...refund, message: "x", results: [] });
@@ -3076,7 +3076,7 @@ describe("POST /api/appointments — przedział pusty (#165)", () => {
   });
 });
 
-describe("PUT /api/appointments/[id] — przeniesienie na innego pracownika (#165, B1 Quinn)", () => {
+describe("PUT /api/appointments/[id] — przeniesienie na innego pracownika (#165, B1)", () => {
   // Edytowana wizyta: pracownik E1 (TEST_IDS.EMPLOYEE_UUID), 14–15.
   // Kolizja ma być liczona u NOWEGO pracownika, nie u zapisanego.
   const E2 = "bbbbbbbb-0000-4000-8000-000000000002";

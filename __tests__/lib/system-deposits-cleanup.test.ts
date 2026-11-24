@@ -1,7 +1,7 @@
 /**
  * #193 P5a-2 — cron martwych rezerwacji z zadatkiem przeniesiony do
  * `src/lib/server/system/deposits-cleanup.ts` (plik zadatków: zapis
- * deposit_payments i anulowanie wizyt, recenzja także CTO).
+ * deposit_payments i anulowanie wizyt, recenzja także architektoniczna).
  *
  * - Moduł ładowany dynamicznie (brak modułu = czerwień testów, nie błąd
  *   typecheck całego pliku); trasa woła wyjście z rejestru.
