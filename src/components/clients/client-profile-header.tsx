@@ -237,6 +237,9 @@ export function ClientProfileHeader({
                   "Żadna wizyta tego klienta nie ma notatek ani kart zabiegów."
                 ))}
             </div>
+            <p className="text-sm text-muted-foreground" data-testid="delete-impact-reviews">
+              Treść opinii tego klienta i odpowiedź salonu też znikną. Ocena zostanie.
+            </p>
             {deleteBlockers && (
               <div
                 role="alert"

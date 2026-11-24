@@ -109,6 +109,9 @@ describe("ClientProfileHeader — usuwanie klienta", () => {
     expect(await screen.findByTestId("delete-impact-count")).toHaveTextContent("2");
     expect(screen.getByTestId("delete-impact")).toHaveTextContent("Notatki i karty zabiegów znikną z 2 wizyt");
     expect(fetchMock).toHaveBeenCalledWith(`/api/clients/${CLIENT_ID}/appointments`, expect.anything());
+    expect(screen.getByTestId("delete-impact-reviews")).toHaveTextContent(
+      "Treść opinii tego klienta i odpowiedź salonu też znikną. Ocena zostanie."
+    );
   });
 
   it("bez notatek: informacja, że nic nie zniknie", async () => {
