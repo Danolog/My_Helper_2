@@ -7,6 +7,11 @@
 -- Trasa POST /api/client/appointments/[id]/review zamienia naruszenie (23505) na 409.
 --
 -- Dopisane ręcznie przed indeksem:
+-- 0. SET LOCAL lock_timeout: LOCK TABLE ... IN SHARE MODE czeka na koniec każdej
+--    transakcji piszącej do reviews, a w kolejce za nim stają kolejne zapytania.
+--    Jeśli blokady nie da się wziąć w 5 s, migracja kończy się błędem 55P03 i nic
+--    się nie zmienia. Ponowienie = ponowne uruchomienie migracji. Obowiązuje do końca
+--    transakcji migratora (reguła: __tests__/lint/migration-lock-timeout.test.ts).
 -- 1. LOCK TABLE ... IN SHARE MODE: blokuje zapisy do reviews do końca transakcji
 --    migracji (odczyty działają), więc między kontrolą a indeksem nie dojdzie
 --    nowy duplikat. CREATE INDEX i tak bierze tę samą blokadę.
@@ -20,6 +25,7 @@
 --
 -- ROLLBACK: ręcznie — DROP INDEX "reviews_appointment_id_uq";
 --   (wpis 0016 w drizzle.__drizzle_migrations zostaje; ponowne włączenie = nowa migracja).
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
 LOCK TABLE "reviews" IN SHARE MODE;--> statement-breakpoint
 DO $$
 DECLARE
