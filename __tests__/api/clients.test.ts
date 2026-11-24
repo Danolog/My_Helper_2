@@ -980,12 +980,14 @@ describe("DELETE /api/clients/[id]", () => {
     });
 
     it.each([
-      ["55P03 (lock_timeout) z blokady", "lock", () => pgError("55P03")],
-      ["40P01 (zakleszczenie) z blokady", "lock", () => pgError("40P01")],
-      ["55P03 opakowany w cause, z anonimizacji", "anonymize", () => wrappedPgError("55P03")],
-      ["40P01 opakowany w cause, z DELETE", "delete", () => wrappedPgError("40P01")],
-    ] as const)("503 + Retry-After: 2 — %s", async (_label, where, makeError) => {
-      const error = makeError();
+      ["55P03 (lock_timeout) z blokady", "lock", "55P03", pgError],
+      ["40P01 (zakleszczenie) z blokady", "lock", "40P01", pgError],
+      ["55P03 opakowany w cause, z anonimizacji", "anonymize", "55P03", wrappedPgError],
+      ["40P01 opakowany w cause, z DELETE", "delete", "40P01", wrappedPgError],
+    ] as const)("503 + Retry-After: 2 — %s", async (_label, where, code, makeError) => {
+      const { logger } = await import("@/lib/logger");
+      const warnSpy = vi.spyOn(logger, "warn");
+      const error = makeError(code);
       if (where === "lock") retentionMocks.lockClientForRemoval.mockRejectedValue(error);
       if (where === "anonymize") retentionMocks.anonymizeClientData.mockRejectedValue(error);
       if (where === "delete") {
@@ -1002,6 +1004,10 @@ describe("DELETE /api/clients/[id]", () => {
       expect(body).toEqual({ success: false, code: "CLIENT_DELETE_RETRY", error: "Spróbuj ponownie za chwilę" });
       // Bez ponawiania w serwerze: jedna próba blokady.
       expect(retentionMocks.lockClientForRemoval).toHaveBeenCalledTimes(1);
+      // W logu tylko kod błędu — bez message, stacku i parametrów zapytania.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expect.any(String), { code });
+      warnSpy.mockRestore();
     });
 
     it("500: inny błąd bazy w transakcji (np. 23503) → ogólny komunikat, bez Retry-After", async () => {
