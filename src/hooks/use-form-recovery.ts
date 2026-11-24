@@ -124,8 +124,8 @@ function readDraftData(raw: string, now: number): Record<string, unknown> | null
 /**
  * Removes every form draft that is expired, corrupted or stored in the legacy
  * format. A draft is otherwise removed only when its form mounts again, so
- * this runs once at application start to keep the 24-hour limit for forms the
- * user never reopens. Keys outside the form-recovery prefix are left alone.
+ * this runs at application start and periodically afterwards (see SwRegister)
+ * to keep the 24-hour limit for forms the user never reopens. Keys outside the form-recovery prefix are left alone.
  * Never throws: storage may be missing, blocked or failing.
  */
 export function sweepExpiredDrafts(now: number = Date.now()): void {

@@ -7,6 +7,13 @@ import { sweepExpiredDrafts } from "@/hooks/use-form-recovery";
 const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
+ * Interval between form draft sweeps (15 minutes). A salon tablet can keep
+ * the app open for days without a reload, so a sweep at start alone would
+ * let a draft outlive the 24-hour limit. The interval bounds the overshoot.
+ */
+export const DRAFT_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
  * Registers the service worker and manages its lifecycle.
  *
  * - Registers `/sw.js` on mount.
@@ -18,15 +25,31 @@ const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
  *   (`controllerchange`) -- but never on the first install, when the page
  *   had no controller yet (see `onControllerChange`).
  *
- * - Once per application start, removes expired and legacy form drafts from
- *   localStorage. This runs in every environment and without service worker
- *   support, so it lives in its own effect before the service worker guard.
+ * - Removes expired and legacy form drafts from localStorage at start, every
+ *   15 minutes and whenever the page becomes visible again (background tabs
+ *   throttle timers). This runs in every environment and without service
+ *   worker support, so it lives in its own effect before the service worker
+ *   guard.
  *
  * Renders nothing -- this is a side-effect-only component.
  */
 export function SwRegister() {
   useEffect(() => {
-    sweepExpiredDrafts();
+    // Wrapped so that neither the interval nor the event passes an argument
+    // that would replace the default `now` of sweepExpiredDrafts.
+    const sweep = () => sweepExpiredDrafts();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") sweep();
+    };
+
+    sweep();
+    const sweepInterval = setInterval(sweep, DRAFT_SWEEP_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearInterval(sweepInterval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
