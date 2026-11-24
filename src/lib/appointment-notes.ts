@@ -1,5 +1,5 @@
 /**
- * Pole `notes` w PUT /api/appointments/[id] z dialogu edycji (#90, Ethan).
+ * Pole `notes` w PUT /api/appointments/[id] z dialogu edycji (#90, recenzja).
  *
  * Dialog wysyła `notes` TYLKO, gdy użytkownik je zmienił. PUT od #90 odrzuca
  * notatki dłuższe niż APPOINTMENT_NOTES_MAX_LENGTH (400), a wizyty sprzed

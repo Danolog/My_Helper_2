@@ -133,7 +133,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create employee",
   },
   async ({ body }) => {
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
     // pozwalał każdemu zalogowanemu kontu dodać pracownika do cudzego salonu.
     // body.salonId tylko porównywany (inny => 403). Dodawanie pracowników: tylko
     // właściciel (salons.ownerId), bez grantów — jak PUT /api/employees/[id].

@@ -53,7 +53,7 @@ interface ResendResponse {
 /**
  * Typy błędów dostawcy dopuszczone do kodu błędu wysyłki. Przepisane dosłownie
  * ze strony https://resend.com/docs/api-reference/errors (odczyt 16.11.2026).
- * Zmiana listy wymaga recenzji CRCO. Nazwa pola z typem w treści odpowiedzi
+ * Zmiana listy wymaga przeglądu zgodności. Nazwa pola z typem w treści odpowiedzi
  * (`name`) jest założeniem — przy innym kształcie odpowiedzi wynik to "other".
  */
 export const PROVIDER_ERROR_TYPES = [

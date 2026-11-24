@@ -1,5 +1,5 @@
 /**
- * Adapter Better Auth na puli systemowej (#193, Z9; decyzja Ethana R-Z1).
+ * Adapter Better Auth na puli systemowej (#193, Z9; decyzja z recenzji R-Z1).
  *
  * Jawny schemat obejmuje WYŁĄCZNIE 4 tabele auth. Adapter nie sięga do żadnej
  * innej tabeli — model spoza tej listy kończy się błędem adaptera (test).
@@ -7,7 +7,7 @@
  * wyłącznie schematu tego adaptera, nie uprawnień w bazie. Odebranie puli żądań
  * grantów na account/session/verification to dług do P6 (#193, lista kontrolna P6).
  *
- * Wyjątek od Z7/W2 z zamkniętej listy (Ethan 16.11). Importuje go wyłącznie
+ * Wyjątek od Z7/W2 z zamkniętej listy (recenzja 16.11). Importuje go wyłącznie
  * `src/lib/auth.ts` (test skanu importów); nie wychodzi przez `system/index.ts`.
  */
 import { drizzleAdapter } from "better-auth/adapters/drizzle";

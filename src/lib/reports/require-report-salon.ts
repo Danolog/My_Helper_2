@@ -13,7 +13,7 @@ function badRequest(error: string): ReportSalonResult {
 }
 
 /**
- * Bramka endpointów raportów — cienkie opakowanie (#101, decyzja Ethana z
+ * Bramka endpointów raportów — cienkie opakowanie (#101, decyzja z recenzji z
  * recenzji #99). Autoryzacja to jeden strażnik dla wszystkich tras salonu:
  * `requireSalonStaff({ requestedSalonId, feature: REPORTS_FEATURE })`.
  *

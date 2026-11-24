@@ -18,7 +18,7 @@ import { isOwnUploadUrl } from "@/lib/upload-url";
  * Vercel Blob ani GCS NIE są kasowane (jak na main). Ścieżka `gallery/<uuid>.<ext>`
  * nie wiąże pliku z salonem, a adresy są publiczne (/api/salons/[id]/gallery),
  * więc del() pozwalałby salonowi A skasować plik salonu B przypięty do
- * własnego wpisu (blokada Ryana/Leo na #45, B1). Kasowanie Blob wraca razem
+ * własnego wpisu (blokada z audytu bezpieczeństwa i recenzji na #45, B1). Kasowanie Blob wraca razem
  * z powiązaniem pliku z salonem (`gallery/<salonId>/<uuid>`) — osobny PR.
  */
 
@@ -106,7 +106,7 @@ type SalonTx = Parameters<Parameters<ReturnType<typeof forSalon>["raw"]>[0]>[0];
  * Bez tego dwa wpisy dzieliłyby plik, a DELETE jednego kasowałby (unlink)
  * zdjęcie drugiego. Zapytanie idzie w kontekście salonu (RLS) — duplikatu
  * w innym salonie stąd nie widać; to domyka powiązanie pliku z salonem
- * (osobny PR, decyzja Ethana), nie obejście RLS.
+ * (osobny PR, decyzja z recenzji), nie obejście RLS.
  */
 export async function hasGalleryUrlConflict(
   tx: SalonTx,

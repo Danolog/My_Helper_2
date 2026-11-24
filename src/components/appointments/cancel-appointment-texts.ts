@@ -1,6 +1,6 @@
 /**
  * Teksty okna odwołania wizyty przez salon i toastów po odwołaniu
- * (refund-fix RF3; brzmienie: Sophia, 2026-11-15 — dosłownie).
+ * (refund-fix RF3; brzmienie z decyzji produktowej, 2026-11-15 — dosłownie).
  *
  * Bez zdania o SMS i bez wariantu „utrata zadatku”: odwołanie przez salon
  * zawsze zwraca zadatek w całości (RF1, `depositForfeited` zawsze false).
@@ -66,7 +66,7 @@ export type CancelToast =
 export function salonCancelToast(details: SalonCancellationDetails | undefined): CancelToast {
   const amount = details?.refund?.amount ?? details?.depositAmount ?? 0;
   if (details?.refundFailed) {
-    // Kwota, która NIE wróciła — nie suma udanych zwrotów (Leo, #98).
+    // Kwota, która NIE wróciła — nie suma udanych zwrotów (recenzja, #98).
     const failedAmount = details?.refund?.failedAmount ?? details?.depositAmount ?? 0;
     return {
       kind: "error",

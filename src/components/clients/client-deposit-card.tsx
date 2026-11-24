@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 
-/** #66: zakres flagi klienta „Wymagaj zadatku” (tekst: Sophia, PO). */
+/** #66: zakres flagi klienta „Wymagaj zadatku” (tekst z decyzji produktowej). */
 export const CLIENT_DEPOSIT_SCOPE_NOTE =
   "Działa tylko wtedy, gdy klient rezerwuje online zalogowany na konto z potwierdzonym e-mailem, a w tej kartotece jest wpisany dokładnie ten sam e-mail. Nie działa przy rezerwacji bez logowania (jako gość) ani gdy kartoteka nie ma e-maila.";
 

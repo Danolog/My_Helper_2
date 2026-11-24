@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     }
     const repo = forSalon(salonId);
 
-    // P1 (Ryan): klient i pracownik z body musza nalezec do salonu z sesji —
+    // P1 (audyt bezpieczeństwa): klient i pracownik z body musza nalezec do salonu z sesji —
     // inaczej pakiet podpinalby cudzego klienta albo blokowal kalendarz
     // pracownika innego salonu (overlap/timeBlocks filtruja po employeeId).
     const refsError = await assertSalonRefs(salonId, { clientId, employeeId });

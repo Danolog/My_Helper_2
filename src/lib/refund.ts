@@ -24,7 +24,7 @@ export type RefundErrorCode =
   | "payment_changed_concurrently"
   | "refund_error";
 
-/** Klucz idempotencji zwrotu w Stripe: jeden zwrot na płatność (Ethan, #70). */
+/** Klucz idempotencji zwrotu w Stripe: jeden zwrot na płatność (recenzja, #70). */
 export function depositRefundIdempotencyKey(depositPaymentId: string): string {
   return `deposit-refund:${depositPaymentId}`;
 }
@@ -71,7 +71,7 @@ async function resolvePaymentIntentId(
 }
 
 /**
- * Zwrot JEDNEJ, wskazanej płatności zadatku (Ethan, #98). Obrona: płatność
+ * Zwrot JEDNEJ, wskazanej płatności zadatku (recenzja, #98). Obrona: płatność
  * musi należeć do tej wizyty i być `succeeded`. Nie zmienia
  * `appointments.depositPaid` — to robi wołający (`refundAppointmentDeposits`).
  *
@@ -196,7 +196,7 @@ export interface AppointmentDepositsRefund extends RefundResult {
   /**
    * Kwota, która NIE wróciła do klienta (suma płatności z nieudanym zwrotem).
    * `amount` to suma udanych zwrotów — przy porażce toast musi pokazać tę
-   * (Leo, #98). Brak, gdy nie udało się nawet odczytać płatności.
+   * (recenzja, #98). Brak, gdy nie udało się nawet odczytać płatności.
    */
   failedAmount?: number;
   /** Płatność zatrzymana przez salon (najstarsza `succeeded`), jeśli forfeit. */
@@ -218,7 +218,7 @@ function succeededDepositsOrder() {
 }
 
 /**
- * Wszystkie płatności `succeeded` wizyty, od najstarszej (Ethan, #98).
+ * Wszystkie płatności `succeeded` wizyty, od najstarszej (recenzja, #98).
  */
 export async function selectSucceededDeposits(appointmentId: string) {
   return db
@@ -279,7 +279,7 @@ async function clearDepositPaidAfterRefund(appointmentId: string): Promise<void>
 }
 
 /**
- * Zwrot zadatków anulowanej wizyty (Ethan, #98):
+ * Zwrot zadatków anulowanej wizyty (recenzja, #98):
  * - każda płatność `succeeded` osobno, każda z własnym kluczem idempotencji;
  * - `forfeitReason` (klient odwołuje < 24 h): najstarsza `succeeded` jest
  *   zatrzymana (`forfeited`), pozostałe zwracane;

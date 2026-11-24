@@ -244,7 +244,7 @@ function absentAsUndefined<T extends z.ZodType>(schema: T) {
  * Telefon PL: spacje, myślniki i nawiasy zdejmowane PRZED walidacją, zapis
  * w E.164 przez normalizePolishPhoneNumber (ta sama funkcja co wysyłka SMS):
  * "+48 123 456 789" -> "+48123456789", "123-456-789" -> "+48123456789".
- * Ryan N1 / #64 pkt 4.
+ * Audyt bezpieczeństwa N1 / #64 pkt 4.
  */
 function normalizedPlPhone(message: string) {
   return absentAsUndefined(
@@ -268,7 +268,7 @@ function normalizedPlPhone(message: string) {
  * Date.parse odrzuca nieistniejące wartości (miesiąc 13, godzina 99).
  * Strefa (`Z` albo `±hh:mm`) jest WYMAGANA: wartość bez strefy Date.parse
  * czyta w strefie serwera (UTC na Vercelu), więc "10:00" z Polski byłoby
- * zapisane godzinę lub dwie później (Ethan, przegląd #71). Wszyscy nadawcy
+ * zapisane godzinę lub dwie później (recenzja, przegląd #71). Wszyscy nadawcy
  * wysyłają toISOString(), czyli `Z`.
  *
  * Godzina 00–23, minuty i sekundy 00–59 w samym regexie: Date.parse przyjmuje
@@ -331,7 +331,7 @@ export const createAppointmentSchema = z.object({
   clientId: z.string().nullable().optional(),
   employeeId: requiredString("Pracownik"),
   serviceId: z.string().nullable().optional(),
-  // #66 (P3 Ryana z #67): ISO 8601 jak w create-session — sam Date.parse
+  // #66 (P3 z audytu bezpieczeństwa z #67): ISO 8601 jak w create-session — sam Date.parse
   // przyjmował np. "jutro o 10" (parsuje się jako rok 2010). Front portalu
   // i panelu wysyła toISOString().
   startTime: isoDateString("Czas rozpoczecia"),
@@ -864,7 +864,7 @@ export const bookPackageSchema = z.object({
 // Client Sub-resource Schemas
 // ==========================================
 
-// Zgody marketingowe RODO (P2, Ryan). Kontrakt = body z client-consents-card.tsx:
+// Zgody marketingowe RODO (P2, audyt bezpieczeństwa). Kontrakt = body z client-consents-card.tsx:
 // { consents: { email|sms|phone: boolean } } (UI wysyła jeden typ na żądanie).
 // Wartość wyłącznie boolean — bez koercji: "false" jako tekst to błąd, nie zgoda.
 // .strict() na obu poziomach: nieznany typ zgody albo pole spoza kontraktu => 400.

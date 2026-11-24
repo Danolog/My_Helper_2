@@ -6,7 +6,7 @@
 -- (cała migracja zostanie wycofana). Przy liczbie > 0 nie migrować — najpierw decyzja,
 -- co zrobić z wierszami (lista: drugie zapytanie).
 --
--- Lokalnie: sesja główna. Neon/produkcja: dopiero za zgodą Darka.
+-- Lokalnie: sesja główna. Neon/produkcja: dopiero po decyzji produktowej.
 --   psql "<POSTGRES_URL>" -v ON_ERROR_STOP=1 -f scripts/sql/0009-precheck.sql
 
 BEGIN READ ONLY;

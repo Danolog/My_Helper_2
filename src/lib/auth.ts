@@ -40,7 +40,7 @@ function authLinkLogContext(
  *   (VERCEL=1): `x-real-ip` ustawia Vercel Proxy. Poza Vercelem domyślnie
  *   tylko X-Forwarded-For.
  *
- * `advanced.trustedProxyHeaders` zostaje celowo WYŁĄCZONE (przegląd CRCO
+ * `advanced.trustedProxyHeaders` zostaje celowo WYŁĄCZONE (przegląd zgodności
  * #17, b2): nie mamy dowodu, że LB nadpisuje X-Forwarded-Host od klienta.
  */
 const ipAddressOptions = getAuthIpAddressOptions()
