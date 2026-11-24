@@ -1,3 +1,11 @@
+-- Dopisane ręcznie: SET LOCAL lock_timeout jako pierwsza instrukcja (reguła dla
+-- migracji od 0015, __tests__/lint/migration-lock-timeout.test.ts). Migrator stosuje
+-- wszystkie zaległe pliki w jednej transakcji, a SET LOCAL obowiązuje do jej końca,
+-- więc limit obejmuje też pliki stosowane po tym w tym samym przebiegu. Bez limitu
+-- czekanie na blokadę nie ma końca i ustawia w kolejce zapytania z ruchu.
+-- Po 5 s czekania: błąd 55P03, transakcja wycofana, nic się nie zmienia;
+-- ponowienie = ponowne uruchomienie migracji.
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
 CREATE TABLE "legal_acceptances" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"salon_id" uuid NOT NULL,
