@@ -65,6 +65,19 @@ vi.mock("@/lib/server/system", () => ({
 }));
 const mockFindCredentialPasswordHash = systemMocks.findCredentialPasswordHash;
 
+// Usunięcie klienta: blokady, liczenie zobowiązań i anonimizacja w transakcji.
+// Zachowanie na danych sprawdzają testy pg; tu kolejność i odpowiedzi trasy.
+const retentionMocks = vi.hoisted(() => ({
+  lockClientForRemoval: vi.fn(),
+  countClientRemovalBlockers: vi.fn(),
+  anonymizeClientData: vi.fn(),
+}));
+vi.mock("@/lib/server/retention/anonymize-client", () => ({
+  lockClientForRemoval: (...args: unknown[]) => retentionMocks.lockClientForRemoval(...args),
+  countClientRemovalBlockers: (...args: unknown[]) => retentionMocks.countClientRemovalBlockers(...args),
+  anonymizeClientData: (...args: unknown[]) => retentionMocks.anonymizeClientData(...args),
+}));
+
 // Mock session for DELETE endpoint
 const mockGetSession = vi.fn();
 vi.mock("@/lib/auth", () => ({
@@ -612,6 +625,9 @@ describe("PUT /api/clients/[id]", () => {
 describe("DELETE /api/clients/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retentionMocks.lockClientForRemoval.mockResolvedValue(true);
+    retentionMocks.countClientRemovalBlockers.mockResolvedValue({ futureAppointments: 0, depositsToRefund: 0 });
+    retentionMocks.anonymizeClientData.mockResolvedValue({});
   });
 
   it("should return 401 when not authenticated", async () => {
@@ -856,6 +872,169 @@ describe("DELETE /api/clients/[id]", () => {
     expect((await parseResponse(response)).status).toBe(200);
     // Jedno zapytanie select (findOne w transakcji) — hash nie idzie przez db.select.
     expect(mockDbSelect).toHaveBeenCalledTimes(1);
+  });
+
+  describe("anonimizacja i zobowiązania klienta", () => {
+    const deleteWithPassword = () =>
+      deleteClient(
+        createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+          method: "DELETE",
+          body: { password: "correct-password" },
+        }),
+        createRouteParams(TEST_IDS.CLIENT_UUID)
+      );
+
+    beforeEach(() => {
+      mockGetSession.mockResolvedValue({ user: { id: "user-1", email: "owner@test.com" } });
+      mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+      mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
+      mockVerifyPassword.mockResolvedValue(true);
+      mockDbDelete.mockReturnValue(chainMock([makeClient()]));
+    });
+
+    /** Błąd jak z postgres-js: `code` na samym błędzie. */
+    const pgError = (code: string) => Object.assign(new Error("db"), { code });
+    /** Błąd opakowany przez Drizzle: kod tylko w `cause`. */
+    const wrappedPgError = (code: string) => new Error("Failed query", { cause: pgError(code) });
+
+    it("200: w jednej transakcji blokady → liczenie → anonimizacja → DELETE, z salonem z sesji", async () => {
+      const order: string[] = [];
+      retentionMocks.lockClientForRemoval.mockImplementation(async () => {
+        order.push("lock");
+        return true;
+      });
+      retentionMocks.countClientRemovalBlockers.mockImplementation(async () => {
+        order.push("count");
+        return { futureAppointments: 0, depositsToRefund: 0 };
+      });
+      retentionMocks.anonymizeClientData.mockImplementation(async () => {
+        order.push("anonymize");
+        return {};
+      });
+      const deletedRow = makeClient({ allergies: "Uczulenie na lateks" });
+      mockDbDelete.mockImplementation(() => {
+        order.push("delete");
+        return chainMock([deletedRow]);
+      });
+
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
+
+      expect(status).toBe(200);
+      // Minimalizacja: sam identyfikator, bez danych usuwanej kartoteki.
+      expect(body).toEqual({ success: true, data: { id: deletedRow.id } });
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain(deletedRow.firstName as string);
+      expect(raw).not.toContain("allergies");
+      expect(raw).not.toContain("Uczulenie na lateks");
+      expect(order).toEqual(["lock", "count", "anonymize", "delete"]);
+      for (const fn of [
+        retentionMocks.lockClientForRemoval,
+        retentionMocks.countClientRemovalBlockers,
+        retentionMocks.anonymizeClientData,
+      ]) {
+        expect(fn).toHaveBeenCalledWith(mockTx, TEST_IDS.SALON_UUID, TEST_IDS.CLIENT_UUID);
+      }
+    });
+
+    it("409: przyszłe wizyty → kod i liczby, bez danych klienta; bez anonimizacji i DELETE", async () => {
+      retentionMocks.countClientRemovalBlockers.mockResolvedValue({ futureAppointments: 2, depositsToRefund: 0 });
+
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
+
+      expect(status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: "CLIENT_HAS_PENDING_OBLIGATIONS",
+        error: expect.any(String),
+        futureAppointments: 2,
+        depositsToRefund: 0,
+      });
+      expect(retentionMocks.anonymizeClientData).not.toHaveBeenCalled();
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
+    it("409: zadatek do zwrotu przy odwołanej wizycie → kod i liczby; bez anonimizacji i DELETE", async () => {
+      retentionMocks.countClientRemovalBlockers.mockResolvedValue({ futureAppointments: 0, depositsToRefund: 1 });
+
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
+
+      expect(status).toBe(409);
+      expect(body.code).toBe("CLIENT_HAS_PENDING_OBLIGATIONS");
+      expect(body.futureAppointments).toBe(0);
+      expect(body.depositsToRefund).toBe(1);
+      expect(JSON.stringify(body)).not.toContain(makeClient().firstName);
+      expect(retentionMocks.anonymizeClientData).not.toHaveBeenCalled();
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
+    it("404: klient zniknął przed blokadą (równoległe usunięcie) → bez liczenia, anonimizacji i DELETE", async () => {
+      retentionMocks.lockClientForRemoval.mockResolvedValue(false);
+
+      const { status, body } = await parseResponse(await deleteWithPassword());
+
+      expect(status).toBe(404);
+      expect(body.error).toBe("Client not found");
+      expect(retentionMocks.countClientRemovalBlockers).not.toHaveBeenCalled();
+      expect(retentionMocks.anonymizeClientData).not.toHaveBeenCalled();
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["55P03 (lock_timeout) z blokady", "lock", "55P03", pgError],
+      ["40P01 (zakleszczenie) z blokady", "lock", "40P01", pgError],
+      ["55P03 opakowany w cause, z anonimizacji", "anonymize", "55P03", wrappedPgError],
+      ["40P01 opakowany w cause, z DELETE", "delete", "40P01", wrappedPgError],
+    ] as const)("503 + Retry-After: 2 — %s", async (_label, where, code, makeError) => {
+      const { logger } = await import("@/lib/logger");
+      const warnSpy = vi.spyOn(logger, "warn");
+      const error = makeError(code);
+      if (where === "lock") retentionMocks.lockClientForRemoval.mockRejectedValue(error);
+      if (where === "anonymize") retentionMocks.anonymizeClientData.mockRejectedValue(error);
+      if (where === "delete") {
+        mockDbDelete.mockImplementation(() => {
+          throw error;
+        });
+      }
+
+      const response = await deleteWithPassword();
+      const { status, body } = await parseResponse<Record<string, unknown>>(response);
+
+      expect(status).toBe(503);
+      expect(response.headers.get("Retry-After")).toBe("2");
+      expect(body).toEqual({ success: false, code: "CLIENT_DELETE_RETRY", error: "Spróbuj ponownie za chwilę" });
+      // Bez ponawiania w serwerze: jedna próba blokady.
+      expect(retentionMocks.lockClientForRemoval).toHaveBeenCalledTimes(1);
+      // W logu tylko kod błędu — bez message, stacku i parametrów zapytania.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expect.any(String), { code });
+      warnSpy.mockRestore();
+    });
+
+    it("500: inny błąd bazy w transakcji (np. 23503) → ogólny komunikat, bez Retry-After", async () => {
+      retentionMocks.anonymizeClientData.mockRejectedValue(wrappedPgError("23503"));
+
+      const response = await deleteWithPassword();
+      const { status, body } = await parseResponse(response);
+
+      expect(status).toBe(500);
+      expect(body.error).toBe("Failed to delete client");
+      expect(response.headers.get("Retry-After")).toBeNull();
+    });
+
+    it("403: recepcja bez czasowego dostępu → bez sprawdzania hasła i bez transakcji", async () => {
+      mockGetSalonContext.mockResolvedValueOnce({
+        salonId: TEST_IDS.SALON_UUID,
+        role: "receptionist",
+        employeeId: null,
+        userId: "user-1",
+      });
+
+      const { status } = await parseResponse(await deleteWithPassword());
+
+      expect(status).toBe(403);
+      expect(mockVerifyPassword).not.toHaveBeenCalled();
+      expect(retentionMocks.lockClientForRemoval).not.toHaveBeenCalled();
+    });
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -22,7 +22,35 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { mutationFetch } from "@/lib/api-client";
-import type { ClientData } from "./types";
+import type { AppointmentData, ClientData } from "./types";
+
+/** Wizyty, które przy usunięciu kartoteki stracą notatki, karty zabiegów albo uwagi do materiałów. */
+export function countAppointmentsLosingNotes(appointments: AppointmentData[]): number {
+  return appointments.filter(
+    (a) =>
+      Boolean(a.notes?.trim()) ||
+      a.treatment !== null ||
+      a.materials.some((m) => Boolean(m.notes?.trim()))
+  ).length;
+}
+
+/** Stan liczenia skutków usunięcia w oknie potwierdzenia. */
+type DeleteImpact =
+  | { status: "loading" }
+  | { status: "ready"; count: number }
+  | { status: "error" };
+
+/** Odpowiedź 409: wizyty, które salon musi najpierw obsłużyć. */
+type DeleteBlockers = { futureAppointments: number; depositsToRefund: number };
+
+const RETRY_MESSAGE = "Ktoś właśnie zmienia dane tego klienta. Spróbuj ponownie za chwilę.";
+
+function blockersFromBody(body: unknown): DeleteBlockers | null {
+  if (!body || typeof body !== "object") return null;
+  const { futureAppointments, depositsToRefund } = body as Record<string, unknown>;
+  if (typeof futureAppointments !== "number" || typeof depositsToRefund !== "number") return null;
+  return { futureAppointments, depositsToRefund };
+}
 
 interface ClientProfileHeaderProps {
   client: ClientData;
@@ -55,6 +83,31 @@ export function ClientProfileHeader({
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [deleteImpact, setDeleteImpact] = useState<DeleteImpact>({ status: "loading" });
+  const [deleteBlockers, setDeleteBlockers] = useState<DeleteBlockers | null>(null);
+
+  // Liczba wizyt, które stracą notatki i karty zabiegów — z istniejącej listy
+  // wizyt klienta, liczona przy każdym otwarciu okna.
+  useEffect(() => {
+    if (!deleteDialogOpen) return;
+    const controller = new AbortController();
+    setDeleteImpact({ status: "loading" });
+    (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/appointments`, { signal: controller.signal });
+        const data = await res.json();
+        if (!res.ok || !data.success || !Array.isArray(data.data)) {
+          setDeleteImpact({ status: "error" });
+          return;
+        }
+        setDeleteImpact({ status: "ready", count: countAppointmentsLosingNotes(data.data as AppointmentData[]) });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setDeleteImpact({ status: "error" });
+      }
+    })();
+    return () => controller.abort();
+  }, [deleteDialogOpen, clientId]);
 
   const handleDeleteClient = async () => {
     if (!deletePassword.trim()) {
@@ -64,6 +117,7 @@ export function ClientProfileHeader({
 
     setDeleting(true);
     setDeleteError("");
+    setDeleteBlockers(null);
 
     try {
       const res = await mutationFetch(`/api/clients/${clientId}`, {
@@ -81,7 +135,12 @@ export function ClientProfileHeader({
         setDeleteDialogOpen(false);
         router.replace("/dashboard/clients");
       } else {
-        if (res.status === 403) {
+        const blockers = res.status === 409 ? blockersFromBody(data) : null;
+        if (blockers) {
+          setDeleteBlockers(blockers);
+        } else if (res.status === 503) {
+          setDeleteError(RETRY_MESSAGE);
+        } else if (res.status === 403) {
           setDeleteError("Nieprawidlowe haslo. Sprobuj ponownie.");
         } else {
           setDeleteError(data.error || "Nie udalo sie usunac klienta");
@@ -97,6 +156,7 @@ export function ClientProfileHeader({
   const openDeleteDialog = () => {
     setDeletePassword("");
     setDeleteError("");
+    setDeleteBlockers(null);
     setDeleteDialogOpen(true);
   };
 
@@ -162,6 +222,47 @@ export function ClientProfileHeader({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
+            <div className="text-sm text-muted-foreground" data-testid="delete-impact">
+              {deleteImpact.status === "loading" && "Sprawdzanie historii wizyt..."}
+              {deleteImpact.status === "error" &&
+                "Nie udało się sprawdzić historii wizyt. Notatki i karty zabiegów tego klienta zostaną usunięte."}
+              {deleteImpact.status === "ready" &&
+                (deleteImpact.count > 0 ? (
+                  <>
+                    Notatki i karty zabiegów znikną z{" "}
+                    <strong data-testid="delete-impact-count">{deleteImpact.count}</strong>{" "}
+                    {deleteImpact.count === 1 ? "wizyty" : "wizyt"}. Terminy, usługi i kwoty zostaną w historii salonu.
+                  </>
+                ) : (
+                  "Żadna wizyta tego klienta nie ma notatek ani kart zabiegów."
+                ))}
+            </div>
+            <p className="text-sm text-muted-foreground" data-testid="delete-impact-reviews">
+              Treść opinii tego klienta i odpowiedź salonu też znikną. Ocena zostanie.
+            </p>
+            {deleteBlockers && (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm"
+                data-testid="delete-blockers"
+              >
+                <p className="font-medium">Najpierw obsłuż wizyty klienta:</p>
+                <ul className="mt-1 list-disc pl-5">
+                  {deleteBlockers.futureAppointments > 0 && (
+                    <li data-testid="delete-blockers-future">
+                      Przyszłe wizyty: {deleteBlockers.futureAppointments}. Odwołaj je w kalendarzu.
+                    </li>
+                  )}
+                  {deleteBlockers.depositsToRefund > 0 && (
+                    <li data-testid="delete-blockers-deposits">
+                      Wpłacone zadatki przy odwołanych wizytach: {deleteBlockers.depositsToRefund}. Zwróć zadatek
+                      klientowi i odznacz wpłatę przy wizycie.
+                    </li>
+                  )}
+                </ul>
+                <p className="mt-1">Potem usuń klienta ponownie.</p>
+              </div>
+            )}
             <div className="grid gap-2">
               <Label htmlFor="delete-password">Twoje haslo</Label>
               <Input

@@ -14,6 +14,8 @@
  *    ai_conversations, reviews, clients (wiersze salonu A) nie ma imienia,
  *    nazwiska, telefonu ani e-maila wartownika; kolumny z `information_schema`,
  *    więc nowa kolumna tych typów trafia do sprawdzenia bez zmiany testu;
+ *    Wizyty salonu A nie wskazują już konta portalu klienta
+ *    (`booked_by_user_id`), konto zostaje, wizyty salonu B wskazują je dalej;
  * b) biała lista: liczba wizyt, suma zadatków i rabatów, statusy, pracownik,
  *    usługa i oceny bez zmian; liczniki zwrócone przez funkcję;
  * c) rozdzielenie: wiersze wartownika salonu B są identyczne przed i po,
@@ -23,8 +25,9 @@
  * e) to samo wywołanie na połączeniu testu, które omija RLS: zera i dane A
  *    bez zmian — same jawne warunki `salon_id`, bez pomocy RLS;
  * f) każdy klucz obcy do `clients` i `appointments` z `pg_constraint` ma
- *    przypisaną obsługę w przypiętej mapie; nowa tabela z takim kluczem
- *    wywraca test, dopóki ktoś nie zdecyduje, co z jej danymi.
+ *    przypisaną obsługę i akcję przy usunięciu (`confdeltype`) w przypiętej
+ *    mapie; nowa tabela z takim kluczem albo zmiana akcji klucza wywraca test,
+ *    dopóki ktoś nie zdecyduje, co z danymi.
  *
  * Mocki: `@/lib/db` → pula testu, logger. Dane: użytkownicy `it-t3-anon-…`;
  * reszta kaskadą z salonów w `afterAll`. Dane kontaktowe w domenie example.invalid.
@@ -32,7 +35,7 @@
  * Wymaga bazy po `pnpm db:migrate` (RLS, rola aplikacji).
  */
 import { randomInt, randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   aiConversations,
@@ -69,7 +72,9 @@ vi.mock("@/lib/logger", () => ({
 const RUN = randomUUID().slice(0, 8);
 const OWNER_A = `it-t3-anon-a-${RUN}`;
 const OWNER_B = `it-t3-anon-b-${RUN}`;
-const USERS = [OWNER_A, OWNER_B];
+/** Konto portalu klienta, z którego zarezerwowano wizyty w obu salonach. */
+const PORTAL_USER = `it-t3-anon-p-${RUN}`;
+const USERS = [OWNER_A, OWNER_B, PORTAL_USER];
 
 /** Wartownik: wartości, których nie ma nigdzie indziej w bazie. */
 const SENTINEL = {
@@ -101,27 +106,38 @@ const SCANNED_TABLES = [
  * - billing: dokumenty rozliczeniowe przechowywane z przepisów podatkowych;
  * - deposit: płatności i historia zadatku, obsługiwane osobno;
  * - noClientText: tabela bez danych osobowych klienta (kwoty, ilości).
+ *
+ * `onDelete` to przypięta akcja klucza (`pg_constraint.confdeltype`:
+ * `c` = CASCADE, `n` = SET NULL). Etykieta bywa prawdziwa tylko dzięki tej
+ * akcji: „cascade” przy `client_id` wymaga `c`, a „anonymized” przy
+ * `client_id` wymaga `n` (wiersz zostaje, traci tylko powiązanie). Zmiana akcji
+ * w migracji wywraca test, dopóki ktoś nie potwierdzi, że etykieta dalej pasuje.
+ * Wpisy przy `appointment_id` działają przy usunięciu WIZYTY, nie kartoteki
+ * (kartoteka wizyt nie usuwa), więc etykieta wynika tam z innego klucza.
  */
-const CLIENT_FK_HANDLING: Record<string, "anonymized" | "cascade" | "billing" | "deposit" | "noClientText"> = {
-  "appointments(client_id)": "anonymized",
-  "notifications(client_id)": "anonymized",
-  "ai_conversations(client_id)": "anonymized",
-  "reviews(client_id)": "anonymized",
-  "reviews(appointment_id)": "anonymized",
-  "treatment_history(appointment_id)": "anonymized",
-  "appointment_materials(appointment_id)": "anonymized",
-  "waiting_list(client_id)": "cascade",
-  "waiting_list(existing_appointment_id)": "cascade",
-  "loyalty_points(client_id)": "cascade",
-  "loyalty_transactions(appointment_id)": "cascade",
-  "marketing_consents(client_id)": "cascade",
-  "invoices(client_id)": "billing",
-  "invoices(appointment_id)": "billing",
-  "fiscal_receipts(appointment_id)": "billing",
-  "deposit_payments(appointment_id)": "deposit",
-  "deposit_status_events(appointment_id,salon_id)": "deposit",
-  "employee_commissions(appointment_id)": "noClientText",
-  "product_usage(appointment_id)": "noClientText",
+type FkHandling = "anonymized" | "cascade" | "billing" | "deposit" | "noClientText";
+const CLIENT_FK_HANDLING: Record<string, { handling: FkHandling; onDelete: "c" | "n" }> = {
+  "appointments(client_id)": { handling: "anonymized", onDelete: "n" },
+  "notifications(client_id)": { handling: "anonymized", onDelete: "n" },
+  "ai_conversations(client_id)": { handling: "anonymized", onDelete: "n" },
+  "reviews(client_id)": { handling: "anonymized", onDelete: "n" },
+  "reviews(appointment_id)": { handling: "anonymized", onDelete: "n" },
+  "treatment_history(appointment_id)": { handling: "anonymized", onDelete: "c" },
+  "appointment_materials(appointment_id)": { handling: "anonymized", onDelete: "c" },
+  "waiting_list(client_id)": { handling: "cascade", onDelete: "c" },
+  // Wiersz znika kaskadą po `waiting_list(client_id)`.
+  "waiting_list(existing_appointment_id)": { handling: "cascade", onDelete: "n" },
+  "loyalty_points(client_id)": { handling: "cascade", onDelete: "c" },
+  // Wiersz znika kaskadą z `loyalty_points` (punkty klienta).
+  "loyalty_transactions(appointment_id)": { handling: "cascade", onDelete: "n" },
+  "marketing_consents(client_id)": { handling: "cascade", onDelete: "c" },
+  "invoices(client_id)": { handling: "billing", onDelete: "n" },
+  "invoices(appointment_id)": { handling: "billing", onDelete: "n" },
+  "fiscal_receipts(appointment_id)": { handling: "billing", onDelete: "c" },
+  "deposit_payments(appointment_id)": { handling: "deposit", onDelete: "c" },
+  "deposit_status_events(appointment_id,salon_id)": { handling: "deposit", onDelete: "c" },
+  "employee_commissions(appointment_id)": { handling: "noClientText", onDelete: "c" },
+  "product_usage(appointment_id)": { handling: "noClientText", onDelete: "c" },
 };
 
 type SalonFixture = {
@@ -192,6 +208,7 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
         startTime: new Date(base),
         endTime: new Date(base + hour),
         status: "completed",
+        bookedByUserId: PORTAL_USER,
         notes: `Dzwonic: ${CONTACT}`,
         depositAmount: "45.00",
         depositPaid: true,
@@ -208,6 +225,7 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
         startTime: new Date(base + 24 * hour),
         endTime: new Date(base + 25 * hour),
         status: "cancelled",
+        bookedByUserId: PORTAL_USER,
         notes: `Odwolala ${SENTINEL.firstName}`,
         depositAmount: "30.00",
         depositPaid: false,
@@ -477,26 +495,36 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
     expect(await salonSnapshot(fx.a)).toEqual(before);
   });
 
-  it("f) każdy klucz obcy do clients i appointments ma przypisaną obsługę", async () => {
-    const rows = await h!.observer<{ fk: string }[]>`
-      select c.conrelid::regclass::text || '(' || string_agg(a.attname, ',' order by k.ord) || ')' as fk
+  it("f) każdy klucz obcy do clients i appointments ma przypisaną obsługę i przypiętą akcję przy usunięciu", async () => {
+    const rows = await h!.observer<{ fk: string; on_delete: string }[]>`
+      select c.conrelid::regclass::text || '(' || string_agg(a.attname, ',' order by k.ord) || ')' as fk,
+             c.confdeltype::text as on_delete
       from pg_constraint c
       cross join lateral unnest(c.conkey) with ordinality as k(attnum, ord)
       join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
       where c.contype = 'f'
         and c.confrelid in ('public.clients'::regclass, 'public.appointments'::regclass)
         and c.connamespace = 'public'::regnamespace
-      group by c.oid, c.conrelid
+      group by c.oid, c.conrelid, c.confdeltype
       order by 1
     `;
     const found = rows.map((r) => r.fk).sort();
     expect(found, "klucz obcy bez decyzji w CLIENT_FK_HANDLING (albo wpis mapy bez klucza)").toEqual(
       Object.keys(CLIENT_FK_HANDLING).sort()
     );
-    for (const [fk, handling] of Object.entries(CLIENT_FK_HANDLING)) {
-      if (handling !== "anonymized") continue;
+    const foundOnDelete = Object.fromEntries(rows.map((r) => [r.fk, r.on_delete]));
+    const pinnedOnDelete = Object.fromEntries(
+      Object.entries(CLIENT_FK_HANDLING).map(([fk, entry]) => [fk, entry.onDelete])
+    );
+    expect(foundOnDelete, "akcja ON DELETE klucza inna niż przypięta w CLIENT_FK_HANDLING").toEqual(pinnedOnDelete);
+    for (const [fk, { handling, onDelete }] of Object.entries(CLIENT_FK_HANDLING)) {
       const table = fk.slice(0, fk.indexOf("("));
-      expect(SCANNED_TABLES as readonly string[], `${fk}: tabela anonimizowana poza skanem`).toContain(table);
+      if (handling === "anonymized") {
+        expect(SCANNED_TABLES as readonly string[], `${fk}: tabela anonimizowana poza skanem`).toContain(table);
+      }
+      // Przy kluczu do kartoteki etykieta zależy wprost od akcji klucza.
+      if (fk.endsWith("(client_id)") && handling === "cascade") expect(onDelete, fk).toBe("c");
+      if (fk.endsWith("(client_id)") && handling === "anonymized") expect(onDelete, fk).toBe("n");
     }
   });
 
@@ -533,6 +561,20 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
       .where(eq(notifications.salonId, fx.a.salonId));
     expect(messages).toHaveLength(2);
     expect(messages.every((m) => m.message === REMOVED_MESSAGE_PLACEHOLDER)).toBe(true);
+
+    // a') żadna wizyta salonu A nie wskazuje już konta portalu klienta; samo
+    // konto zostaje, a wizyty salonu B dalej je wskazują.
+    const bookedInA = await h!.db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.salonId, fx.a.salonId), eq(appointments.bookedByUserId, PORTAL_USER)));
+    expect(bookedInA).toEqual([]);
+    const bookedInB = await h!.db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.salonId, fx.b.salonId), eq(appointments.bookedByUserId, PORTAL_USER)));
+    expect(bookedInB).toHaveLength(2);
+    expect(await h!.db.select({ id: user.id }).from(user).where(eq(user.id, PORTAL_USER))).toHaveLength(1);
 
     // b) biała lista: wizyty, kwoty, statusy, pracownik, usługa, oceny
     const whitelistAfter = await appointmentWhitelist(fx.a.appointmentIds);

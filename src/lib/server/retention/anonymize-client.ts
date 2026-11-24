@@ -9,7 +9,8 @@
  * Zostaje (biała lista): data i czas wizyty, usługa, wariant, pracownik,
  * status, kwoty (cena, rabat, zadatek i jego status), ocena opinii.
  * Znika (NULL albo stały tekst): wolny tekst i dane kontaktowe powiązane
- * z klientem przez `client_id` albo przez jego wizyty.
+ * z klientem przez `client_id` albo przez jego wizyty, a także wskazanie
+ * konta portalu, z którego zarezerwowano wizytę (`booked_by_user_id`).
  *
  * Poza zakresem z założenia:
  * - faktury i paragony fiskalne (tabela faktur i tabela paragonów) —
@@ -29,7 +30,7 @@
  * transakcji wołającego (`SET LOCAL`, `FOR UPDATE`), nie tylko do powrotu
  * z funkcji — także dla jego późniejszego `DELETE clients`.
  */
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
 import {
   aiConversations,
   appointmentMaterials,
@@ -70,22 +71,101 @@ const ZERO_COUNTS: ClientAnonymizationCounts = {
   reviews: 0,
 };
 
+/** Status wizyty odwołanej. */
+const CANCELLED_STATUS = "cancelled";
+
+/** Wizyty klienta, które blokują usunięcie kartoteki. */
+export type ClientRemovalBlockers = {
+  /** Wizyty z terminem w przyszłości i statusem innym niż odwołana. */
+  futureAppointments: number;
+  /** Wizyty odwołane z wpłaconym zadatkiem (`deposit_paid = true`). */
+  depositsToRefund: number;
+};
+
 /**
- * Zeruje dane osobowe klienta w tabelach powiązanych z jego kartoteką.
- *
- * Blokady, zanim padnie pierwszy `UPDATE`:
- * 1. wiersz klienta `FOR UPDATE` — chroni tabele z `client_id`
+ * Blokady przed usunięciem kartoteki, w tej kolejności:
+ * 1. `SET LOCAL lock_timeout`;
+ * 2. wiersz klienta `FOR UPDATE` — chroni tabele z `client_id`
  *    (`appointments`, `notifications`, `ai_conversations`, `reviews`):
  *    wstawienie albo przepięcie wiersza na tego klienta sprawdza klucz obcy
  *    blokadą `FOR KEY SHARE` na kliencie i czeka do końca transakcji;
- * 2. wizyty klienta w tym salonie `FOR UPDATE` — chroni tabele powiązane
+ * 3. wizyty klienta w tym salonie `FOR UPDATE` — chroni tabele powiązane
  *    tylko przez `appointment_id` (`treatment_history`,
  *    `appointment_materials`, `reviews` bez `client_id`): ich wstawienie bierze
  *    `FOR KEY SHARE` na wizycie, a ta wyklucza się z `FOR UPDATE`. Sam
- *    `UPDATE appointments` niżej nie wystarczy — zmienia kolumny niekluczowe,
+ *    `UPDATE appointments` nie wystarczy — zmienia kolumny niekluczowe,
  *    więc bierze tylko `FOR NO KEY UPDATE`, zgodne z `FOR KEY SHARE`.
  * Obie blokady czekają najwyżej `LOCK_TIMEOUT`; po nim Postgres zgłasza
  * 55P03 i transakcja wołającego się wycofuje.
+ *
+ * Ponowne wywołanie w tej samej transakcji niczego nie zmienia (blokady już
+ * należą do niej), więc wołający może zablokować, sprawdzić warunki usunięcia
+ * i dopiero potem wywołać `anonymizeClientData`.
+ *
+ * @returns `false`, gdy klienta nie ma w `salonId` — wtedy bez blokady wizyt.
+ */
+export async function lockClientForRemoval(tx: DbTx, salonId: string, clientId: string): Promise<boolean> {
+  await tx.execute(sql.raw(`set local lock_timeout = '${LOCK_TIMEOUT}'`));
+
+  const locked = await tx
+    .select({ id: clients.id })
+    .from(clients)
+    .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
+    .for("update");
+  if (locked.length === 0) return false;
+
+  await tx
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId)))
+    .for("update");
+  return true;
+}
+
+/**
+ * Liczy wizyty klienta, które blokują usunięcie kartoteki:
+ * - przyszłe i nieodwołane — po usunięciu klient przyszedłby na termin bez
+ *   kontaktu i bez wiadomości o odwołaniu;
+ * - odwołane z wpłaconym zadatkiem — zwrot wymaga kontaktu z klientem.
+ * Zadatek przy wizycie zakończonej albo nieobecności nie blokuje: jest
+ * rozliczony albo przepadł.
+ *
+ * Wołać po `lockClientForRemoval` w tej samej transakcji: zbiór wizyt
+ * klienta jest wtedy stały, więc równoległa rezerwacja nie wejdzie między
+ * liczenie a usunięcie. „Teraz” to czas aplikacji przekazany tak samo, jak
+ * aplikacja zapisuje terminy (kolumna bez strefy, wartości w UTC), a nie
+ * `now()` bazy, które zależałoby od strefy sesji.
+ */
+export async function countClientRemovalBlockers(
+  tx: DbTx,
+  salonId: string,
+  clientId: string,
+  now: Date = new Date()
+): Promise<ClientRemovalBlockers> {
+  const isUpcoming = and(gt(appointments.startTime, now), ne(appointments.status, CANCELLED_STATUS));
+  const isDepositToRefund = and(eq(appointments.status, CANCELLED_STATUS), eq(appointments.depositPaid, true));
+  const [row] = await tx
+    .select({
+      futureAppointments: sql<number>`(count(*) filter (where ${isUpcoming}))::int`,
+      depositsToRefund: sql<number>`(count(*) filter (where ${isDepositToRefund}))::int`,
+    })
+    .from(appointments)
+    .where(and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId)));
+  return {
+    futureAppointments: Number(row?.futureAppointments ?? 0),
+    depositsToRefund: Number(row?.depositsToRefund ?? 0),
+  };
+}
+
+/**
+ * Zeruje dane osobowe klienta w tabelach powiązanych z jego kartoteką.
+ *
+ * Zanim padnie pierwszy `UPDATE`, bierze blokady z `lockClientForRemoval`
+ * (opis, która blokada chroni które tabele, jest tam).
+ *
+ * Wizyty klienta tracą też `booked_by_user_id`: inaczej wizyta dalej
+ * wskazywałaby konto portalu klienta (imię i e-mail), a klient widziałby ją
+ * w „Moich wizytach”. Samo konto portalu zostaje nietknięte.
  *
  * Klient spoza `salonId` (albo nieistniejący) → nic się nie zmienia, wynik
  * z samymi zerami. Wołający rozpoznaje brak klienta wcześniej (404).
@@ -101,14 +181,7 @@ export async function anonymizeClientData(
     throw new Error("anonymizeClientData: salonId i clientId wymagane");
   }
 
-  await tx.execute(sql.raw(`set local lock_timeout = '${LOCK_TIMEOUT}'`));
-
-  const locked = await tx
-    .select({ id: clients.id })
-    .from(clients)
-    .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
-    .for("update");
-  if (locked.length === 0) {
+  if (!(await lockClientForRemoval(tx, salonId, clientId))) {
     return { ...ZERO_COUNTS };
   }
 
@@ -116,9 +189,6 @@ export async function anonymizeClientData(
     eq(appointments.clientId, clientId),
     eq(appointments.salonId, salonId)
   );
-
-  // Pełna blokada wizyt klienta (patrz JSDoc, punkt 2).
-  await tx.select({ id: appointments.id }).from(appointments).where(isClientAppointment).for("update");
 
   // Wizyty klienta w tym salonie — źródło dla tabel bez własnego `salon_id`.
   const clientAppointmentIds = tx
@@ -142,7 +212,7 @@ export async function anonymizeClientData(
 
   const appointmentRows = await tx
     .update(appointments)
-    .set({ guestName: null, guestPhone: null, guestEmail: null, notes: null })
+    .set({ guestName: null, guestPhone: null, guestEmail: null, notes: null, bookedByUserId: null })
     .where(isClientAppointment)
     .returning({ id: appointments.id });
 
