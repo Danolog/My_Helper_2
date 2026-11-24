@@ -66,7 +66,7 @@ const LISTED_ROUTE_WITH_ID = listedFile("LISTED_ROUTE_WITH_ID", (f) => f.include
  * per partia. Partia #193 usuwa swoje pliki ze SWOJEJ tablicy w
  * eslint.db-isolation.mjs I stąd w tym samym PR. Dopisanie pozycji albo
  * przeniesienie pliku do innej tablicy bez zmiany tutaj = czerwony test;
- * przeniesienie między partiami = decyzja CTO, osobny commit.
+ * przeniesienie między partiami = decyzja z recenzji, osobny commit.
  */
 const BASELINE: Record<string, readonly string[]> = {
   // P0b (#193): wszystkie 7 pozycji zdjęte — zapytania w src/lib/server/system/**.

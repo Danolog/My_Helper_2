@@ -19,7 +19,7 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // P2 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej ?salonId=<cudzy>
+    // P2 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej ?salonId=<cudzy>
     // listował albumy galerii dowolnego salonu. Query tylko porównywane (inne =>
     // 403), brak => salon sesji. Role jak w galerii (POST /api/gallery,
     // ROUTE_ROLE_MAP /dashboard/gallery): właściciel i pracownik, recepcja z
@@ -73,7 +73,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create album",
   },
   async ({ body }) => {
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
     // pozwalał każdemu zalogowanemu kontu założyć album w cudzym salonie.
     // body.salonId tylko porównywany (inny => 403).
     const guard = await requireSalonStaff({

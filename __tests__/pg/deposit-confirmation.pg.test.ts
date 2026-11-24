@@ -1,6 +1,6 @@
 /**
  * `confirmDepositPayment()` na PRAWDZIWYM Postgresie (#83 cz. 1; luka z werdyktu
- * Ethana na #80: ścieżkę „zadatek opłacony” testujemy tu, nie przez otwarcie
+ * z recenzji na #80: ścieżkę „zadatek opłacony” testujemy tu, nie przez otwarcie
  * `/api/deposits/confirm` na production).
  *
  * - Przejście statusu: pending → succeeded (paidAt, payment_intent), wizyta

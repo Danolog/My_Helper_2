@@ -1,5 +1,5 @@
 /**
- * K-1 (warunek Olivera): webhook Stripe bez STRIPE_WEBHOOK_SECRET odrzuca
+ * K-1 (warunek z decyzji produktowej): webhook Stripe bez STRIPE_WEBHOOK_SECRET odrzuca
  * KAŻDE żądanie (fail-closed). Na Cloud Run sekret `stripe-webhook-secret`
  * jest opcjonalny: bez wersji run-deploy.sh go nie mapuje, więc zmiennej
  * w usłudze po prostu nie ma.

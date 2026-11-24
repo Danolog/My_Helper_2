@@ -1,5 +1,5 @@
 /**
- * Przypomnienia SMS a numery testowe i dane osobowe w logach (#75, uwagi Ryana z #74).
+ * Przypomnienia SMS a numery testowe i dane osobowe w logach (#75, uwagi z audytu bezpieczeństwa z #74).
  *
  * - POST /api/reminders/appointment: wizyta klienta z numerem testowym jest
  *   oznaczana jako obsłużona (reminderSentAt), choć SMS nie wychodzi.

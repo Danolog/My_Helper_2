@@ -1,5 +1,5 @@
 /**
- * Bramka przed `drizzle-kit push` (`pnpm db:push`, `pnpm db:dev`; #188, decyzja Olivera D2).
+ * Bramka przed `drizzle-kit push` (`pnpm db:push`, `pnpm db:dev`; #188, decyzja produktowa D2).
  *
  * `src/lib/schema.ts` nie zna polityk RLS z migracji 0005 ani EXCLUDE z 0009.
  * Push na bazie zbudowanej migracjami „wyrównuje” ją do schema.ts: zmierzone
@@ -66,7 +66,7 @@ const defaultConnect = (url: string): GateSql =>
  * Cała bramka. Przed połączeniem ta sama odmowa parametrów zapytania co w
  * db:reset (`db-url-guard`): bramka łączy się przez postgres.js, a push przez
  * sterownik pg, który bierze host z `?host=` — bez tej odmowy bramka mogłaby
- * ocenić pustą bazę A, a push zdjąć RLS z bazy B (uwaga Leo do ff8d306).
+ * ocenić pustą bazę A, a push zdjąć RLS z bazy B (uwaga z recenzji do ff8d306).
  */
 export async function pushGateMain(
   env: Record<string, string | undefined>,

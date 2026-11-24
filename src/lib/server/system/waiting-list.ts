@@ -1,5 +1,5 @@
 /**
- * Wyjście systemowe (#193 P5a-1, decyzja CTO 4): rozwiązanie tokenu oferty z
+ * Wyjście systemowe (#193 P5a-1, decyzja z recenzji 4): rozwiązanie tokenu oferty z
  * listy oczekujących na wpis i salon. Klient akceptuje/odrzuca termin tokenem,
  * bez sesji salonu, więc salon trzeba ustalić przed wejściem w `forSalon`.
  *

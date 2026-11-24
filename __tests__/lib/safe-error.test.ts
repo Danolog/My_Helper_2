@@ -129,7 +129,7 @@ describe("toSafeErrorMeta — błąd parsowania JSON", () => {
   });
 });
 
-describe("toErrorIdentity (N1, Ryan #62 — catch webhooka Stripe)", () => {
+describe("toErrorIdentity (N1, audyt bezpieczeństwa #62 — catch webhooka Stripe)", () => {
   it("DrizzleQueryError → tylko nazwa i kod z cause; bez message, stack, zapytania i parametrów", () => {
     const identity = toErrorIdentity(drizzleError());
     expect(identity).toEqual({ errorName: "DrizzleQueryError", errorCode: "23505" });

@@ -1,5 +1,5 @@
 /**
- * POST /api/deposits/create-session: referencje z body muszą należeć do salonu (P1, Ryan).
+ * POST /api/deposits/create-session: referencje z body muszą należeć do salonu (P1, audyt bezpieczeństwa).
  *
  * Przed naprawą:
  * - employeeId nie był sprawdzany, więc obcy pracownik (z innego salonu) dostawał

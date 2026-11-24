@@ -1,5 +1,5 @@
 /**
- * POST /api/employees — izolacja salonu (P1 z przeglądu Ryana).
+ * POST /api/employees — izolacja salonu (P1 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą trasa brała salonId z body i wołała forSalon(body.salonId):
  * każde zalogowane konto (także salonu A albo klient) dodawało pracownika

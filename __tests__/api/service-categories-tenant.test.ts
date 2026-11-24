@@ -1,5 +1,5 @@
 /**
- * POST /api/service-categories — izolacja salonu (P1 z przeglądu Ryana).
+ * POST /api/service-categories — izolacja salonu (P1 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą forSalon(body.salonId) — kategoria w cudzym salonie z
  * samym logowaniem. Teraz salon z sesji; tylko właściciel (spójnie z

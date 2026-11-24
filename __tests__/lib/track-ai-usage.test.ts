@@ -60,7 +60,7 @@ describe("trackAIUsage", () => {
     );
   });
 
-  it("zapis wideo nie kompiluje się (B4/B5, Ryan #114 V1–V2) — wywołania tylko sprawdzane przez tsc", () => {
+  it("zapis wideo nie kompiluje się (B4/B5, audyt bezpieczeństwa #114 V1–V2) — wywołania tylko sprawdzane przez tsc", () => {
     // Funkcja nie jest wołana: liczy się `pnpm typecheck`. Gdy ktoś poszerzy
     // typ zapisu, dyrektywy @ts-expect-error staną się zbędne i tsc padnie.
     const neverCalled = () => {
@@ -76,7 +76,7 @@ describe("trackAIUsage", () => {
     expect(mockValues).not.toHaveBeenCalled();
   });
 
-  describe("allowlista w czasie wykonania (Ryan #117, T1–T3, J2)", () => {
+  describe("allowlista w czasie wykonania (audyt bezpieczeństwa #117, T1–T3, J2)", () => {
     // Wartości dochodzą tu tak, jak przez `as any` / `as never` /
     // `// @ts-ignore` albo z pliku .js/.mjs — typ ich nie zatrzymuje.
     const cast = <T>(v: unknown) => v as T;
@@ -98,7 +98,7 @@ describe("trackAIUsage", () => {
       const [message, context] = vi.mocked(logger.error).mock.calls[0]!;
       expect(message).toBe("[AI] Rejected usage record outside the allowlist");
       // Dokładnie salon i odrzucone wartości — bez feature i metadata żądania
-      // (Leo #117: M4 log bez type/provider, M5 log z metadata).
+      // (recenzja #117: M4 log bez type/provider, M5 log z metadata).
       expect(context).toEqual({
         salonId: "salon-1",
         type: String(options.type ?? "text"),

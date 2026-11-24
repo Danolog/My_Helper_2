@@ -249,7 +249,7 @@ describe("db:reset — plan (bez połączenia)", () => {
     expect(planReset([], LOCAL, { VERCEL_ENV: "production" }).ok).toBe(false);
   });
 
-  // B2 (Ethan): sterownik pg w drizzle-kit bierze host z `?host=`, a
+  // B2 (recenzja): sterownik pg w drizzle-kit bierze host z `?host=`, a
   // bezpieczniki oceniają adres jak postgres.js — localhost przeszedłby, pg
   // połączyłby się z Neonem.
   it.each([
@@ -291,7 +291,7 @@ describe("db:reset — plan (bez połączenia)", () => {
   });
 });
 
-describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", () => {
+describe("db:reset — przebieg (L1, recenzja): każdy krok na resetowanej bazie", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -339,7 +339,7 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  // L8 (Leo): druga warstwa po kontroli hosta — serwer z ustawieniami neon.*
+  // L8 (recenzja): druga warstwa po kontroli hosta — serwer z ustawieniami neon.*
   // albo sonda bez wyniku → odmowa przed DROP.
   it.each([
     ["serwer z ustawieniami neon.*", [{ database: "postgres", neon_settings: 1 }]],
@@ -355,7 +355,7 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     expect(err.mock.calls.flat().join(" ")).toContain("serwer ma ustawienia neon.*");
   });
 
-  // Ethan do c16a7fd: checkSeedClientOptions na kliencie admina stoi przed sondą i DROP.
+  // recenzja do c16a7fd: checkSeedClientOptions na kliencie admina stoi przed sondą i DROP.
   it.each([
     ["host Neon w opcjach klienta", { host: ["ep-x.eu-central-1.aws.neon.tech"], path: undefined }],
     ["host spoza localhost", { host: ["db.example.com"], path: undefined }],
@@ -427,7 +427,7 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
     expect(unsafe).toHaveBeenCalledWith(PUSH_GATE_SQL);
   });
 
-  describe("adres bramki = adres pusha (uwaga Leo do ff8d306: ?host= w sterowniku pg)", () => {
+  describe("adres bramki = adres pusha (uwaga z recenzji do ff8d306: ?host= w sterowniku pg)", () => {
     afterEach(() => {
       vi.restoreAllMocks();
     });
@@ -466,7 +466,7 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
       expect(await pushGateMain({ POSTGRES_URL: LOCAL }, connect)).toBe(1);
     });
 
-    // Ethan do c16a7fd: gałąź błędu — zapytanie odrzucone (np. brak połączenia).
+    // recenzja do c16a7fd: gałąź błędu — zapytanie odrzucone (np. brak połączenia).
     it.each([
       ["błąd z kodem", "ECONNREFUSED", " (ECONNREFUSED)"],
       ["błąd bez kodu", undefined, ""],

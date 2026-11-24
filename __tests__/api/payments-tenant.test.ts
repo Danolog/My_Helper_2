@@ -1,5 +1,5 @@
 /**
- * GET /api/payments — izolacja salonu (P0 z przeglądu Ryana).
+ * GET /api/payments — izolacja salonu (P0 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą trasa brała salonId z query i od razu forSalon(salonId):
  * każde zalogowane konto czytało zadatki (z nazwiskami klientów) i płatności

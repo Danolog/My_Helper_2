@@ -75,7 +75,7 @@ describe("buildCsp — produkcja", () => {
     expect(csp).not.toContain("'unsafe-eval'");
   });
 
-  it("script-src: self, nonce, strict-dynamic — bez hostów (C3, ustalenie Ryana P3)", () => {
+  it("script-src: self, nonce, strict-dynamic — bez hostów (C3, ustalenie z audytu bezpieczeństwa P3)", () => {
     expect(d.get("script-src")).toBe(`'self' 'nonce-${NONCE}' 'strict-dynamic'`);
   });
 

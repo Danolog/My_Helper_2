@@ -29,7 +29,7 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // P0 (przeglad Ryana): salon z sesji, query salonId tylko porownywany;
+    // P0 (przeglad bezpieczeństwa): salon z sesji, query salonId tylko porownywany;
     // kody rabatowe jak promocje — wlasciciel albo grant "promotions".
     const guard = await requireSalonStaff({
       feature: "promotions",
@@ -80,7 +80,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create promo code",
   },
   async ({ body }) => {
-    // P0 (przeglad Ryana): kod powstaje WYLACZNIE w salonie z sesji —
+    // P0 (przeglad bezpieczeństwa): kod powstaje WYLACZNIE w salonie z sesji —
     // body.salonId tylko porownywany (inny => 403, zero zapisu).
     const guard = await requireSalonStaff({
       feature: "promotions",
@@ -138,7 +138,7 @@ export const POST = withApiHandler(
         .limit(1)
       );
 
-      // Promocja zamrożonego typu nie istnieje dla panelu (B2.1, Ryan N1):
+      // Promocja zamrożonego typu nie istnieje dla panelu (B2.1, audyt bezpieczeństwa N1):
       // ta sama odpowiedź co brak promocji — kod nie dawałby rabatu.
       if (!promotion || isPromotionTypeFrozen(promotion.type)) {
         return NextResponse.json(

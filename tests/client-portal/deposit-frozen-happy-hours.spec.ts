@@ -178,7 +178,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
   // i telefon w formacie placeholdera (ze spacjami). Do #65 trasa odrzucała je
   // 400 "Validation failed" — kazda rezerwacja z zadatkiem z portalu.
   //
-  // Zakres (Ethan, #61): ten test dowodzi, ze formularz wysyla poprawny
+  // Zakres (recenzja, #61): ten test dowodzi, ze formularz wysyla poprawny
   // ksztalt body i serwer go przyjmuje. NIE dowodzi, ze serwer sam liczy
   // kwote — formularz wysyla 60 i serwer odpowiada 60. Odrzucenie kwoty
   // z rabatem happy hours (30 PLN) dowodzi test wyzej, ale na trasie

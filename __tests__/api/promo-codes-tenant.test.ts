@@ -1,5 +1,5 @@
 /**
- * GET/POST /api/promo-codes — izolacja salonu (P0 z przeglądu Ryana).
+ * GET/POST /api/promo-codes — izolacja salonu (P0 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą obie metody brały salonId z query/body i od razu
  * forSalon(salonId): każde zalogowane konto listowało kody dowolnego salonu

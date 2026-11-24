@@ -1,5 +1,5 @@
 /**
- * #193 P5a-1: push.ts bez surowej puli żądań (decyzje CTO 3d i 3d-KOREKTA).
+ * #193 P5a-1: push.ts bez surowej puli żądań (decyzje z recenzji 3d i 3d-KOREKTA).
  *
  * - Subskrypcje użytkownika: `getPushSubscriptionsForUser(userId)` z rejestru
  *   `@/lib/server/system` (tylko kolumny potrzebne do wysyłki).

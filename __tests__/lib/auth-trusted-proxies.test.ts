@@ -1,7 +1,7 @@
 /**
  * Konfiguracja Better Auth: advanced.ipAddress.trustedProxies czyta TO SAMO
  * źródło co getClientIp (TRUSTED_PROXIES przez getTrustedProxies), a
- * advanced.trustedProxyHeaders zostaje wyłączone (przegląd Ryana #17, b2).
+ * advanced.trustedProxyHeaders zostaje wyłączone (przegląd bezpieczeństwa #17, b2).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 

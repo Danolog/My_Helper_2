@@ -6,7 +6,7 @@ import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
 /**
- * Przynależność identyfikatorów z body do salonu (P1, przegląd Ryana).
+ * Przynależność identyfikatorów z body do salonu (P1, przegląd bezpieczeństwa).
  *
  * Trasy przyjmują `clientId` / `employeeId` / `serviceId` / `categoryId`
  * z żądania. Bez sprawdzenia, że rekord należy do salonu wizyty, można było

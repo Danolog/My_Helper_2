@@ -1,5 +1,5 @@
 /**
- * Promocja zamrożonego typu nie istnieje dla panelu kodów (B2.1, Ryan N1).
+ * Promocja zamrożonego typu nie istnieje dla panelu kodów (B2.1, audyt bezpieczeństwa N1).
  *
  * POST /api/promo-codes i PUT /api/promo-codes/:id: powiązanie kodu z promocją
  * pakietową / 2+1 / happy hours / pierwszej wizyty → 404, ta sama odpowiedź co

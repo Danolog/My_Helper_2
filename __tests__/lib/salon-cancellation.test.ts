@@ -1,6 +1,6 @@
 /**
  * expireCheckoutSessions — wygaszanie sesji Checkout po odwołaniu przez salon.
- * Ryan, P2 (#98): błąd Stripe logowany wyłącznie jako toErrorIdentity
+ * Audyt bezpieczeństwa, P2 (#98): błąd Stripe logowany wyłącznie jako toErrorIdentity
  * (nazwa + kod), bez message/stack — komunikat może nieść dane klienta.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";

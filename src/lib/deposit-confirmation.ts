@@ -25,7 +25,7 @@ export interface ConfirmDepositOptions {
   /**
    * `payment_status` sesji Checkout ze zdarzenia Stripe. Tylko `"paid"`
    * pozwala zapisać wpłatę płatności już `failed` (anulowanie przed wpłatą,
-   * #70; warunek Ethana). Bez tego (np. dev-symulator) `failed` = not_pending.
+   * #70; warunek z recenzji). Bez tego (np. dev-symulator) `failed` = not_pending.
    */
   stripePaymentStatus?: string | undefined;
 }
@@ -66,7 +66,7 @@ const PAYABLE_APPOINTMENT_STATUSES = new Set(["scheduled", "confirmed"]);
  * PRZED wpłatą. Jeśli Stripe mimo to pobrał pieniądze (otwarta sesja,
  * `payment_status === "paid"`), księga musi to pokazać: osobny warunkowy
  * UPDATE `WHERE status = 'failed'` w tej samej transakcji co odczyt wizyty.
- * `refunded` jest końcowe (warunki Ethana, #70).
+ * `refunded` jest końcowe (warunki z recenzji, #70).
  */
 function mayConfirmFailed(options: ConfirmDepositOptions): boolean {
   return options.stripePaymentStatus === "paid";
@@ -260,7 +260,7 @@ export async function confirmDepositPayment(
   const { updatedPayment, updatedAppointment, wasScheduled } = txResult;
 
   // Wizyta `confirmed` przed wpłatą: zadatek zapisany, bez drugiego SMS
-  // „potwierdzono wizytę” (warunek Ethana).
+  // „potwierdzono wizytę” (warunek z recenzji).
   if (!wasScheduled) {
     logger.info("[Deposit] Deposit paid for an already confirmed appointment — no SMS", {
       depositPaymentId,

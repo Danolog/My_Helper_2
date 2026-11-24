@@ -3,7 +3,7 @@
  *
  * web-push robi https.request na host:port z `endpoint` (url.parse). Bez
  * allowlisty dowolne konto kierowało nasz serwer na dowolny host (SSRF, P1 —
- * ocena Ryana na #46, sekcja 2).
+ * ocena z audytu bezpieczeństwa na #46, sekcja 2).
  */
 import { parse as legacyParse } from "node:url";
 import { describe, it, expect, vi, afterEach } from "vitest";

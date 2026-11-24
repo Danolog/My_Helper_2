@@ -27,8 +27,8 @@
  * Kontrakt: PR, który dodaje lub usuwa importera wyjścia, aktualizuje tę migawkę i uzasadnia
  * w opisie, skąd pochodzą `userId`/`salonId`. Dwa poziomy akceptacji:
  * - wyjścia kasujące dane albo nieodwracalnie zmieniające stan wizyty lub płatności w wielu
- *   salonach (osobne asercje „lista DOKŁADNIE”): zmianę akceptują CTO i CRCO;
- * - pozostałe wyjścia: zmianę akceptuje CTO, CRCO do wglądu.
+ *   salonach (osobne asercje „lista DOKŁADNIE”): zmianę akceptują recenzja i przegląd zgodności;
+ * - pozostałe wyjścia: zmianę akceptuje recenzja, przegląd zgodności do wglądu.
  * Zakres: wyłącznie `src/` (bez plików testów).
  */
 import fs from "node:fs";

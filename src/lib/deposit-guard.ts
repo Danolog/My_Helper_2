@@ -49,7 +49,7 @@ export type DepositDecision =
   | { kind: "error" };
 
 /**
- * JEDNA reguła zadatku (#67, kształt Ethana): używa jej strażnik tras bez
+ * JEDNA reguła zadatku (#67, kształt z recenzji): używa jej strażnik tras bez
  * płatności i /api/deposits/create-session. Najpierw `Number.isFinite` —
  * NaN nie jest ani "> 0", ani "≤ 0", więc bez tego wpadałby po cichu do "none".
  */

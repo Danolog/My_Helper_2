@@ -76,7 +76,7 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji. Wcześniej właściciel był
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji. Wcześniej właściciel był
     // zwolniony z kontroli (`ctx.role === "owner" ? ?salonId : ...`) — owner
     // salonu A listował magazyn salonu B. Query tylko porównywane (inne => 403),
     // brak => salon sesji. Dostęp: właściciel albo czasowy grant "products".
@@ -131,7 +131,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create product",
   },
   async ({ body }) => {
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji. Wcześniej warunek
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji. Wcześniej warunek
     // `ctx.role !== "owner" && ...` zwalniał każdego właściciela z porównania
     // salonu — owner salonu A dodawał produkt do salonu B (forSalon(body.salonId)).
     // body.salonId tylko porównywany (inny => 403); właściciel albo grant "products".

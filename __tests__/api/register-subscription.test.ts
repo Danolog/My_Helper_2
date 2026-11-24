@@ -3,7 +3,7 @@
  *
  * Przed poprawką trasa szukała konta po `email` z body (alias `userTable`),
  * potem tworzyła salon dla TAMTEGO konta albo zmieniała `planId` jego
- * istniejącej subskrypcji. Skutki (P1, Ryan):
+ * istniejącej subskrypcji. Skutki (P1, audyt bezpieczeństwa):
  *  (a) konto A z e-mailem B w body zmienia plan subskrypcji salonu B,
  *  (b) konto A przestawia własną subskrypcję na Pro bez płatności,
  *  (c) 404 "User not found" / 200 zdradza, czy konto o danym e-mailu istnieje.

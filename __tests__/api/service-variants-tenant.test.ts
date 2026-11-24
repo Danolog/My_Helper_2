@@ -207,7 +207,7 @@ describe("izolacja salonów przy zapisie wariantów (#125)", () => {
       expect(write?.op).toBe(op);
       const q = whereOf(write?.where);
       // Dokładny tekst: spójnik `and` (nie `or`) i przypisanie parametrów do
-      // kolumn — id wariantu = $1, service_id własnej usługi = $2 (Ryan, Y1–Y3).
+      // kolumn — id wariantu = $1, service_id własnej usługi = $2 (audyt bezpieczeństwa, Y1–Y3).
       expect(q.sql).toBe('("service_variants"."id" = $1 and "service_variants"."service_id" = $2)');
       expect(q.params).toEqual([VARIANT_B, SERVICE]);
       expect(m.insertedValues).toEqual([]);

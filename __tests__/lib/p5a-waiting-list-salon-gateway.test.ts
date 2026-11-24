@@ -1,5 +1,5 @@
 /**
- * #193 P5a-1, decyzja CTO 4: `waiting-list.ts` bez puli `db`.
+ * #193 P5a-1, decyzja z recenzji 4: `waiting-list.ts` bez puli `db`.
  *
  * - `acceptEarlierSlot` / `declineEarlierSlot` (token, bez sesji salonu): salon
  *   ustalany wyłącznie przez wyjście `resolveWaitingListToken(token)`; każdy

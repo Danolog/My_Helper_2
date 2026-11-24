@@ -8,7 +8,7 @@
  *     potem wizyta FOR UPDATE; paymentIntentId zapisywany tylko gdy podany,
  *   - failed: TYLKO gdy Stripe payment_status === "paid" — osobny warunkowy
  *     UPDATE ... WHERE status='failed' w tej samej transakcji; bez tego
- *     (dev-symulator) => not_pending (warunki Ethana, #70),
+ *     (dev-symulator) => not_pending (warunki z recenzji, #70),
  *   - #70: wizyta nie scheduled/confirmed (np. cancelled) => platnosc
  *     succeeded, wizyta NIETYKANA (status i depositPaid), bez SMS, zwrot TEJ
  *     platnosci; nieudany zwrot => logger.error „manual refund”,

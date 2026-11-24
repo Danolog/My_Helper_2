@@ -154,7 +154,7 @@ export async function PUT(
             .limit(1)
         );
 
-        // Promocja zamrożonego typu nie istnieje dla panelu (B2.1, Ryan N1):
+        // Promocja zamrożonego typu nie istnieje dla panelu (B2.1, audyt bezpieczeństwa N1):
         // nowego powiązania nie ma — 404 jak brak promocji. Wyjątek: kod już
         // z nią powiązany (formularz edycji odsyła promotionId zawsze) — bez
         // tego właściciel nie zmieniłby limitu ani daty takiego kodu.

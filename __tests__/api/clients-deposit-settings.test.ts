@@ -1,5 +1,5 @@
 /**
- * GET /api/clients/deposit-settings — P1 (Ryan): IDOR.
+ * GET /api/clients/deposit-settings — P1 (audyt bezpieczeństwa): IDOR.
  *
  * Trasa brala salonId i e-mail z zapytania i wymagala tylko zalogowania, wiec
  * dowolne konto dostawalo imie i nazwisko, clientId i ustawienia zadatku

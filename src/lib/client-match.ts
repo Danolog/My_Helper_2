@@ -8,7 +8,7 @@
 // innym przypadku wynik to „nie znaleziono” (null), a nie błąd.
 //
 // Konta Google mają emailVerified = true (Better Auth ustawia to przy OAuth).
-// Ocena Ryana: https://github.com/Danolog/My_Helper_2/pull/29#issuecomment-6883470917
+// Ocena z audytu bezpieczeństwa: https://github.com/Danolog/My_Helper_2/pull/29#issuecomment-6883470917
 
 export interface SessionUserLike {
   email?: string | null;

@@ -4,7 +4,7 @@
  *   { rating: 1..5, comment: string | null }   // comment: trim() || null
  *
  * Przed poprawką schemat miał `comment: z.string().optional()`, więc ocena
- * bez komentarza (UI wysyła null) kończyła się 400 (Quinn, req-5a).
+ * bez komentarza (UI wysyła null) kończyła się 400 (req-5a).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRequest, parseResponse } from "./helpers";

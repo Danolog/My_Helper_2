@@ -5,7 +5,7 @@
  *  - każdy katalog `src/app/api/cron/*` ma zadanie w skrypcie,
  *  - strefa `Europe/Warsaw`, metoda GET, stan ENABLED|PAUSED,
  *  - zadań z wiadomościami do klientów (notifications) nie ma do R3-C
- *    (Oliver); gdyby wróciły — tylko PAUSED,
+ *    (decyzja produktowa); gdyby wróciły — tylko PAUSED,
  *  - zadanie trasy zamrożonego modułu (`hardOff`, `frozenModuleForApiPath`)
  *    tylko PAUSED — `--resume` odrzuca takie zadanie przed gcloud,
  *  - każde `gcloud` idzie przez tablicę z jawnym `--project`,

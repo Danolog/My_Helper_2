@@ -153,7 +153,7 @@ function fullGuard(url: string, opts: { host: string[]; path: string | false }):
   return checkSeedTarget(url).ok && checkSeedClientOptions(opts).ok;
 }
 
-// B1 z recenzji #56: Leo (6891447141) i Ryan (6891466919).
+// B1 z recenzji #56: recenzja (6891447141) i audyt bezpieczeństwa (6891466919).
 const B1_URLS = [
   "postgresql://u:p@ep-cool-123.eu-central-1.aws.neon.tech,@localhost/db",
   "postgresql://u@db.example.com,x@localhost:5432/db",
@@ -174,7 +174,7 @@ const STRICT_ONLY_URLS = [
 ];
 const STRICT_ONLY_AMBIGUOUS: AmbiguousPart[][] = [["multiple_at"], ["multiple_at"], ["comma"]];
 
-// N1 z ponownej recenzji Ryana (6891756918): postgres.js tnie authority tylko na `[?/]`, nie na `#`.
+// N1 z ponownej recenzji z audytu bezpieczeństwa (6891756918): postgres.js tnie authority tylko na `[?/]`, nie na `#`.
 const N1_URLS = [
   "postgres://u:p@localhost#@ep-x.neon.tech,x/db",
   "postgres://u:p@localhost%23@ep-x.neon.tech,x/db",
@@ -191,7 +191,7 @@ const N1_AMBIGUOUS: AmbiguousPart[][] = [
 ];
 
 describe("N1: # w authority", () => {
-  // Leo (6892163799): zamiast `toContain("#")` dokładna lista niejednoznacznych elementów.
+  // recenzja (6892163799): zamiast `toContain("#")` dokładna lista niejednoznacznych elementów.
   it.each(N1_URLS.map((url, i) => [url, N1_AMBIGUOUS[i]!] as const))(
     "etap URL odrzuca %s z powodu %j",
     (url, parts) => {
@@ -283,7 +283,7 @@ describe("checkSeedClientOptions — hosty wyliczone przez postgres.js", () => {
   });
 });
 
-describe("zgodność guardu z postgres.js (test Leo)", () => {
+describe("zgodność guardu z postgres.js (test z recenzji)", () => {
   const CORPUS = [
     "postgresql://dev_user:dev_password@localhost:5432/pos_dev",
     "postgres://dev_user:dev_password@127.0.0.1:5432/pos_dev",
@@ -414,7 +414,7 @@ describe("kontekst komunikatów (harness: INTEGRATION_POSTGRES_URL zamiast seed/
     const src = readFileSync(join(process.cwd(), "__tests__/pg/pg-harness.ts"), "utf8");
     expect(src).toMatch(/checkSeedTarget\([^)]*HARNESS_GUARD_CONTEXT\)/);
     expect(src).toMatch(/checkSeedClientOptions\(client\.options, HARNESS_GUARD_CONTEXT\)/);
-    // N1 (Ryan): etap 3 obejmuje OBIE pule, nie tylko appClient.
+    // N1 (audyt bezpieczeństwa): etap 3 obejmuje OBIE pule, nie tylko appClient.
     expect(src).toMatch(/verifySeedServerIdentities\(\[appClient, observer\], HARNESS_GUARD_CONTEXT\)/);
   });
 });
@@ -450,7 +450,7 @@ describe("seed-test.ts używa guardu przed połączeniem", () => {
 });
 
 // -------------------------------------------------------
-// P3 po #72 (Ryan): dwa kody bez asercji kodu + sprzątanie pul przy etapie 3
+// P3 po #72 (audyt bezpieczeństwa): dwa kody bez asercji kodu + sprzątanie pul przy etapie 3
 // -------------------------------------------------------
 
 describe("kody invalid_url i client_no_host", () => {

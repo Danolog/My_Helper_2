@@ -7,9 +7,9 @@
  * w `src/lib/schema.ts`): wyłącza RLS i usuwa polityki na 39 tabelach (pomiar
  * #188/#190). Zostaje wtedy samo filtrowanie w kodzie, a nic tego nie zgłasza.
  *
- * Podstawa: parser 0005 Maxa (#188, `scripts/db-schema-guard.ts` w jego drzewie) —
+ * Podstawa: parser migracji 0005 (#188, `scripts/db-schema-guard.ts` w jego drzewie) —
  * te same nazwy eksportów i kształt `RlsRequirement`/`RlsRow`, żeby #188 importował
- * ten moduł zamiast własnej kopii. Zmiany względem tamtej wersji (D3, Oliver):
+ * ten moduł zamiast własnej kopii. Zmiany względem tamtej wersji (D3, decyzja produktowa):
  * - nazwa polityki dla tabel z bloków DO wyprowadzona z TEGO bloku
  *   (`CREATE POLICY <nazwa> ON %I`), nie wpisana w kod;
  * - liczba tabel z `relrowsecurity` w bazie nie mniejsza niż liczba tabel z pliku;

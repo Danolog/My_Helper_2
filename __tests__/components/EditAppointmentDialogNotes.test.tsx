@@ -1,5 +1,5 @@
 /**
- * Dialog edycji wysyła `notes` tylko, gdy się zmieniły (#90, Ethan): wizyta
+ * Dialog edycji wysyła `notes` tylko, gdy się zmieniły (#90, recenzja): wizyta
  * z notatkami ponad limit sprzed #71 musi dać się przesunąć bez 400.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";

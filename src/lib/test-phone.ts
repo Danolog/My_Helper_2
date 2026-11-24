@@ -4,7 +4,7 @@
  *
  * +48 000 … — numer krajowy zaczynający się od 0 nie jest przydzielany
  * abonentom w PL, więc nawet bez blokady nie trafi do realnej osoby
- * (potwierdzenie: Ryan, review PR cleanup E2E).
+ * (potwierdzenie: audyt bezpieczeństwa, review PR cleanup E2E).
  *
  * Czysty moduł bez zależności serwerowych — importują go testy Playwright.
  */

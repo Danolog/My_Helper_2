@@ -43,7 +43,7 @@ type ViewException = { name: string; kind: "v" | "m"; reason: string; acceptedBy
 
 /**
  * ZAMKNIĘTA lista wyjątków (#193). Każda pozycja: nazwa, rodzaj, jednozdaniowe uzasadnienie,
- * akceptacja ról CTO i CRCO oraz numer PR. Dopisanie pozycji = recenzja CTO i CRCO w tym PR.
+ * akceptacja ról recenzji i przeglądu zgodności oraz numer PR. Dopisanie pozycji = recenzja i przegląd zgodności w tym PR.
  */
 const VIEW_EXCEPTIONS: ViewException[] = [];
 
@@ -130,7 +130,7 @@ describe("lista wyjątków widoków: format (#193 P0c-1)", () => {
   /** Pozycja bez pola `pr` (np. z JSON albo po rzutowaniu typu). */
   const noPr = Object.fromEntries(Object.entries(OK).filter(([k]) => k !== "pr")) as unknown as ViewException;
 
-  it("VIEW_EXCEPTIONS: każda pozycja z nazwą, jednozdaniowym uzasadnieniem, akceptacją ról CTO i CRCO i numerem PR", () => {
+  it("VIEW_EXCEPTIONS: każda pozycja z nazwą, jednozdaniowym uzasadnieniem, obiema rolami akceptującymi w acceptedBy i numerem PR", () => {
     expect(exceptionFormatViolations(VIEW_EXCEPTIONS)).toEqual([]);
   });
 

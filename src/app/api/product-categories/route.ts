@@ -16,7 +16,7 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // P2 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej ?salonId=<cudzy>
+    // P2 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej ?salonId=<cudzy>
     // listował kategorie magazynu dowolnego salonu. Query tylko porównywane
     // (inny => 403), brak => salon sesji. Dostęp jak do /api/products:
     // właściciel albo czasowy grant "products".
@@ -65,7 +65,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create product category",
   },
   async ({ body }) => {
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
     // pozwalał każdemu zalogowanemu kontu dodać kategorię w cudzym salonie.
     // body.salonId tylko porównywany (inny => 403); właściciel albo grant "products".
     const guard = await requireSalonStaff({

@@ -341,7 +341,7 @@ describe("resolveClientIp: ostrzeżenie o łańcuchu XFF przy pustej liście", (
 });
 
 // -------------------------------------------------------
-// Parser IPv6 (L2 Leo): formy skrócone, niepoprawne, końcówka IPv4, łańcuch
+// Parser IPv6 (L2 z recenzji): formy skrócone, niepoprawne, końcówka IPv4, łańcuch
 // -------------------------------------------------------
 
 describe("parser IPv6 (przez parseTrustedProxies / isTrustedProxy / selectClientIp)", () => {

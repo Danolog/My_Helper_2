@@ -72,7 +72,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create service category",
   },
   async ({ body }) => {
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
     // pozwalał każdemu zalogowanemu kontu dodać kategorię w cudzym salonie.
     // body.salonId tylko porównywany (inny => 403). Tylko właściciel — jak
     // PUT/DELETE /api/service-categories/[id].

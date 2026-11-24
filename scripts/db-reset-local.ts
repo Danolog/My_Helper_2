@@ -11,7 +11,7 @@
  * 2. `drizzle-kit migrate`; 3. strażnik `scripts/db-schema-guard.ts`.
  * BEZ `drizzle-kit push` po migracjach: schema.ts nie zna polityk RLS z 0005, więc
  * push na zmigrowanej bazie robi 39× DISABLE ROW LEVEL SECURITY i DROP POLICY
- * (pomiar #188, decyzja Olivera). Push jest tylko dla pustej bazy prototypowej.
+ * (pomiar #188, decyzja produktowa). Push jest tylko dla pustej bazy prototypowej.
  *
  * Bezpieczniki:
  * - nazwa bazy wyłącznie z twardej listy `RESET_ALLOWED_DATABASES` (domyślnie
@@ -83,7 +83,7 @@ export function planReset(
 /** Zmienne środowiska przekazywane krokom resetu. */
 export type ResetEnv = Record<string, string | undefined>;
 
-/** Zależności `resetMain` — wstrzykiwane w testach (L1, Leo: bez prawdziwej bazy i procesów). */
+/** Zależności `resetMain` — wstrzykiwane w testach (L1, recenzja: bez prawdziwej bazy i procesów). */
 export interface ResetDeps {
   connect: (url: string) => postgres.Sql;
   spawn: (cmd: string, args: readonly string[], env: ResetEnv) => { status: number | null };
@@ -97,7 +97,7 @@ const defaultDeps: ResetDeps = {
 /**
  * Cały reset. Każdy krok (migrate, strażnik) dostaje POSTGRES_URL = `plan.targetUrl`
  * — NIGDY adres z otoczenia: inaczej reset skasowałby pos_reset_test, a migrował
- * pos_dev (mutant L1, Leo).
+ * pos_dev (mutant L1, recenzja).
  */
 export async function resetMain(
   argv: readonly string[],

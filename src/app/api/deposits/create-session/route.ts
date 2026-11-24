@@ -82,9 +82,9 @@ function stripeErrorFields(error: unknown): {
  * Symulacja płatności (bez klucza Stripe) jest opt-in, nie opt-out:
  * - Na hostingu — Vercel (`VERCEL=1`) albo Cloud Run (`K_SERVICE`), oba
  *   ustawiane przez platformę (lib/hosting, #106) → NIGDY, niezależnie
- *   od NODE_ENV i flagi. Ta bramka stoi PIERWSZA (#84, Ryan): dziś Next
+ *   od NODE_ENV i flagi. Ta bramka stoi PIERWSZA (#84, audyt bezpieczeństwa): dziś Next
  *   wpisuje NODE_ENV=production w build, ale kolejność nie może na tym polegać.
- *   Ustawiona tam flaga jest logowana jako błąd konfiguracji (druga bramka, Ethan).
+ *   Ustawiona tam flaga jest logowana jako błąd konfiguracji (druga bramka, recenzja).
  * - `NODE_ENV=development` (lokalny `pnpm dev`) → dozwolona;
  * - `ALLOW_PAYMENT_SIMULATION=1` → dozwolona. Flaga jest ustawiana wyłącznie
  *   w krokach E2E workflow CI (serwer `pnpm start`, NODE_ENV=production) —
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
     // telefony. Surowe body omijało tę normalizację.
     const parsed = parseBody(depositCreateSessionSchema, body);
     if (!parsed.ok) {
-      // Quinn: front pokazuje `error` w toaście — zamiast ogólnego
+      // Front pokazuje `error` w toaście — zamiast ogólnego
       // "Validation failed" pierwszy konkretny komunikat (np. za krótkie
       // imię). `details` bez zmian, `code` dla klientów maszynowych.
       const firstMessage = Object.values(parsed.error.details)[0];
@@ -179,7 +179,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // #69/Ethan: brak klucza Stripe → 503, nic nie zapisane — chyba że
+    // #69/recenzja: brak klucza Stripe → 503, nic nie zapisane — chyba że
     // symulacja jest jawnie dozwolona (isPaymentSimulationAllowed): tylko
     // poza hostingiem (Vercel, Cloud Run — tam NIGDY, także przy
     // NODE_ENV=development), czyli lokalny `pnpm dev` albo
@@ -197,7 +197,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // P1 (Ryan), wzorzec z #39: clientId wybiera WYLACZNIE personel TEGO
+    // P1 (audyt bezpieczeństwa), wzorzec z #39: clientId wybiera WYLACZNIE personel TEGO
     // salonu. Gosc i klient portalu (jedyny front tej trasy) nie podpinaja
     // rekordu klienta — gosc jest opisany przez guestName/guestPhone/guestEmail.
     // Wczesniej wystarczylo znac id klienta salonu, by podpiac jego kartoteke.
@@ -214,7 +214,7 @@ export async function POST(request: Request) {
     // Klient portalu: id z sesji; gość: null.
     const bookedByUserId: string | null = isSalonStaff ? null : session?.user?.id || null;
 
-    // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu — PRZED
+    // P1 (audyt bezpieczeństwa): klient, pracownik i usluga musza nalezec do salonu — PRZED
     // sprawdzeniem kolizji i zapisem. Bez tego obcy employeeId dostawal wizyte
     // "scheduled", ktora blokowala jego termin w innym salonie przez czas
     // zycia sesji Checkout. Jeden, niezdradzajacy komunikat 400.
@@ -467,7 +467,7 @@ export async function POST(request: Request) {
         // Do NOT fall back to the dev simulation when Stripe is configured —
         // in production the appointment would stay unpayable and block the
         // slot. Clean up (cascade also removes the depositPayments row).
-        // Luka D (P1 logi, Ryan): message błędu Stripe może zawierać e-mail
+        // Luka D (P1 logi, audyt bezpieczeństwa): message błędu Stripe może zawierać e-mail
         // gościa (customer_email), a ten catch łapie też błąd zapisu Drizzle
         // (params). Do logu tylko tożsamość błędu i pola Stripe bez wartości.
         logger.error("Stripe Checkout session creation failed for deposit", {

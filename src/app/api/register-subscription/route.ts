@@ -50,7 +50,7 @@ function alreadySubscribed() {
  * subskrypcji ta trasa nie zmienia (409) — zmiana planu tylko przez Stripe
  * (/api/subscriptions/checkout, /api/subscriptions/downgrade).
  *
- * T3b (Ethan §3 — niezmiennik „każdy salon ma dokładnie jeden wiersz” od
+ * T3b (recenzja §3 — niezmiennik „każdy salon ma dokładnie jeden wiersz” od
  * strony zapisu):
  *  - salon i subskrypcja w JEDNEJ transakcji — błąd zapisu subskrypcji nie
  *    zostawia salonu bez wiersza,

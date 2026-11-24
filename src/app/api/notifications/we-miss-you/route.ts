@@ -4,7 +4,7 @@ import { isValidUuid, validateBody, weMissYouNotificationSchema } from "@/lib/ap
 import { requireCronSecret } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 import { clients, appointments, notifications, salons } from "@/lib/schema";
-// #193 P5a-2 (decyzja CTO D1): jeden salon z obowiązkowego salonId → brama salonu;
+// #193 P5a-2 (decyzja z recenzji D1): jeden salon z obowiązkowego salonId → brama salonu;
 // w raw jawny warunek salonu w każdym zapytaniu (także w podzapytaniu wizyt);
 // odczyty kończą się przed sprawdzeniem planu i personalizacją AI.
 import { forSalon } from "@/lib/server/repository";

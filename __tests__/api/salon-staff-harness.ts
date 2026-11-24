@@ -69,7 +69,7 @@ export function createSalonStaffMocks() {
   /**
    * Surowa pula żądań: WYŁĄCZNIE transakcja (forSalon). `db.select` poza
    * transakcją nie istnieje — w trasie na requireSalonStaff byłoby to
-   * zapytanie poza izolacją (#193 P0b, decyzja Ethana).
+   * zapytanie poza izolacją (#193 P0b, decyzja z recenzji).
    */
   const db = {
     transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
