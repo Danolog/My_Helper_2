@@ -250,7 +250,7 @@ export const FROZEN_MODULES_NOTICE: string | null =
  *    zmieniły) — naliczą rabat w portalu, zadatku i przez powiązane kody.
  *    Trzeba je najpierw wyłączyć (`is_active = false`) albo przejrzeć
  *    z każdym salonem.
- * 2. To zmiana danych na produkcji — wymaga decyzji produktowej, przed wdrożeniem.
+ * 2. To zmiana danych na produkcji — wymaga zgody właściciela produktu, przed wdrożeniem.
  * 3. Dopiero potem zdjęcie `hardOff` w jednym miejscu (ten plik). Typy,
  *    trasy `check-*`, `book-package` i zadatek odmrażają się razem — pilnuje
  *    `__tests__/lib/frozen-promotions-unfreeze.test.ts`.

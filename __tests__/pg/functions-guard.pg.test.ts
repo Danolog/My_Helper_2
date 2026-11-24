@@ -189,7 +189,7 @@ describe("lista FUNCTION_EXCEPTIONS: format (#193)", () => {
   };
   const noAccepted = Object.fromEntries(Object.entries(OK).filter(([k]) => k !== "acceptedBy")) as unknown as FunctionException;
 
-  it("FUNCTION_EXCEPTIONS: pełna sygnatura, jednozdaniowe uzasadnienie, akceptacja recenzji i przeglądu zgodności, numer PR", () => {
+  it("FUNCTION_EXCEPTIONS: pełna sygnatura, jednozdaniowe uzasadnienie, obie role akceptujące w acceptedBy, numer PR", () => {
     expect(exceptionFormatViolations(FUNCTION_EXCEPTIONS, SIGNATURE_NAME)).toEqual([]);
   });
 

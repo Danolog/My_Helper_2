@@ -1,6 +1,6 @@
 /**
  * Kod rabatowy powiązany z promocją zamrożonego typu (B2.1, wiersz 16,
- * Recenzja N2): karta kodu nie może udawać działającego rabatu. Zamiast typu
+ * recenzja N2): karta kodu nie może udawać działającego rabatu. Zamiast typu
  * i wartości — „Promocja niedostępna” i podpowiedź, co zrobić; bez „Aktywny”.
  * Kontrola: kod z rabatem procentowym pokazuje typ i wartość jak dotąd.
  */

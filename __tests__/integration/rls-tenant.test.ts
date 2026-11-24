@@ -1,7 +1,7 @@
 /**
  * Testy RLS (Row-Level Security) na REALNEJ, LOKALNEJ bazie pod WŁĄCZONYM RLS.
  *
- * NAPRAWA po review z audytu bezpieczeństwa (ADR-001, W1):
+ * NAPRAWA po review z audytu bezpieczeństwa (ADR-001, przegląd RLS, W1):
  * Poprzednia wersja POZOROWAŁA — wchodziła w rolę app RĘCZNIE w teście
  * (`set local role` pisany w teście), a nie przez kod produkcyjny. Dowodziła
  * polityki SQL, ale NIE ścieżki, którą faktycznie chodzi aplikacja. Owner-bypass

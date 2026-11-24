@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Obserwator statusów Vercela (#110): limit wdrożeń ≠ porażka budowy.
- * Przykłady odpowiadają commitom z review #108 (recenzja).
+ * Przykłady odpowiadają commitom z review #108 (komentarz 6895089747).
  */
 import { describe, expect, it } from "vitest";
 import { classifyVercelStatuses, EXIT_CODES } from "../../infra/ci/vercel-status.mjs";

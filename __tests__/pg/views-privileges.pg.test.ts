@@ -130,7 +130,7 @@ describe("lista wyjątków widoków: format (#193 P0c-1)", () => {
   /** Pozycja bez pola `pr` (np. z JSON albo po rzutowaniu typu). */
   const noPr = Object.fromEntries(Object.entries(OK).filter(([k]) => k !== "pr")) as unknown as ViewException;
 
-  it("VIEW_EXCEPTIONS: każda pozycja z nazwą, jednozdaniowym uzasadnieniem, akceptacją ról recenzji i przeglądu zgodności i numerem PR", () => {
+  it("VIEW_EXCEPTIONS: każda pozycja z nazwą, jednozdaniowym uzasadnieniem, obiema rolami akceptującymi w acceptedBy i numerem PR", () => {
     expect(exceptionFormatViolations(VIEW_EXCEPTIONS)).toEqual([]);
   });
 

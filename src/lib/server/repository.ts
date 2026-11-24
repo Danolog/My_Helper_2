@@ -13,7 +13,7 @@
  *      więc baza (RLS, ADR sekcja 3) odrzuca cudzy wiersz nawet, gdyby filtr
  *      aplikacyjny zawiódł.
  *
- * DLACZEGO `SET LOCAL ROLE` (naprawa W1 z review, ADR-001):
+ * DLACZEGO `SET LOCAL ROLE` (naprawa W1 z review, ADR-001, przegląd RLS):
  * pula połączeń aplikacji loguje się rolą OWNER (`dev_user`/prod owner). Pod
  * `ENABLE`-not-`FORCE` owner OMIJA polityki RLS. Gdyby transakcja żądania jechała
  * ownerem, RLS byłby martwą literą na ścieżce żądania — izolację dawałby tylko

@@ -1,7 +1,7 @@
 /**
  * Integration tests for /api/gallery/[id] — tenant isolation (P0-A IDOR).
  *
- * Regression for the gap found in the security audit (P0 findings):
+ * Regression for the gap found in the P0 security review (point P0-A):
  * GET was scoped to the caller's salon, but PATCH and DELETE were not — a
  * salon-A owner could edit/delete a salon-B photo (and unlink its file from
  * disk) by guessing the photo UUID, because authorization keyed off the role
