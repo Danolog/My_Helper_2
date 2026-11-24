@@ -151,7 +151,7 @@ export function buildCsp(nonce: string): string {
     "default-src 'self'",
     // Bez hostów: 'strict-dynamic' i tak je ignoruje w przeglądarkach CSP3,
     // a w starszych host storage.googleapis.com dopuszczałby skrypt z dowolnego
-    // zasobnika GCS (Ryan, P3). /sw.js ładuje Workbox z własnego originu
+    // zasobnika GCS (audyt bezpieczeństwa, P3). /sw.js ładuje Workbox z własnego originu
     // (/workbox-v7.3.0/) przez importScripts — worker ma politykę z własnej
     // odpowiedzi, a /sw.js jest poza matcherem proxy (config niżej).
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra}`,
