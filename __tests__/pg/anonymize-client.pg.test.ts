@@ -8,11 +8,12 @@
  * `DELETE clients`.
  *
  * Dowody:
- * a) po anonimizacji i usunięciu w żadnej kolumnie `text`/`varchar` tabel
- *    appointments, notifications, treatment_history, appointment_materials,
+ * a) po anonimizacji i usunięciu w żadnej kolumnie `text`/`varchar`/`json`/
+ *    `jsonb`/tablicowej (porównanie przez `::text`) tabel appointments,
+ *    notifications, treatment_history, appointment_materials,
  *    ai_conversations, reviews, clients (wiersze salonu A) nie ma imienia,
  *    nazwiska, telefonu ani e-maila wartownika; kolumny z `information_schema`,
- *    więc nowa kolumna tekstowa trafia do sprawdzenia bez zmiany testu;
+ *    więc nowa kolumna tych typów trafia do sprawdzenia bez zmiany testu;
  * b) biała lista: liczba wizyt, suma zadatków i rabatów, statusy, pracownik,
  *    usługa i oceny bez zmian; liczniki zwrócone przez funkcję;
  * c) rozdzielenie: wiersze wartownika salonu B są identyczne przed i po;
@@ -173,6 +174,8 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
     recipe: `Receptura dla ${FULL_NAME}`,
     techniques: `Technika ${SENTINEL.lastName}`,
     notes: `Uwagi ${SENTINEL.phone}`,
+    // Trasa przyjmuje tu dowolny JSON — także dane klienta.
+    materialsJson: [{ name: "Farba", note: `Dla ${FULL_NAME}, tel. ${SENTINEL.phone}` }],
   });
   await db.insert(appointmentMaterials).values({
     appointmentId: appointmentIds[0]!,
@@ -221,14 +224,17 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
   return { salonId, clientId, appointmentIds, reviewIds: revs.map((r) => r.id) };
 }
 
-/** Kolumny `text`/`varchar` tabeli z `information_schema`. */
-async function textColumns(table: string): Promise<string[]> {
+/**
+ * Kolumny tabeli, które mogą nieść tekst klienta: `text`, `varchar`, `char`,
+ * `json`, `jsonb` i tablice (`ARRAY`) — z `information_schema`.
+ */
+async function scannedColumns(table: string): Promise<string[]> {
   const rows = await h!.observer<{ column_name: string }[]>`
     select column_name
     from information_schema.columns
     where table_schema = 'public'
       and table_name = ${table}
-      and data_type in ('text', 'character varying')
+      and data_type in ('text', 'character varying', 'character', 'json', 'jsonb', 'ARRAY')
     order by column_name
   `;
   return rows.map((r) => r.column_name);
@@ -245,15 +251,16 @@ async function hasSalonColumn(table: string): Promise<boolean> {
 }
 
 /**
- * Trafienia wartości wartownika w kolumnach tekstowych wierszy danego salonu:
- * lista `tabela.kolumna: wartość`. Identyfikatory z `information_schema`
- * cytowane przez `sql()` sterownika; wartości jako parametry.
+ * Trafienia wartości wartownika w skanowanych kolumnach wierszy danego salonu:
+ * lista `tabela.kolumna: wartość`. Porównanie po `::text`, więc JSON i tablice
+ * też. Identyfikatory z `information_schema` cytowane przez `sql()`
+ * sterownika; wartości jako parametry.
  */
 async function sentinelHits(salonId: string): Promise<string[]> {
   const hits: string[] = [];
   for (const table of SCANNED_TABLES) {
-    const columns = await textColumns(table);
-    expect(columns.length, `${table}: brak kolumn tekstowych w information_schema`).toBeGreaterThan(0);
+    const columns = await scannedColumns(table);
+    expect(columns.length, `${table}: brak skanowanych kolumn w information_schema`).toBeGreaterThan(0);
     const scoped = await hasSalonColumn(table);
     for (const column of columns) {
       for (const value of SENTINEL_VALUES) {
@@ -261,12 +268,12 @@ async function sentinelHits(salonId: string): Promise<string[]> {
         const rows = scoped
           ? await h!.observer<{ n: number }[]>`
               select count(*)::int as n from ${h!.observer(table)} t
-              where t.salon_id = ${salonId} and t.${h!.observer(column)} ilike ${pattern}
+              where t.salon_id = ${salonId} and t.${h!.observer(column)}::text ilike ${pattern}
             `
           : await h!.observer<{ n: number }[]>`
               select count(*)::int as n from ${h!.observer(table)} t
               join appointments a on a.id = t.appointment_id
-              where a.salon_id = ${salonId} and t.${h!.observer(column)} ilike ${pattern}
+              where a.salon_id = ${salonId} and t.${h!.observer(column)}::text ilike ${pattern}
             `;
         if ((rows[0]?.n ?? 0) > 0) hits.push(`${table}.${column}: ${value}`);
       }
@@ -366,6 +373,7 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
         "treatment_history.recipe",
         "treatment_history.techniques",
         "treatment_history.notes",
+        "treatment_history.materials_json",
         "appointment_materials.notes",
         "ai_conversations.transcript",
         "reviews.comment",

@@ -107,9 +107,11 @@ export async function anonymizeClientData(
     .from(appointments)
     .where(and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId)));
 
+  // `materials_json` (lista materiałów zapisywana przez salon dowolnym JSON-em)
+  // wraca do pustej listy — tę samą wartość zapisuje UI i zakończenie wizyty.
   const treatmentRows = await tx
     .update(treatmentHistory)
-    .set({ notes: null, recipe: null, techniques: null })
+    .set({ notes: null, recipe: null, techniques: null, materialsJson: sql`'[]'::jsonb` })
     .where(inArray(treatmentHistory.appointmentId, clientAppointmentIds))
     .returning({ id: treatmentHistory.id });
 
