@@ -146,8 +146,13 @@ export function useClientsData(salonId: string | null): UseClientsDataReturn {
 
   // Save client form state on changes (debounced inside hook)
   useEffect(() => {
-    const hasData = !!formFirstName || !!formLastName || !!formPhone || !!formEmail || !!formNotes;
-    if (hasData) {
+    // Notes are never stored in the draft (NEVER_PERSIST_KEYS), so notes
+    // alone must not create one: the dialog would reopen after a refresh with
+    // a recovery banner that restores nothing. They still count as unsaved
+    // changes for the beforeunload warning.
+    const hasPersistableData = !!formFirstName || !!formLastName || !!formPhone || !!formEmail;
+    const hasData = hasPersistableData || !!formNotes;
+    if (hasPersistableData) {
       saveClientFormState({
         firstName: formFirstName,
         lastName: formLastName,
