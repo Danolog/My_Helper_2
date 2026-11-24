@@ -8,7 +8,9 @@
  *  - odczyt ujścia _Default przed jakąkolwiek zmianą;
  *  - (0) zasobnik myhelper-logs wyłącznie w europe-central2, retencja 30 dni;
  *  - (1) ujście _Default: dokładny cel myhelper-logs i DOKŁADNE wyrażenie filtru
- *    (tylko adres żądania, z kotwicą, bez Referer, disabled=false), zgodne ze
+ *    (tylko adres żądania, z kotwicą, bez Referer), wykluczenie włączone
+ *    (gcloud stosuje bool() do wartości `disabled`: tylko pusta = False) i
+ *    sprawdzone odczytem json(exclusions) po zapisie, zgodne ze
  *    ścieżkami tokenów w zainstalowanym Better Auth; adresy, które tylko
  *    wspominają ścieżkę resetu w parametrach albo we fragmencie, zostają w logach;
  *    token resetu = jeden segment alfabetu generateId (bez `..`, `%2e%2e`);
@@ -108,6 +110,9 @@ case " $* " in
     [ -n "$FAKE_SET_ERROR" ] && { echo "bindings: - members: [user:$FAKE_EMAIL]"; echo "ERROR: ABORTED: 409 etag mismatch, user:$FAKE_EMAIL" >&2; exit 1; }
     echo "bindings: - members: [user:$FAKE_EMAIL]"; echo "Updated IAM policy for $FAKE_EMAIL" >&2
     exit 0 ;;
+  *" sinks describe _Default --format=json(exclusions) "*)
+    [ -n "$FAKE_VERIFY_READ_ERROR" ] && { echo "ERROR: PERMISSION_DENIED" >&2; exit 1; }
+    cat "$FAKE_EXCL"; exit 0 ;;
   *" sinks describe _Default "*)
     [ -n "$FAKE_READ_ERROR" ] && { echo "ERROR: PERMISSION_DENIED" >&2; exit 1; }
     [ -n "$FAKE_EXISTS" ] && echo "other-exclusion;myhelper-auth-token-urls"
@@ -119,6 +124,22 @@ exit 0
 `,
 );
 chmodSync(join(FAKE, "gcloud"), 0o755);
+
+// Odpowiedź `sinks describe _Default --format=json(exclusions)` po zapisie.
+// gcloud pomija `disabled: false` w JSON (wartość domyślna), więc stan
+// poprawny to wykluczenie bez klucza `disabled`.
+const EXCL = {
+  ok: { exclusions: [{ name: "other-exclusion", filter: "x" }, { name: "myhelper-auth-token-urls", filter: EXCLUSION_FILTER }] },
+  "explicit-false": { exclusions: [{ name: "myhelper-auth-token-urls", filter: EXCLUSION_FILTER, disabled: false }] },
+  disabled: { exclusions: [{ name: "myhelper-auth-token-urls", filter: EXCLUSION_FILTER, disabled: true }] },
+  "disabled-string": { exclusions: [{ name: "myhelper-auth-token-urls", filter: EXCLUSION_FILTER, disabled: "false" }] },
+  missing: { exclusions: [{ name: "other-exclusion", filter: "x" }] },
+  empty: {},
+  filter: { exclusions: [{ name: "myhelper-auth-token-urls", filter: 'httpRequest.requestMethod="GET"' }] },
+} as const;
+type Excl = keyof typeof EXCL | "invalid";
+for (const [k, v] of Object.entries(EXCL)) writeFileSync(join(DIR, `excl-${k}.json`), JSON.stringify(v, null, 2));
+writeFileSync(join(DIR, "excl-invalid.json"), "exclusions: [");
 
 // Warunek --apply: next.config.ts w repo z no-referrer dla ścieżek z tokenem.
 // Skrypt czyta next.config.ts z katalogu ../../ względem siebie, więc przebiegi
@@ -188,6 +209,8 @@ function lg(
     setError?: boolean;
     policy?: "no-etag" | "broken";
     script?: string;
+    excl?: Excl;
+    verifyReadError?: boolean;
   } = {},
 ): Run {
   const id = n++;
@@ -207,6 +230,8 @@ function lg(
       FAKE_FILES: files,
       FAKE_EMAIL: EMAIL,
       FAKE_POLICY: join(DIR, policy),
+      FAKE_EXCL: join(DIR, `excl-${opts.excl ?? "ok"}.json`),
+      ...(opts.verifyReadError ? { FAKE_VERIFY_READ_ERROR: "1" } : {}),
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
       ...(opts.readError ? { FAKE_READ_ERROR: "1" } : {}),
       ...(opts.iamReadError ? { FAKE_IAM_READ_ERROR: "1" } : {}),
@@ -370,18 +395,58 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
     expect(CODE).not.toMatch(/referer/i);
   });
 
-  it("brak wykluczenia → cel myhelper-logs i --add-exclusion z dokładnym filtrem, disabled=false", () => {
+  it("brak wykluczenia → cel myhelper-logs i --add-exclusion z dokładnym filtrem, bez klucza disabled", () => {
     const c = lg(APPLY).calls.map(strip).filter((x) => /^logging sinks update _Default /.test(x));
     expect(c).toEqual([
-      `logging sinks update _Default ${LOGS_DEST} --add-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER},disabled=false`,
+      `logging sinks update _Default ${LOGS_DEST} --add-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER}`,
     ]);
   });
 
-  it("wykluczenie istnieje → ten sam cel i --update-exclusion z tym samym filtrem, disabled=false (bez dryfu)", () => {
+  it("wykluczenie istnieje → ten sam cel i --update-exclusion z tym samym filtrem, pusty disabled= (włącza)", () => {
     const c = lg(APPLY, { exists: true, auditPresent: true }).calls.map(strip).filter((x) => /^logging sinks update _Default /.test(x));
     expect(c).toEqual([
-      `logging sinks update _Default ${LOGS_DEST} --update-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER},disabled=false`,
+      `logging sinks update _Default ${LOGS_DEST} --update-exclusion=name=myhelper-auth-token-urls,filter=${EXCLUSION_FILTER},disabled=`,
     ]);
+  });
+
+  // gcloud (surface/logging/sinks/update.py) parsuje --add-exclusion i
+  // --update-exclusion przez ArgDict(spec={..., 'disabled': bool}): wartość
+  // klucza przechodzi przez bool() Pythona, czyli każdy niepusty napis
+  // (także "false", "False", "0") = True. Emulacja tej reguły na argumentach,
+  // które skrypt faktycznie przekazuje do gcloud.
+  const pyBool = (s: string) => s.length > 0;
+  /** Wynik `disabled` po stronie gcloud: true/false albo null (klucz pominięty). */
+  const gcloudDisabled = (flag: string): boolean | null => {
+    const fields = flag.replace(/^--(add|update)-exclusion=/, "").split(",");
+    const d = fields.find((f) => f === "disabled" || f.startsWith("disabled="));
+    return d === undefined ? null : pyBool(d.slice("disabled=".length));
+  };
+  it.each([
+    ["disabled=false", true],
+    ["disabled=False", true],
+    ["disabled=0", true],
+    ["disabled=", false],
+  ])("emulacja bool() gcloud: %s → disabled %s", (kv, want) => {
+    expect(gcloudDisabled(`--update-exclusion=name=x,filter=f,${kv}`)).toBe(want);
+  });
+
+  it.each([
+    ["brak wykluczenia (--add-exclusion)", {}, null],
+    ["wykluczenie istnieje (--update-exclusion)", { exists: true, auditPresent: true }, false],
+  ])("%s: gcloud nie dostaje wartości, która włącza disabled", (_l, o, want) => {
+    const flags = lg(APPLY, o)
+      .calls.map(strip)
+      .filter((x) => /^logging sinks update _Default /.test(x))
+      // Ostatni argument; filtr zawiera spacje, więc bez podziału na spacjach.
+      .flatMap((x) => /(--(?:add|update)-exclusion=.*)$/.exec(x)?.[1] ?? []);
+    expect(flags).toHaveLength(1);
+    // --add-exclusion: klucz pominięty = włączone; --update-exclusion: klucz
+    // MUSI być podany pusty (pominięty zostawia wyłączone wykluczenie).
+    expect(gcloudDisabled(flags[0]!)).toBe(want);
+  });
+
+  it("w kodzie brak disabled= z niepustą wartością", () => {
+    expect(CODE).not.toMatch(/disabled=[^"\s]/);
   });
 
   it("filtr nie ma przecinka (rozdziela pola --add-exclusion) ani `\\`", () => {
@@ -526,6 +591,60 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
         expect(re.test(origin + p), origin + p).toBe(true);
       }
     }
+  });
+});
+
+describe("P8 (1): kontrola wykluczenia po zapisie (json(exclusions))", () => {
+  const VERIFY = "logging sinks describe _Default --format=json(exclusions)";
+  const AFTER = /^logging buckets update _Default |set-iam-policy|myhelper-audit/;
+
+  it.each([
+    ["stan pusty", {}],
+    ["zasoby istnieją", { exists: true, auditPresent: true }],
+    ["disabled: false jawnie", { excl: "explicit-false" as const }],
+  ])("%s: odczyt zaraz po sinks update _Default, wykluczenie włączone → przebieg dalej", (_l, o) => {
+    const r = lg(APPLY, o);
+    expect(r.status, r.stderr).toBe(0);
+    const calls = r.calls.map(strip);
+    const upd = calls.findIndex((c) => /^logging sinks update _Default /.test(c));
+    expect(upd).toBeGreaterThan(0);
+    expect(calls[upd + 1]).toBe(VERIFY);
+    expect(calls.filter((c) => c === VERIFY)).toHaveLength(1);
+    expect(r.stdout).toContain("  state: exclusion myhelper-auth-token-urls enabled\n");
+  });
+
+  it.each([
+    ["disabled: true", { excl: "disabled" as const }, "exclusion myhelper-auth-token-urls is disabled on _Default after update"],
+    ["disabled: true przy istniejącym wykluczeniu", { excl: "disabled" as const, exists: true, auditPresent: true }, "is disabled"],
+    ["disabled niebędące false", { excl: "disabled-string" as const }, "is disabled"],
+    ["brak wykluczenia (inne zostają)", { excl: "missing" as const }, "exclusion myhelper-auth-token-urls missing on _Default after update"],
+    ["brak klucza exclusions", { excl: "empty" as const }, "missing on _Default"],
+    ["inny filtr", { excl: "filter" as const }, "has a different filter"],
+    ["nieprawidłowy JSON", { excl: "invalid" as const }, "unexpected exclusions of _Default"],
+    ["błąd odczytu", { verifyReadError: true }, "cannot read exclusions of _Default"],
+  ])("%s → kod 2, stop przed krokami (2)–(4)", (_l, o, msg) => {
+    const r = lg(APPLY, o);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(msg);
+    const calls = r.calls.map(strip);
+    expect(calls).toContain(VERIFY);
+    expect(calls.filter((c) => AFTER.test(c))).toEqual([]);
+    expect(r.stdout).not.toContain("logging: done");
+  });
+
+  it("dry-run: wypisuje odczyt kontrolny po sinks update _Default, bez wywołania gcloud", () => {
+    const r = lg(P);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toEqual([]);
+    const lines = r.stdout.split("\n");
+    const upd = lines.findIndex((l) => l.startsWith(`+ gcloud --project=${PROJECT} --quiet logging sinks update _Default `));
+    expect(lines[upd + 1]).toBe(`? gcloud --project=${PROJECT} --quiet ${VERIFY}`);
+    expect(lines[upd + 2]).toBe("  state: not checked (dry-run)");
+  });
+
+  it("w kodzie kontrola wywoływana zaraz po exclusion", () => {
+    const main = CODE.slice(CODE.lastIndexOf('if [[ "$APPLY" == 1 ]]; then\n  echo "mode: APPLY'));
+    expect(main).toContain("\nexclusion\nverify_exclusion\ndefault_retention\n");
   });
 });
 
