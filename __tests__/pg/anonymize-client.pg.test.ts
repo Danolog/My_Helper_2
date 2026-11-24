@@ -14,6 +14,8 @@
  *    ai_conversations, reviews, clients (wiersze salonu A) nie ma imienia,
  *    nazwiska, telefonu ani e-maila wartownika; kolumny z `information_schema`,
  *    więc nowa kolumna tych typów trafia do sprawdzenia bez zmiany testu;
+ *    Wizyty salonu A nie wskazują już konta portalu klienta
+ *    (`booked_by_user_id`), konto zostaje, wizyty salonu B wskazują je dalej;
  * b) biała lista: liczba wizyt, suma zadatków i rabatów, statusy, pracownik,
  *    usługa i oceny bez zmian; liczniki zwrócone przez funkcję;
  * c) rozdzielenie: wiersze wartownika salonu B są identyczne przed i po,
@@ -32,7 +34,7 @@
  * Wymaga bazy po `pnpm db:migrate` (RLS, rola aplikacji).
  */
 import { randomInt, randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   aiConversations,
@@ -69,7 +71,9 @@ vi.mock("@/lib/logger", () => ({
 const RUN = randomUUID().slice(0, 8);
 const OWNER_A = `it-t3-anon-a-${RUN}`;
 const OWNER_B = `it-t3-anon-b-${RUN}`;
-const USERS = [OWNER_A, OWNER_B];
+/** Konto portalu klienta, z którego zarezerwowano wizyty w obu salonach. */
+const PORTAL_USER = `it-t3-anon-p-${RUN}`;
+const USERS = [OWNER_A, OWNER_B, PORTAL_USER];
 
 /** Wartownik: wartości, których nie ma nigdzie indziej w bazie. */
 const SENTINEL = {
@@ -192,6 +196,7 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
         startTime: new Date(base),
         endTime: new Date(base + hour),
         status: "completed",
+        bookedByUserId: PORTAL_USER,
         notes: `Dzwonic: ${CONTACT}`,
         depositAmount: "45.00",
         depositPaid: true,
@@ -208,6 +213,7 @@ async function seedSalon(ownerId: string): Promise<SalonFixture> {
         startTime: new Date(base + 24 * hour),
         endTime: new Date(base + 25 * hour),
         status: "cancelled",
+        bookedByUserId: PORTAL_USER,
         notes: `Odwolala ${SENTINEL.firstName}`,
         depositAmount: "30.00",
         depositPaid: false,
@@ -533,6 +539,20 @@ suite("anonimizacja klienta przed usunięciem kartoteki, prawdziwy Postgres", ()
       .where(eq(notifications.salonId, fx.a.salonId));
     expect(messages).toHaveLength(2);
     expect(messages.every((m) => m.message === REMOVED_MESSAGE_PLACEHOLDER)).toBe(true);
+
+    // a') żadna wizyta salonu A nie wskazuje już konta portalu klienta; samo
+    // konto zostaje, a wizyty salonu B dalej je wskazują.
+    const bookedInA = await h!.db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.salonId, fx.a.salonId), eq(appointments.bookedByUserId, PORTAL_USER)));
+    expect(bookedInA).toEqual([]);
+    const bookedInB = await h!.db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.salonId, fx.b.salonId), eq(appointments.bookedByUserId, PORTAL_USER)));
+    expect(bookedInB).toHaveLength(2);
+    expect(await h!.db.select({ id: user.id }).from(user).where(eq(user.id, PORTAL_USER))).toHaveLength(1);
 
     // b) biała lista: wizyty, kwoty, statusy, pracownik, usługa, oceny
     const whitelistAfter = await appointmentWhitelist(fx.a.appointmentIds);

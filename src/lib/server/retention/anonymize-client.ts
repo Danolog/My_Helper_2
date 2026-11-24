@@ -9,7 +9,8 @@
  * Zostaje (biała lista): data i czas wizyty, usługa, wariant, pracownik,
  * status, kwoty (cena, rabat, zadatek i jego status), ocena opinii.
  * Znika (NULL albo stały tekst): wolny tekst i dane kontaktowe powiązane
- * z klientem przez `client_id` albo przez jego wizyty.
+ * z klientem przez `client_id` albo przez jego wizyty, a także wskazanie
+ * konta portalu, z którego zarezerwowano wizytę (`booked_by_user_id`).
  *
  * Poza zakresem z założenia:
  * - faktury i paragony fiskalne (tabela faktur i tabela paragonów) —
@@ -87,6 +88,10 @@ const ZERO_COUNTS: ClientAnonymizationCounts = {
  * Obie blokady czekają najwyżej `LOCK_TIMEOUT`; po nim Postgres zgłasza
  * 55P03 i transakcja wołającego się wycofuje.
  *
+ * Wizyty klienta tracą też `booked_by_user_id`: inaczej wizyta dalej
+ * wskazywałaby konto portalu klienta (imię i e-mail), a klient widziałby ją
+ * w „Moich wizytach”. Samo konto portalu zostaje nietknięte.
+ *
  * Klient spoza `salonId` (albo nieistniejący) → nic się nie zmienia, wynik
  * z samymi zerami. Wołający rozpoznaje brak klienta wcześniej (404).
  *
@@ -142,7 +147,7 @@ export async function anonymizeClientData(
 
   const appointmentRows = await tx
     .update(appointments)
-    .set({ guestName: null, guestPhone: null, guestEmail: null, notes: null })
+    .set({ guestName: null, guestPhone: null, guestEmail: null, notes: null, bookedByUserId: null })
     .where(isClientAppointment)
     .returning({ id: appointments.id });
 

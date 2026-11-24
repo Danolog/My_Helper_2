@@ -98,4 +98,13 @@ describe("anonymizeClientData — kolejność blokad", () => {
     const update = captured.find((q) => q.sql.startsWith('update "treatment_history"'));
     expect(update?.sql).toContain(`"materials_json" = '[]'::jsonb`);
   });
+
+  it("appointments: ten sam UPDATE zeruje wskazanie konta portalu (booked_by_user_id)", async () => {
+    const { tx, captured } = recordingTx([[CLIENT_LOCK, [[CLIENT_ID]]]]);
+    await anonymizeClientData(tx, SALON_ID, CLIENT_ID);
+    const updates = captured.filter((q) => q.sql.startsWith('update "appointments"'));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.sql).toMatch(/"booked_by_user_id" = (\$\d+|null)/);
+    expect(updates[0]!.sql).toMatch(/"notes" = (\$\d+|null)/);
+  });
 });
