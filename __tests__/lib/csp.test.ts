@@ -79,12 +79,10 @@ describe("buildCsp — produkcja", () => {
     expect(d.get("script-src")).toBe(`'self' 'nonce-${NONCE}' 'strict-dynamic'`);
   });
 
-  it("/sw.js (importScripts Workbox z storage.googleapis.com) zostaje poza matcherem proxy", () => {
-    // Gdyby proxy objęło /sw.js, worker dostałby tę CSP bez hosta Workboxa
-    // i importScripts by padło — tak długo, jak sw.js ładuje Workbox z CDN.
-    expect(readFileSync(join(process.cwd(), "public", "sw.js"), "utf8")).toContain(
-      "https://storage.googleapis.com/workbox-cdn/",
-    );
+  it("/sw.js zostaje poza matcherem proxy", () => {
+    // Worker dostaje politykę z własnej odpowiedzi; strona-owa CSP z nonce
+    // nie ma dla niego sensu. Workbox idzie z własnego originu
+    // (strażnik: __tests__/lib/sw-workbox-local.test.ts).
     const matcher = new RegExp(`^${proxyConfig.matcher[0]!}$`);
     expect(matcher.test("/sw.js")).toBe(false);
     expect(matcher.test("/dashboard")).toBe(true);
