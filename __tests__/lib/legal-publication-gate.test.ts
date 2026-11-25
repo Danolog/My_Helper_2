@@ -113,11 +113,17 @@ describe("legalPublicationProblems (dane z parametru)", () => {
   });
 
   it("problemy z kilku dokumentów zbierane razem, w kolejności rejestru", () => {
+    const documents: LegalDocuments = {
+      ...VERSIONED,
+      privacy: { ...VERSIONED.privacy, version: null },
+      terms: { ...VERSIONED.terms, version: null },
+      dpa: { ...VERSIONED.dpa, version: null },
+    };
     const content: LegalContent = {
       ...READY_CONTENT,
       contact: "[DO UZUPEŁNIENIA: adres]",
     };
-    expect(legalPublicationProblems(LEGAL_DOCUMENTS, content)).toEqual([
+    expect(legalPublicationProblems(documents, content)).toEqual([
       { key: "privacy", reason: "missing_version" },
       { key: "terms", reason: "missing_version" },
       { key: "dpa", reason: "missing_version" },
@@ -125,15 +131,12 @@ describe("legalPublicationProblems (dane z parametru)", () => {
     ]);
   });
 
-  it("obecny rejestr i treść nie są gotowe do publikacji", () => {
-    const problems = legalPublicationProblems(LEGAL_DOCUMENTS, LEGAL_CONTENT);
-    expect(problems.length).toBeGreaterThan(0);
-    for (const key of LEGAL_DOCUMENT_KEYS) {
-      expect(problems, key).toContainEqual(
-        expect.objectContaining({ key, reason: "placeholders" }),
-      );
-    }
-  });
+  it.skipIf(LEGAL_DOCS_PUBLISHED)(
+    "flaga wyłączona: obecny rejestr i treść nie są jeszcze gotowe do publikacji",
+    () => {
+      expect(legalPublicationProblems(LEGAL_DOCUMENTS, LEGAL_CONTENT).length).toBeGreaterThan(0);
+    },
+  );
 });
 
 describe("countLegalPlaceholders", () => {

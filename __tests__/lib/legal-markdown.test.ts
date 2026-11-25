@@ -6,9 +6,48 @@
 import { describe, it, expect } from "vitest";
 import { LEGAL_CONTENT } from "@/lib/legal/content";
 import { LEGAL_DOCUMENT_KEYS } from "@/lib/legal/documents";
-import { parseLegalInline, parseLegalMarkdown } from "@/lib/legal/markdown";
+import {
+  parseLegalInline,
+  parseLegalMarkdown,
+  type LegalBlock,
+  type LegalInline,
+  type LegalList,
+} from "@/lib/legal/markdown";
 
 const text = (value: string) => ({ type: "text", text: value });
+
+/** Sprawdza, że węzły to sam tekst, który składa się dokładnie w źródło. */
+function expectPlainText(nodes: readonly LegalInline[], source: string) {
+  expect(nodes.every((node) => node.type === "text"), source).toBe(true);
+  expect(nodes.map((node) => (node.type === "text" ? node.text : "")).join(""), source).toBe(
+    source,
+  );
+}
+
+/** Wszystkie węzły tekstowe z bloków, także z list, tabel i pogrubień. */
+function collectTexts(blocks: readonly LegalBlock[]): string[] {
+  const texts: string[] = [];
+  const fromInline = (nodes: readonly LegalInline[]) => {
+    for (const node of nodes) {
+      if (node.type === "text") texts.push(node.text);
+      if (node.type === "strong" || node.type === "link") fromInline(node.children);
+    }
+  };
+  const fromList = (list: LegalList) => {
+    for (const item of list.items) {
+      fromInline(item.content);
+      if (item.children !== null) fromList(item.children);
+    }
+  };
+  for (const block of blocks) {
+    if (block.type === "heading" || block.type === "paragraph") fromInline(block.content);
+    if (block.type === "list") fromList(block);
+    if (block.type === "table") {
+      for (const row of [block.header, ...block.rows]) row.forEach(fromInline);
+    }
+  }
+  return texts;
+}
 
 describe("parseLegalInline", () => {
   it("zwykły tekst bez zmian", () => {
@@ -43,10 +82,29 @@ describe("parseLegalInline", () => {
       "[x](javascript:alert(1))",
       "[konto salonu / konto klienta](*)",
     ]) {
-      const nodes = parseLegalInline(source);
-      expect(nodes.every((node) => node.type === "text"), source).toBe(true);
-      expect(nodes.map((node) => (node.type === "text" ? node.text : "")).join("")).toBe(source);
+      expectPlainText(parseLegalInline(source), source);
     }
+  });
+
+  it("adres z ukośnikiem wstecznym zostaje tekstem (przeglądarka czyta `\\` jak `/`)", () => {
+    for (const source of [
+      "[x](/\\evil.com)",
+      "[x](/\\/evil.com)",
+      "[x](\\\\evil.com)",
+      "[x](/a\\b)",
+      "[x](/privacy\\)",
+    ]) {
+      expectPlainText(parseLegalInline(source), source);
+    }
+  });
+
+  it("adres wewnętrzny z jednym ukośnikiem daje odnośnik", () => {
+    expect(parseLegalInline("[x](/privacy)")).toEqual([
+      { type: "link", href: "/privacy", children: [text("x")] },
+    ]);
+    expect(parseLegalInline("[x](/)")).toEqual([
+      { type: "link", href: "/", children: [text("x")] },
+    ]);
   });
 
   it("znacznik do uzupełnienia zostaje tekstem", () => {
@@ -137,11 +195,37 @@ describe("parseLegalMarkdown", () => {
     ]);
   });
 
-  it("treść każdego dokumentu daje bloki, a znaczniki zostają w tekście", () => {
+  it("nieobsługiwana składnia zostaje dosłownym tekstem akapitu", () => {
+    for (const source of [
+      '<p onclick="alert(1)">HTML</p>',
+      "<script>alert(1)</script>",
+      '<img src=x onerror="alert(1)">',
+      "![x](y)",
+      "[x](https://example.com)",
+      "[x](javascript:alert(1))",
+      "[x](/\\evil.com)",
+      "# H1",
+      "> cytat",
+      "_kursywa_",
+    ]) {
+      const blocks = parseLegalMarkdown(source);
+      expect(blocks.map((block) => block.type), source).toEqual(["paragraph"]);
+      const [paragraph] = blocks;
+      if (paragraph?.type !== "paragraph") throw new Error(source);
+      expectPlainText(paragraph.content, source);
+    }
+  });
+
+  it("treść każdego dokumentu daje bloki bez resztek składni w tekście", () => {
+    // Wzór z formularza odstąpienia celowo zostaje tekstem razem z `](*)`.
+    const ALLOWED_LITERAL = "[konto salonu / konto klienta](*)";
     for (const key of LEGAL_DOCUMENT_KEYS) {
       const blocks = parseLegalMarkdown(LEGAL_CONTENT[key]);
       expect(blocks.length, key).toBeGreaterThan(0);
-      expect(JSON.stringify(blocks), key).toContain("[DO UZUPEŁNIENIA");
+      for (const value of collectTexts(blocks)) {
+        const rest = value.split(ALLOWED_LITERAL).join("");
+        expect(rest, key).not.toMatch(/\*\*|`|\]\(/);
+      }
     }
   });
 

@@ -9,7 +9,7 @@
  * przeglądarki jako surowy HTML.
  *
  * Odnośnik powstaje tylko dla adresu wewnątrz serwisu (zaczyna się od jednego
- * `/`). Każda inna składnia odnośnika zostaje zwykłym tekstem — także wzór
+ * `/` i nie zawiera `\`). Każda inna składnia odnośnika zostaje zwykłym tekstem — także wzór
  * w formularzu odstąpienia `[konto salonu / konto klienta](*)`.
  */
 
@@ -51,9 +51,18 @@ const TABLE_SEPARATOR = /^\|[\s|:-]+\|$/;
 // Kod, pogrubienie albo odnośnik — pierwszy pasujący od lewej.
 const INLINE = /`([^`]+)`|\*\*(.+?)\*\*|\[([^[\]]+)\]\(([^()\s]+)\)/g;
 
-/** Czy adres prowadzi do strony w serwisie (nie `//host`, nie inny schemat). */
+// Adres w serwisie: jeden `/` na początku, po nim nie `/` ani `\`.
+const INTERNAL_HREF = /^\/(?![/\\])/;
+
+/**
+ * Czy adres prowadzi do strony w serwisie (nie `//host`, nie inny schemat).
+ *
+ * Przeglądarki czytają `\` w adresach http(s) jak `/`, więc `/\host` albo
+ * `/\/host` prowadzi do obcej domeny tak samo jak `//host`. Dlatego adres
+ * z `\` w dowolnym miejscu nigdy nie jest odnośnikiem wewnętrznym.
+ */
 function isInternalHref(href: string): boolean {
-  return href.startsWith("/") && !href.startsWith("//");
+  return INTERNAL_HREF.test(href) && !href.includes("\\");
 }
 
 export function parseLegalInline(source: string): LegalInline[] {
