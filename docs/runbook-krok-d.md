@@ -661,6 +661,62 @@ i nową wersją kodu:
 - zmiana nazwy = dodaj nową → zapis do obu → przenieś dane → contract.
 Recenzent PR z migracją sprawdza tę regułę; kopia na żądanie jest siatką, nie planem.
 
+## 7b. Pierwsze wdrożenie z migracjami 0015–0017
+
+**Zasada.** Pierwsze wdrożenie kodu, który zawiera migracje 0015–0017,
+uruchamiamy wyłącznie z `run_migrations=true`. Domyślne `false` uruchomi kod na
+schemacie bez tych tabel i kolumn. `/api/health` sprawdza tylko połączenie
+z bazą, więc tego nie wykryje: rewizja dostanie cały ruch, a zapytania do
+`clients` będą padać.
+
+**Przed wdrożeniem** (baza produkcyjna, tylko odczyt):
+
+a) liczba wpisów w `drizzle.__drizzle_migrations` równa 15; inna wartość = stop:
+
+```sql
+SELECT count(*) FROM drizzle.__drizzle_migrations;
+```
+
+b) zapytanie kontrolne na duplikaty opinii musi dać pusty wynik; inaczej
+migracja 0016 zatrzyma się z błędem:
+
+```sql
+SELECT appointment_id, count(*) FROM reviews WHERE appointment_id IS NOT NULL GROUP BY appointment_id HAVING count(*) > 1;
+```
+
+**Warunki:**
+
+- Kopię Cloud SQL na żądanie robi `infra/gcp/run-migrate.sh`, a błąd kopii
+  zatrzymuje job. Id i czas kopii trafiają do dziennika migracji tego samego
+  dnia.
+- Przed uruchomieniem wdrożenia z `run_migrations=true` w dzienniku migracji
+  zapisane są: commit `main`, sha256 plików 0015–0017, oczekiwana liczba
+  migracji = 18 i suma kontrolna `migrations_sha256` z próby. Po migracji
+  porównanie; rozbieżność = stop.
+- Osobna, wcześniejsza kopia na żądanie → odtworzenie do tymczasowej instancji
+  Cloud SQL → porównanie skryptem → na niej próba 0015–0017 z commitu `main`
+  (źródło liczb z punktu wyżej) → instancja tymczasowa usunięta tego samego
+  dnia.
+- W trakcie joba migracji żadnych innych sesji na tej bazie (porównań,
+  zrzutów, `psql`). Przy błędzie 55P03 ustalić, kto blokuje, i ponowić job,
+  bez `psql -f` i bez podnoszenia limitu.
+- Obie kopie trzymane maksymalnie 30 dni od migracji; usunięcie z wpisem
+  w dzienniku. Starej bazy (Neon) nie usuwać przed zamknięciem okna powrotu
+  przełączenia.
+- Cofnięcie migracji = odtworzenie Cloud SQL z kopii sprzed joba, tylko przed
+  pierwszym prawdziwym salonem; potem wyłącznie migracja w przód. Powrót na
+  starą bazę (Neon) tylko przed pierwszym prawdziwym salonem i z plikami
+  0015–0017 z tego samego commitu `main`. Po pierwszym salonie ta droga
+  wymaga osobnego planu przeniesienia danych.
+- Czerwony job migracji = wdrożenie wstrzymane.
+
+**Po wdrożeniu** (te same zmienne i terminal co w sekcji 9):
+
+- liczba migracji = 18 (`SELECT count(*) FROM drizzle.__drizzle_migrations;`);
+- suma kontrolna zgodna ze wzorcem z dziennika migracji;
+- tabele i kolumny z 0015–0017 istnieją (w tym indeks
+  `reviews_appointment_id_uq`).
+
 ## 7a. Pilna poprawka a czerwony „Security Audit”
 
 `main` jest chroniony (tylko PR + zielone TypeScript Check / Unit Tests /
