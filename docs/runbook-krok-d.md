@@ -690,6 +690,14 @@ z bazą, więc tego nie wykryje: rewizja dostanie cały ruch, a zapytania do
 
 **Przed wdrożeniem** (baza produkcyjna, tylko odczyt):
 
+Kontrole przed migracją i po niej idą w sesji `psql` ustawionej na tylko
+odczyt: `PGOPTIONS='-c default_transaction_read_only=on'` w środowisku
+procesu `psql` (blok w sekcji 9) albo, gdy sesja jest już otwarta,
+`SET default_transaction_read_only = on;` jako pierwsze polecenie. To
+zabezpieczenie przed pomyłką (zapis kończy się błędem 25006), nie
+uprawnienie: login aplikacji mógłby je wyłączyć, więc w tej sesji żadnych
+poleceń poza zapytaniami z tej sekcji.
+
 a) liczba wpisów w `drizzle.__drizzle_migrations` równa 15; inna wartość = stop:
 
 ```sql
@@ -703,7 +711,15 @@ migracja 0016 zatrzyma się z błędem:
 SELECT appointment_id, count(*) FROM reviews WHERE appointment_id IS NOT NULL GROUP BY appointment_id HAVING count(*) > 1;
 ```
 
-Po kontroli (a, b) wychodzimy z `psql`: przed startem joba żadna sesja nie
+c) zapytanie kontrolne 0017 musi dać `alergie_niepuste=0`; inna wartość =
+stop, bo 0017 zeruje wypełnione `allergies` bez możliwości odtworzenia.
+Zapytanie i wynik trafiają do dziennika migracji (oczekiwana wartość: 0):
+
+```sql
+SELECT 'alergie_niepuste=' || count(*) FROM clients WHERE allergies IS NOT NULL;
+```
+
+Po kontroli (a, b, c) wychodzimy z `psql`: przed startem joba żadna sesja nie
 zostaje otwarta (otwarta transakcja na `reviews` zablokuje indeks z 0016,
 błąd 55P03).
 
@@ -714,15 +730,32 @@ błąd 55P03).
   dnia.
 - Przed uruchomieniem wdrożenia z `run_migrations=true` w dzienniku migracji
   zapisane są: commit `main`, sha256 każdego z plików 0015–0017, oczekiwana liczba
-  migracji = 18 i suma kontrolna `migrations_sha256` z próby. Po migracji
+  migracji = 18, suma kontrolna `migrations_sha256` z próby oraz zapytanie
+  kontrolne 0017 (punkt c wyżej) z oczekiwaną wartością 0. Po migracji
   porównanie; rozbieżność = stop.
+- **Rozbieżność po wdrożeniu.** Porównanie robimy, gdy nowa rewizja ma już
+  100% ruchu, więc „stop” nie zatrzymuje niczego samo. Znaczy: żadnych
+  kolejnych wdrożeń (także ponownego `workflow_dispatch`), zgłoszenie
+  rozbieżności z wynikiem zapytania w dzienniku migracji i decyzja
+  o cofnięciu według punktu „Cofnięcie migracji” niżej. Automatycznego
+  cofnięcia migracji nie ma: ani workflow, ani job nie odwracają zmian
+  w schemacie.
 - Osobna, wcześniejsza kopia na żądanie → odtworzenie do tymczasowej instancji
   Cloud SQL → porównanie skryptem → na niej próba 0015–0017 z commitu `main`
   (źródło liczb z punktu wyżej) → instancja tymczasowa usunięta tego samego
-  dnia.
+  dnia. Porównanie skryptem obejmuje co najmniej odczyty kontrolne: liczbę
+  migracji, `migrations_sha256` sprzed migracji i zapytanie na duplikaty
+  opinii (punkt b). `infra/db/cutover/compare.sh` daje dwa pierwsze
+  (`migrations_count`, `migrations_sha256`) w jednej transakcji tylko do
+  odczytu; duplikaty opinii sprawdza zapytanie z punktu b. Wymóg uruchomienia
+  `compare.sh` bez zmian.
 - W trakcie joba migracji żadnych innych sesji na tej bazie (porównań,
   zrzutów, `psql`). Przy błędzie 55P03 ustalić, kto blokuje, i ponowić job,
-  bez `psql -f` i bez podnoszenia limitu.
+  bez `psql -f` i bez podnoszenia limitu. „Ponowić job” = ponowny
+  `workflow_dispatch` z `run_migrations=true`, nie ręczne uruchomienie joba
+  (`gcloud run jobs execute`): tylko przebieg przez workflow robi kopię na
+  żądanie i ustawia job na obraz migratora z tego samego commitu
+  (`infra/gcp/run-migrate.sh`).
 - Obie kopie trzymane maksymalnie 30 dni od migracji; usunięcie z wpisem
   w dzienniku. Starej bazy (Neon) nie usuwać przed zamknięciem okna powrotu
   przełączenia.
@@ -736,7 +769,8 @@ błąd 55P03).
   są tylko w Cloud SQL, więc eksport jednej tabeli nie wystarcza.
 - Czerwony job migracji = wdrożenie wstrzymane.
 
-**Po wdrożeniu** (te same zmienne i terminal co w sekcji 9):
+**Po wdrożeniu** (ten sam blok kontroli 7b z sekcji 9 — login aplikacji,
+tylko odczyt):
 
 - liczba migracji = 18 (`SELECT count(*) FROM drizzle.__drizzle_migrations;`);
 - suma kontrolna zgodna ze wzorcem z dziennika migracji, liczona dokładnie
@@ -819,7 +853,7 @@ sieci, bez publicznego dostępu hasłem):
 
 ```bash
 set +x
-cloud-sql-proxy --port 6543 my-helper-2-488419:europe-central2:myhelper-pg &
+cloud-sql-proxy --gcloud-auth --port 6543 my-helper-2-488419:europe-central2:myhelper-pg &
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=my-helper-2-488419 secrets versions access latest --secret=postgres-admin-password)" \
   psql "host=127.0.0.1 port=6543 user=postgres dbname=myhelper sslmode=disable"
 kill %1
@@ -829,6 +863,47 @@ Hasło trafia tylko do środowiska procesu `psql` (nie do argumentów, historii
 ani lokalnego logu gcloud — `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`, B-1).
 Ostatnia linia bloku (`kill %1`, K-1e) kończy proxy po wyjściu z `psql` —
 proxy do bazy nie zostaje w tle.
+
+`cloud-sql-proxy` zawsze z `--gcloud-auth` (poświadczenia z `gcloud auth
+login`). Bez tej flagi proxy szuka danych ADC, a gdy ich nie ma, kończy się
+kodem 1 i `psql` nie ma z czym się połączyć.
+
+**Rola `postgres` nie wystarcza do kontroli 7b.** Wbudowana rola `postgres`
+nie ma praw do schematu `drizzle` ani do tabel aplikacji, bo ich właścicielem
+jest login aplikacji (`myhelper_svc`). Kontrole 7b uruchamia się jako login
+aplikacji, w sesji tylko do odczytu. Hasło jest wycinane z sekretu
+`postgres-url` prosto do zmiennej środowiskowej procesu `psql` — nie trafia na
+ekran, do argumentów, historii ani pliku:
+
+```bash
+set +x
+P=my-helper-2-488419
+cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
+  PGOPTIONS='-c default_transaction_read_only=on' \
+  psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+kill %1
+```
+
+`sed -n … p` wypisuje tylko dopasowane hasło i tylko do podstawienia; gdy
+sekret ma inny format, zmienna jest pusta i `psql` odmawia logowania (bez
+wartości sekretu na ekranie). Pierwsze zapytanie w sesji:
+`SHOW default_transaction_read_only;` → `on`; inna wartość = wyjść.
+
+**Bez `psql` na stacji** — ten sam blok, w miejsce linii z `psql` klient
+z obrazu Postgresa. Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
+wartość z otoczenia procesu `docker`), nigdy `-e NAZWA=wartość`; hasło
+wyłącznie przez zmienną środowiskową:
+
+```bash
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
+  PGOPTIONS='-c default_transaction_read_only=on' \
+  docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
+  psql "host=host.docker.internal port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+```
+
+**zsh:** w zapisie `$P:europe-central2` zsh czyta `:e` jako modyfikator
+(rozszerzenie pliku) i psuje nazwę instancji. Zawsze `${P}:europe-central2`.
 
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
