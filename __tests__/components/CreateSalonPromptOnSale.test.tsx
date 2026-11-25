@@ -25,6 +25,9 @@ import { planHighlights } from "@/lib/plan-features";
 vi.mock("@/lib/api-client", () => ({
   mutationFetch: vi.fn(async () => ({ json: async () => ({ success: true }) })),
 }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
 
 const BASIC_CARD = new RegExp(`^${PLANS.basic.name}`);
 const PRO_CARD = new RegExp(`^${PLANS.pro.name}`);

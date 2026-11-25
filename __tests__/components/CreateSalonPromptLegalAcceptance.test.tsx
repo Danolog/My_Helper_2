@@ -22,6 +22,9 @@ import {
 vi.mock("@/lib/api-client", () => ({
   mutationFetch: vi.fn(async () => ({ json: async () => ({ success: true }) })),
 }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
 
 afterEach(() => {
   cleanup();
