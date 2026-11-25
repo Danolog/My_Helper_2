@@ -16,6 +16,10 @@ import { test, expect } from '../fixtures';
  * Projekt `auth` (bez storageState): test nie może startować jako seedowany
  * właściciel. Własne konto testu, bo założenie salonu zmienia stan konta.
  */
+const PANEL_PATHS = ['/dashboard', '/dashboard/clients'] as const;
+const LAST_PANEL_PATH = PANEL_PATHS.at(-1) ?? '/dashboard';
+const pathRegExp =(path: string) => new RegExp(`${path}$`);
+
 test.describe('Panel: konto bez salonu', () => {
   test(
     'rejestracja bez salonu -> /dashboard -> zakladanie salonu -> panel',
@@ -36,9 +40,9 @@ test.describe('Panel: konto bez salonu', () => {
       const clientLink = page.getByRole('link', { name: /Jestem klientem/ });
 
       // 2. /dashboard i dowolna podstrona: tylko zakładanie salonu, bez przekierowania.
-      for (const path of ['/dashboard', '/dashboard/appointments']) {
+      for (const path of PANEL_PATHS) {
         await page.goto(path, { waitUntil: 'domcontentloaded' });
-        await expect(page).toHaveURL(new RegExp(`${path}$`));
+        await expect(page).toHaveURL(pathRegExp(path));
         await expect(createHeading).toBeVisible({ timeout: 15000 });
         await expect(sidebar).toHaveCount(0);
         await expect(clientLink).toHaveAttribute('href', '/salons');
@@ -63,7 +67,7 @@ test.describe('Panel: konto bez salonu', () => {
       await expect(sidebar).toBeVisible({ timeout: 30000 });
       await expect(createHeading).toHaveCount(0);
       await expect(clientLink).toHaveCount(0);
-      await expect(page).toHaveURL(/\/dashboard\/appointments$/);
+      await expect(page).toHaveURL(pathRegExp(LAST_PANEL_PATH));
     }
   );
 });
