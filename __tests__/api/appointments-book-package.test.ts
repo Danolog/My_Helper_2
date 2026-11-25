@@ -1,5 +1,5 @@
 /**
- * POST /api/appointments/book-package — P1 (Ryan): clientId i employeeId
+ * POST /api/appointments/book-package — P1 (audyt bezpieczeństwa): clientId i employeeId
  * z body muszą należeć do salonu z sesji (assertSalonRefs).
  *
  * UWAGA: bookPackageSchema (api-validation.ts) nie odpowiada polom, których

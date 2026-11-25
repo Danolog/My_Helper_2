@@ -1,7 +1,7 @@
 /**
  * POST /api/subscriptions/confirm — potwierdzenie opłaconego Checkoutu (T3).
  *
- * Kontrakt (przegląd Ethana i Ryana P2 po #37):
+ * Kontrakt (recenzja i audyt bezpieczeństwa, P2 po #37):
  * - salon z sesji; `metadata.salonId` innego salonu → 403, zero odczytów
  *   płatności i zero zapisów (dawniej metadata wygrywała z sesją),
  * - brak `metadata.salonId` → 400 (bez cichego zastępstwa salonem z sesji),

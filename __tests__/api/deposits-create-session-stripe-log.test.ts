@@ -1,5 +1,5 @@
 /**
- * Luka D (P1 logi, zakres Ryana T3): POST /api/deposits/create-session przy
+ * Luka D (P1 logi, zakres z audytu bezpieczeństwa T3): POST /api/deposits/create-session przy
  * błędzie Stripe Checkout loguje tylko tożsamość błędu i pola Stripe bez
  * wartości — nigdy `message` (Stripe wkleja tam e-mail gościa z
  * `customer_email`) ani params Drizzle (ten sam catch łapie zapis cs_ po
@@ -81,7 +81,7 @@ const guestBody = {
 };
 
 /**
- * Prawdziwa klasa błędu z SDK stripe (uwaga Ethana do #191): w SDK `type` to
+ * Prawdziwa klasa błędu z SDK stripe (uwaga z recenzji do #191): w SDK `type` to
  * nazwa klasy, a typ z API leży w `rawType` — atrapa z `type =
  * "invalid_request_error"` ukryła, że trasa logowała nazwę klasy jako typ.
  * Importowana PO `vi.resetModules()` (w `runInMode`), żeby `instanceof` w

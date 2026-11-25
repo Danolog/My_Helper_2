@@ -1,22 +1,31 @@
 /// Service Worker for MyHelper - Workbox Caching + Push Notifications
 
 // ---------------------------------------------------------------------------
-// 1. Load Workbox via CDN
+// 1. Load Workbox from the app's own origin (public/workbox-v7.3.0/)
 // ---------------------------------------------------------------------------
-importScripts(
-  "https://storage.googleapis.com/workbox-cdn/releases/7.3.0/workbox-sw.js"
-);
+// The files are vendored so the worker never fetches scripts from a third-party
+// host (provenance and checksums: public/workbox-v7.3.0/README).
+const WORKBOX_PATH = "/workbox-v7.3.0/";
+importScripts(`${WORKBOX_PATH}workbox-sw.js`);
+
+// setConfig must run before the first workbox.* access: that access lazily
+// importScripts the module, and the config is frozen afterwards.
+// - modulePathPrefix: without it workbox-sw falls back to its built-in CDN URL.
+// - debug: false: workbox-sw defaults to .dev.js builds on localhost, and only
+//   .prod.js builds are vendored.
+workbox.setConfig({ modulePathPrefix: WORKBOX_PATH, debug: false });
 
 // ---------------------------------------------------------------------------
 // 2. Cache version – bump this to invalidate all caches at once
 // ---------------------------------------------------------------------------
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 
 // ---------------------------------------------------------------------------
 // 3. Extract Workbox modules
 // ---------------------------------------------------------------------------
-const { precaching, routing, strategies, expiration, cacheableResponse } =
-  workbox;
+// Each module read here is loaded from WORKBOX_PATH, so its .prod.js file must
+// exist there. precaching is not used and therefore not read (or vendored).
+const { routing, strategies, expiration, cacheableResponse } = workbox;
 
 const { registerRoute, setCatchHandler } = routing;
 const { CacheFirst, NetworkFirst, StaleWhileRevalidate } = strategies;

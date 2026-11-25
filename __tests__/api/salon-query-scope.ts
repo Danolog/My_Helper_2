@@ -1,5 +1,5 @@
 /**
- * Skaner tras API, które czytają `salonId` z query (#94, niezmiennik Ethana).
+ * Skaner tras API, które czytają `salonId` z query (#94, niezmiennik z recenzji).
  *
  * Wspólny dla:
  *   - `salon-query-scope-invariant.test.ts` — analiza tekstowa źródeł,

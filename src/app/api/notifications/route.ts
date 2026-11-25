@@ -27,7 +27,7 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // P0 (przeglad Ryana): salon z sesji, query salonId tylko porownywany.
+    // P0 (przeglad bezpieczeństwa): salon z sesji, query salonId tylko porownywany.
     // Dostep: kazdy personel wlasnego salonu (zachowanie sprzed naprawy w
     // obrebie salonu; zawezenie roli = decyzja produktowa, opis PR).
     const guard = await requireSalonStaff({

@@ -87,7 +87,7 @@ async function sendViaSmsapi(
   }
 
   if (data?.error !== undefined && data.error !== null) {
-    // Tylko kod błędu (#75, Ryan): `message` dostawcy bywa echem danych
+    // Tylko kod błędu (#75, audyt bezpieczeństwa): `message` dostawcy bywa echem danych
     // wejściowych (numer, treść) i trafiałby do logów bez redakcji.
     // Kod przepuszczamy tylko, gdy jest liczbą — inaczej to też tekst dostawcy.
     const code = /^\d{1,6}$/.test(String(data.error)) ? String(data.error) : "unknown";
@@ -176,7 +176,7 @@ export function smsProviderUnavailablePlatform(): HostingPlatform | null {
 export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   const normalizedTo = normalizePolishPhoneNumber(msg.to);
   if (!normalizedTo) {
-    // N2 (Ryan): numer zamaskowany — log i wynik błędu trafiają do
+    // N2 (audyt bezpieczeństwa): numer zamaskowany — log i wynik błędu trafiają do
     // notifications/logów Vercela, pełny numer to dana osobowa.
     logger.warn("Invalid phone number for SMS", {
       to: maskPhoneNumber(msg.to),
@@ -219,7 +219,7 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
       await sendViaSmsapi(token, normalizedTo, msg.message);
     } else {
       // Simulation mode - log instead of sending (no SMS provider configured).
-      // Ryan: numer zamaskowany, bez treści (imię, usługa, termin = PII).
+      // Audyt bezpieczeństwa: numer zamaskowany, bez treści (imię, usługa, termin = PII).
       logger.info("SMS notification (simulated - no SMSAPI_TOKEN)", {
         to: maskPhoneNumber(normalizedTo),
         salonId: msg.salonId,

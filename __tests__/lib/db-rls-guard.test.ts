@@ -3,7 +3,7 @@
  * #190: strażnik RLS z migracji 0005 (`scripts/db-rls-guard.ts`) — parser pliku
  * migracji, decyzja na wierszach katalogu, odczyt przez klienta i wywołanie z
  * wiersza poleceń (bez bazy). Bloki „lista RLS” i „decyzja” odpowiadają blokom
- * z testu #188 (Max), żeby #188 mógł je przenieść na ten moduł.
+ * z testu #188, żeby #188 mógł je przenieść na ten moduł.
  * Na prawdziwym Postgresie: `__tests__/pg/rls-guard.pg.test.ts`.
  */
 import { spawnSync } from "node:child_process";
@@ -46,10 +46,14 @@ const fullRls = (): RlsRow[] => RLS.map((r) => ({ table: r.table, rls: true, pol
 describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)", () => {
   it("pliki migracji: 0005 + jawne polityki z RLS_EXTRA_MIGRATION_FILES", () => {
     expect(RLS_MIGRATION_FILE).toBe("drizzle/0005_rls_tenant_isolation.sql");
-    expect(RLS_EXTRA_MIGRATION_FILES).toEqual(["drizzle/0014_deposit_status_events.sql"]);
+    expect(RLS_EXTRA_MIGRATION_FILES).toEqual([
+      "drizzle/0014_deposit_status_events.sql",
+      "drizzle/0015_legal_acceptances.sql",
+    ]);
     expect(loadRlsRequirements(ROOT)).toEqual([
       ...parseRlsRequirements(SQL),
       { table: "deposit_status_events", policy: "tenant_isolation" },
+      { table: "legal_acceptances", policy: "tenant_isolation" },
     ]);
   });
 
@@ -59,14 +63,14 @@ describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)"
     expect(from0005.filter((r) => r.policy === "tenant_isolation")).toHaveLength(38);
   });
 
-  it("łącznie 40 tabel: 39 z tenant_isolation (z deposit_status_events), salons z tenant_self", () => {
-    expect(RLS).toHaveLength(40);
-    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(39);
+  it("łącznie 41 tabel: 40 z tenant_isolation (z deposit_status_events i legal_acceptances), salons z tenant_self", () => {
+    expect(RLS).toHaveLength(41);
+    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(40);
     expect(RLS.filter((r) => r.policy === "tenant_self")).toEqual([{ table: "salons", policy: "tenant_self" }]);
-    for (const t of ["appointments", "deposit_payments", "deposit_status_events", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
+    for (const t of ["appointments", "deposit_payments", "deposit_status_events", "legal_acceptances", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
       expect(RLS).toContainEqual({ table: t, policy: "tenant_isolation" });
     }
-    expect(new Set(RLS.map((r) => r.table)).size).toBe(40);
+    expect(new Set(RLS.map((r) => r.table)).size).toBe(41);
   });
 
   it("tabela dopisana do direct_tables w pliku → jest na liście (nic na sztywno)", () => {
@@ -117,6 +121,13 @@ describe("strażnik — jawne polityki z migracji po 0005", () => {
     expect(parseExplicitRlsRequirements(SQL_0014, FILE)).toEqual([{ table: "deposit_status_events", policy: "tenant_isolation" }]);
   });
 
+  it("plik 0015 → legal_acceptances z tenant_isolation", () => {
+    const file = "drizzle/0015_legal_acceptances.sql";
+    expect(parseExplicitRlsRequirements(readFileSync(join(ROOT, file), "utf8"), file)).toEqual([
+      { table: "legal_acceptances", policy: "tenant_isolation" },
+    ]);
+  });
+
   it.each([
     ["zakomentowana polityka", `${enable}-- CREATE POLICY tenant_isolation ON t USING (true);\n`, /brak jawnego CREATE POLICY/],
     ["polityka bez ENABLE", "CREATE POLICY tenant_isolation ON t USING (true);\n", /CREATE POLICY na t bez ALTER TABLE t ENABLE/],
@@ -141,31 +152,31 @@ describe("strażnik — jawne polityki z migracji po 0005", () => {
 });
 
 describe("strażnik — decyzja", () => {
-  it("komplet RLS (0005 + 0014) → ok z liczbami; tabele spoza listy bez znaczenia", () => {
-    expect(checkRls([...fullRls(), { table: "inna", rls: false, policies: [] }], RLS)).toEqual({ ok: true, checked: 40, rlsTables: 40 });
+  it("komplet RLS (0005 + 0014 + 0015) → ok z liczbami; tabele spoza listy bez znaczenia", () => {
+    expect(checkRls([...fullRls(), { table: "inna", rls: false, policies: [] }], RLS)).toEqual({ ok: true, checked: 41, rlsTables: 41 });
   });
 
-  it("push po migracjach (RLS zdjęte na wszystkich 40) → odmowa z liczbą tabel", () => {
+  it("push po migracjach (RLS zdjęte na wszystkich 41) → odmowa z liczbą tabel", () => {
     const rows = RLS.map((r) => ({ table: r.table, rls: false, policies: [] }));
     const r = checkRls(rows, RLS);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.missing).toHaveLength(41);
-    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z migracji");
-    expect(r.message).toMatch(/^RLS z migracji niekompletne \(41\): .* i 36 więcej — .*pnpm db:migrate\.$/);
+    expect(r.missing).toHaveLength(42);
+    expect(r.missing).toContain("tabel z RLS w bazie 0 < 41 z migracji");
+    expect(r.message).toMatch(/^RLS z migracji niekompletne \(42\): .* i 37 więcej — .*pnpm db:migrate\.$/);
   });
 
-  it("RLS wyłączone na deposit_status_events (0014) → odmowa wskazująca tabelę", () => {
-    const r = checkRls(fullRls().map((x) => (x.table === "deposit_status_events" ? { ...x, rls: false } : x)), RLS);
+  it.each(["deposit_status_events", "legal_acceptances"])("RLS wyłączone na %s (migracja po 0005) → odmowa wskazująca tabelę", (table) => {
+    const r = checkRls(fullRls().map((x) => (x.table === table ? { ...x, rls: false } : x)), RLS);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toEqual(["deposit_status_events (RLS wyłączone)", "tabel z RLS w bazie 39 < 40 z migracji"]);
+    if (!r.ok) expect(r.missing).toEqual([`${table} (RLS wyłączone)`, "tabel z RLS w bazie 40 < 41 z migracji"]);
   });
 
   it.each([
-    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), ["appointments (RLS wyłączone)", "tabel z RLS w bazie 39 < 40 z migracji"]],
+    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), ["appointments (RLS wyłączone)", "tabel z RLS w bazie 40 < 41 z migracji"]],
     ["brak polityki na deposit_payments", (rows: RlsRow[]) => rows.map((x) => (x.table === "deposit_payments" ? { ...x, policies: [] } : x)), ["deposit_payments (brak polityki tenant_isolation)"]],
     ["salons z tenant_isolation zamiast tenant_self", (rows: RlsRow[]) => rows.map((x) => (x.table === "salons" ? { ...x, policies: ["tenant_isolation"] } : x)), ["salons (brak polityki tenant_self)"]],
-    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), ["clients (brak tabeli)", "tabel z RLS w bazie 39 < 40 z migracji"]],
+    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), ["clients (brak tabeli)", "tabel z RLS w bazie 40 < 41 z migracji"]],
   ])("%s → odmowa wskazująca tabelę", (_n, mutate, expected) => {
     const r = checkRls(mutate(fullRls()), RLS);
     expect(r.ok).toBe(false);

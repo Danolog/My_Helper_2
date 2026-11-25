@@ -1,7 +1,7 @@
 /**
  * P0 · /api/salons — mutacje korzenia najemcy (tabela `salons`).
  *
- * POST (#86): tworzył salon bez wiersza subskrypcji (niezmiennik Ethana §3),
+ * POST (#86): tworzył salon bez wiersza subskrypcji (niezmiennik z recenzji §3),
  * nikt go nie wołał — zdjęty. Salon powstaje tylko przez
  * POST /api/register-subscription. Test: 405 i żaden salon nie powstaje.
  *

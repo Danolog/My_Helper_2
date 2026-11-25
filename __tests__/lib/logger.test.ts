@@ -403,6 +403,17 @@ describe("logger — redakcja danych osobowych", () => {
     expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { notes: "[redacted]" });
   });
 
+  it("informacje o zdrowiu i preferencje z kartoteki klienta są redagowane", async () => {
+    const { redactLogContext, PII_LOG_KEYS, REDACTED } = await import("@/lib/logger");
+    expect(PII_LOG_KEYS).toEqual(expect.arrayContaining(["allergies", "preferences"]));
+    expect(redactLogContext({ allergies: "lateks", preferences: "kawa", fields: ["allergies"] })).toEqual({
+      allergies: REDACTED,
+      preferences: REDACTED,
+      // Same nazwy pól (np. lista zmienionych kolumn) zostają.
+      fields: ["allergies"],
+    });
+  });
+
   it("każdy klucz z listy, bez wielkości liter, na dowolnym poziomie i w tablicach", async () => {
     const { redactLogContext, PII_LOG_KEYS, REDACTED } = await import("@/lib/logger");
     for (const key of PII_LOG_KEYS) {

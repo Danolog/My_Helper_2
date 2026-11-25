@@ -155,6 +155,9 @@ export const createClientSchema = z.object({
   notes: z.string().nullable().optional(),
   preferences: z.string().nullable().optional(),
   allergies: z.string().nullable().optional(),
+  // Zgoda na zapis informacji o zdrowiu. Czas i konto zgody nadaje serwer;
+  // pola healthDataConsentAt/By przysłane w body trasa ignoruje (nie czyta ich).
+  healthDataConsent: z.boolean().optional(),
   favoriteEmployeeId: z.string().nullable().optional(),
   requireDeposit: z.boolean().optional(),
   depositType: z.enum(["percentage", "fixed"]).optional(),
@@ -241,7 +244,7 @@ function absentAsUndefined<T extends z.ZodType>(schema: T) {
  * Telefon PL: spacje, myślniki i nawiasy zdejmowane PRZED walidacją, zapis
  * w E.164 przez normalizePolishPhoneNumber (ta sama funkcja co wysyłka SMS):
  * "+48 123 456 789" -> "+48123456789", "123-456-789" -> "+48123456789".
- * Ryan N1 / #64 pkt 4.
+ * Audyt bezpieczeństwa N1 / #64 pkt 4.
  */
 function normalizedPlPhone(message: string) {
   return absentAsUndefined(
@@ -265,7 +268,7 @@ function normalizedPlPhone(message: string) {
  * Date.parse odrzuca nieistniejące wartości (miesiąc 13, godzina 99).
  * Strefa (`Z` albo `±hh:mm`) jest WYMAGANA: wartość bez strefy Date.parse
  * czyta w strefie serwera (UTC na Vercelu), więc "10:00" z Polski byłoby
- * zapisane godzinę lub dwie później (Ethan, przegląd #71). Wszyscy nadawcy
+ * zapisane godzinę lub dwie później (recenzja, przegląd #71). Wszyscy nadawcy
  * wysyłają toISOString(), czyli `Z`.
  *
  * Godzina 00–23, minuty i sekundy 00–59 w samym regexie: Date.parse przyjmuje
@@ -328,7 +331,7 @@ export const createAppointmentSchema = z.object({
   clientId: z.string().nullable().optional(),
   employeeId: requiredString("Pracownik"),
   serviceId: z.string().nullable().optional(),
-  // #66 (P3 Ryana z #67): ISO 8601 jak w create-session — sam Date.parse
+  // #66 (P3 z audytu bezpieczeństwa z #67): ISO 8601 jak w create-session — sam Date.parse
   // przyjmował np. "jutro o 10" (parsuje się jako rok 2010). Front portalu
   // i panelu wysyła toISOString().
   startTime: isoDateString("Czas rozpoczecia"),
@@ -456,6 +459,9 @@ export const updateClientSchema = z.object({
   notes: z.string().nullable().optional(),
   preferences: z.string().nullable().optional(),
   allergies: z.string().nullable().optional(),
+  // true = zaznacz zgodę (czas i konto nadaje serwer), false = cofnij zgodę
+  // (serwer zeruje allergies), brak = bez zmiany zgody.
+  healthDataConsent: z.boolean().optional(),
   favoriteEmployeeId: z.string().nullable().optional(),
   requireDeposit: z.boolean().optional(),
   depositType: z.enum(["percentage", "fixed"]).optional(),
@@ -688,8 +694,10 @@ export function isPolishMobileNumber(e164: string): boolean {
 
 const BLIK_PHONE_FORMAT_MESSAGE = "Podaj prawidlowy numer telefonu (9 cyfr, opcjonalnie +48)";
 const BLIK_PHONE_MOBILE_MESSAGE = "Numer BLIK musi byc numerem komorkowym";
-const BLIK_CONSENT_MESSAGE = "Zaznacz zgode na pokazywanie numeru klientom";
-const BLIK_CONSENT_VERSION_MESSAGE = "Brak wersji tresci zgody. Odswiez strone";
+// Pole jest potwierdzeniem włączenia funkcji, nie zgodą — teksty dla
+// użytkownika nie używają słowa „zgoda” (nazwy w kodzie zostają).
+const BLIK_CONSENT_MESSAGE = "Zaznacz potwierdzenie, aby włączyć wpłaty BLIK na ten numer";
+const BLIK_CONSENT_VERSION_MESSAGE = "Brak wersji treści potwierdzenia. Odśwież stronę";
 
 /**
  * Numer BLIK salonu: ta sama normalizacja co `guestPhone` (spacje, myślniki,
@@ -856,7 +864,7 @@ export const bookPackageSchema = z.object({
 // Client Sub-resource Schemas
 // ==========================================
 
-// Zgody marketingowe RODO (P2, Ryan). Kontrakt = body z client-consents-card.tsx:
+// Zgody marketingowe RODO (P2, audyt bezpieczeństwa). Kontrakt = body z client-consents-card.tsx:
 // { consents: { email|sms|phone: boolean } } (UI wysyła jeden typ na żądanie).
 // Wartość wyłącznie boolean — bez koercji: "false" jako tekst to błąd, nie zgoda.
 // .strict() na obu poziomach: nieznany typ zgody albo pole spoza kontraktu => 400.
@@ -1113,11 +1121,19 @@ export const clientWaitingListResponseSchema = z.object({
 // Konto bierze trasa z sesji. `email` zostaje opcjonalne tylko dla zgodnosci
 // ze starszymi klientami (UI go wysyla), trasa go IGNORUJE.
 // Dozwolone wartosci planSlug to elementy PLANS_ON_SALE z @/lib/plan-catalog.
+// Akceptacja regulaminu i umowy powierzenia: dwie wersje w osobnych polach i
+// zrodlo (formularz rejestracji albo zakladanie salonu z panelu). Tu tylko ksztalt;
+// czy akceptacja obowiazuje i czy wersje sa biezace, rozstrzyga
+// checkLegalAcceptance z @/lib/legal/acceptance.
+const legalVersionField = z.string().min(1).max(64).optional();
 export const registerSubscriptionSchema = z.object({
   planSlug: z.enum(PLANS_ON_SALE, {
     message: `planSlug musi byc jednym z: ${PLANS_ON_SALE.join(", ")}`,
   }),
   email: z.string().optional(),
+  termsVersion: legalVersionField,
+  dpaVersion: legalVersionField,
+  acceptanceSource: z.enum(["registration", "create_salon"]).optional(),
 });
 
 export const sendInvoiceEmailSchema = z.object({

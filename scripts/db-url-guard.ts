@@ -1,7 +1,7 @@
 /**
  * Wspólna reguła parametrów zapytania w POSTGRES_URL dla skryptów, które łączą
  * się z bazą przez postgres.js, a potem oddają ten sam adres drizzle-kit
- * (`db:reset`, bramka `db:push`; #188, B2 Ethana i uwaga Leo do bramki push).
+ * (`db:reset`, bramka `db:push`; #188, B2 z recenzji i uwaga z recenzji do bramki push).
  *
  * Sterownik pg w drizzle-kit bierze host z `?host=` w zapytaniu, a postgres.js
  * ocenia host z części adresu przed ścieżką. Przy takim adresie bezpiecznik

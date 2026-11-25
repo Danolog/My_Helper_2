@@ -1,23 +1,32 @@
 /**
- * Stopka strony a flaga dokumentów prawnych (`areLegalDocsPublished()`).
+ * Stopka strony a dokumenty prawne (`publishedLegalLinks()`).
  *
- * Przy wartości z prawdziwego modułu (false) stopka nie linkuje do
- * /privacy, /terms ani /contact — te strony jeszcze nie istnieją. Przy true
- * (atrapa modułu features) odnośniki wracają w wersji desktopowej
- * i mobilnej. Opis marki nie obiecuje AI.
+ * Przy wartości z prawdziwego modułu (flaga wyłączona) stopka nie linkuje do
+ * żadnej strony prawnej — każda odpowiada 404. Przy włączonej fladze (stan
+ * podany do prawdziwej funkcji, z wersjami dokumentów) odnośniki pojawiają
+ * się w wersji desktopowej i mobilnej. Opis marki nie obiecuje AI.
  */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SiteFooter } from "@/components/site-footer";
+import type { LegalDocuments } from "@/lib/legal/documents";
 
-const flags = vi.hoisted(() => ({ legal: false, real: false }));
+const state = vi.hoisted(() => ({ useRealModule: true }));
 
-vi.mock("@/lib/features", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/features")>();
-  flags.real = actual.areLegalDocsPublished();
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  const versioned: LegalDocuments = {
+    ...actual.LEGAL_DOCUMENTS,
+    privacy: { ...actual.LEGAL_DOCUMENTS.privacy, version: "2026-12-01" },
+    terms: { ...actual.LEGAL_DOCUMENTS.terms, version: "2026-12-01" },
+    dpa: { ...actual.LEGAL_DOCUMENTS.dpa, version: "2026-12-01" },
+  };
   return {
     ...actual,
-    areLegalDocsPublished: () => flags.legal,
+    publishedLegalLinks: () =>
+      state.useRealModule
+        ? actual.publishedLegalLinks()
+        : actual.publishedLegalLinks(true, versioned),
   };
 });
 
@@ -37,7 +46,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-const LEGAL_HREFS = ["/privacy", "/terms", "/contact"];
+const LEGAL_HREFS = ["/privacy", "/terms", "/dpa", "/podprocesorzy", "/contact"];
 
 function hrefs(): string[] {
   return screen.getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
@@ -45,21 +54,17 @@ function hrefs(): string[] {
 
 describe("SiteFooter — dokumenty prawne nieopublikowane (wartość z modułu)", () => {
   beforeEach(() => {
-    flags.legal = flags.real;
+    state.useRealModule = true;
   });
 
-  it("prawdziwy areLegalDocsPublished() zwraca false", () => {
-    expect(flags.real).toBe(false);
-  });
-
-  it("brak odnośników do /privacy, /terms i /contact oraz nagłówka „Informacje”", () => {
+  it("brak odnośników do stron prawnych i nagłówka „Informacje”", () => {
     render(<SiteFooter />);
 
     for (const href of LEGAL_HREFS) {
       expect(hrefs()).not.toContain(href);
     }
     expect(screen.queryByText("Informacje")).toBeNull();
-    expect(screen.queryByText(/Regulamin/)).toBeNull();
+    expect(screen.queryByText(/Regulamin|Polityka prywatności|Kontakt/)).toBeNull();
   });
 
   it("pozostałe odnośniki zostają (rejestracja, cennik, salony)", () => {
@@ -80,18 +85,19 @@ describe("SiteFooter — dokumenty prawne nieopublikowane (wartość z modułu)"
   });
 });
 
-describe("SiteFooter — dokumenty prawne opublikowane (atrapa)", () => {
+describe("SiteFooter — dokumenty prawne opublikowane (stan podany do funkcji)", () => {
   beforeEach(() => {
-    flags.legal = true;
+    state.useRealModule = false;
   });
 
-  it("odnośniki do /privacy i /terms w obu wersjach stopki, /contact w wersji desktopowej", () => {
+  it("każda strona prawna w obu wersjach stopki, z tytułem dokumentu", () => {
     render(<SiteFooter />);
 
     const all = hrefs();
-    expect(all.filter((h) => h === "/privacy")).toHaveLength(2);
-    expect(all.filter((h) => h === "/terms")).toHaveLength(2);
-    expect(all.filter((h) => h === "/contact")).toHaveLength(1);
+    for (const href of LEGAL_HREFS) {
+      expect(all.filter((h) => h === href)).toHaveLength(2);
+    }
     expect(screen.getByText("Informacje")).toBeInTheDocument();
+    expect(screen.getAllByText("Polityka prywatności")).toHaveLength(2);
   });
 });

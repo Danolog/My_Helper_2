@@ -65,6 +65,19 @@ vi.mock("@/lib/server/system", () => ({
 }));
 const mockFindCredentialPasswordHash = systemMocks.findCredentialPasswordHash;
 
+// Usunięcie klienta: blokady, liczenie zobowiązań i anonimizacja w transakcji.
+// Zachowanie na danych sprawdzają testy pg; tu kolejność i odpowiedzi trasy.
+const retentionMocks = vi.hoisted(() => ({
+  lockClientForRemoval: vi.fn(),
+  countClientRemovalBlockers: vi.fn(),
+  anonymizeClientData: vi.fn(),
+}));
+vi.mock("@/lib/server/retention/anonymize-client", () => ({
+  lockClientForRemoval: (...args: unknown[]) => retentionMocks.lockClientForRemoval(...args),
+  countClientRemovalBlockers: (...args: unknown[]) => retentionMocks.countClientRemovalBlockers(...args),
+  anonymizeClientData: (...args: unknown[]) => retentionMocks.anonymizeClientData(...args),
+}));
+
 // Mock session for DELETE endpoint
 const mockGetSession = vi.fn();
 vi.mock("@/lib/auth", () => ({
@@ -560,6 +573,7 @@ describe("PUT /api/clients/[id]", () => {
         notes: "VIP client",
         preferences: "Morning appointments",
         allergies: "Latex",
+        healthDataConsent: true,
         favoriteEmployeeId: employeeUuid,
         requireDeposit: true,
         depositType: "fixed",
@@ -611,6 +625,9 @@ describe("PUT /api/clients/[id]", () => {
 describe("DELETE /api/clients/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retentionMocks.lockClientForRemoval.mockResolvedValue(true);
+    retentionMocks.countClientRemovalBlockers.mockResolvedValue({ futureAppointments: 0, depositsToRefund: 0 });
+    retentionMocks.anonymizeClientData.mockResolvedValue({});
   });
 
   it("should return 401 when not authenticated", async () => {
@@ -856,6 +873,169 @@ describe("DELETE /api/clients/[id]", () => {
     // Jedno zapytanie select (findOne w transakcji) — hash nie idzie przez db.select.
     expect(mockDbSelect).toHaveBeenCalledTimes(1);
   });
+
+  describe("anonimizacja i zobowiązania klienta", () => {
+    const deleteWithPassword = () =>
+      deleteClient(
+        createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+          method: "DELETE",
+          body: { password: "correct-password" },
+        }),
+        createRouteParams(TEST_IDS.CLIENT_UUID)
+      );
+
+    beforeEach(() => {
+      mockGetSession.mockResolvedValue({ user: { id: "user-1", email: "owner@test.com" } });
+      mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+      mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
+      mockVerifyPassword.mockResolvedValue(true);
+      mockDbDelete.mockReturnValue(chainMock([makeClient()]));
+    });
+
+    /** Błąd jak z postgres-js: `code` na samym błędzie. */
+    const pgError = (code: string) => Object.assign(new Error("db"), { code });
+    /** Błąd opakowany przez Drizzle: kod tylko w `cause`. */
+    const wrappedPgError = (code: string) => new Error("Failed query", { cause: pgError(code) });
+
+    it("200: w jednej transakcji blokady → liczenie → anonimizacja → DELETE, z salonem z sesji", async () => {
+      const order: string[] = [];
+      retentionMocks.lockClientForRemoval.mockImplementation(async () => {
+        order.push("lock");
+        return true;
+      });
+      retentionMocks.countClientRemovalBlockers.mockImplementation(async () => {
+        order.push("count");
+        return { futureAppointments: 0, depositsToRefund: 0 };
+      });
+      retentionMocks.anonymizeClientData.mockImplementation(async () => {
+        order.push("anonymize");
+        return {};
+      });
+      const deletedRow = makeClient({ allergies: "Uczulenie na lateks" });
+      mockDbDelete.mockImplementation(() => {
+        order.push("delete");
+        return chainMock([deletedRow]);
+      });
+
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
+
+      expect(status).toBe(200);
+      // Minimalizacja: sam identyfikator, bez danych usuwanej kartoteki.
+      expect(body).toEqual({ success: true, data: { id: deletedRow.id } });
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain(deletedRow.firstName as string);
+      expect(raw).not.toContain("allergies");
+      expect(raw).not.toContain("Uczulenie na lateks");
+      expect(order).toEqual(["lock", "count", "anonymize", "delete"]);
+      for (const fn of [
+        retentionMocks.lockClientForRemoval,
+        retentionMocks.countClientRemovalBlockers,
+        retentionMocks.anonymizeClientData,
+      ]) {
+        expect(fn).toHaveBeenCalledWith(mockTx, TEST_IDS.SALON_UUID, TEST_IDS.CLIENT_UUID);
+      }
+    });
+
+    it("409: przyszłe wizyty → kod i liczby, bez danych klienta; bez anonimizacji i DELETE", async () => {
+      retentionMocks.countClientRemovalBlockers.mockResolvedValue({ futureAppointments: 2, depositsToRefund: 0 });
+
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
+
+      expect(status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: "CLIENT_HAS_PENDING_OBLIGATIONS",
+        error: expect.any(String),
+        futureAppointments: 2,
+        depositsToRefund: 0,
+      });
+      expect(retentionMocks.anonymizeClientData).not.toHaveBeenCalled();
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
+    it("409: zadatek do zwrotu przy odwołanej wizycie → kod i liczby; bez anonimizacji i DELETE", async () => {
+      retentionMocks.countClientRemovalBlockers.mockResolvedValue({ futureAppointments: 0, depositsToRefund: 1 });
+
+      const { status, body } = await parseResponse<Record<string, unknown>>(await deleteWithPassword());
+
+      expect(status).toBe(409);
+      expect(body.code).toBe("CLIENT_HAS_PENDING_OBLIGATIONS");
+      expect(body.futureAppointments).toBe(0);
+      expect(body.depositsToRefund).toBe(1);
+      expect(JSON.stringify(body)).not.toContain(makeClient().firstName);
+      expect(retentionMocks.anonymizeClientData).not.toHaveBeenCalled();
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
+    it("404: klient zniknął przed blokadą (równoległe usunięcie) → bez liczenia, anonimizacji i DELETE", async () => {
+      retentionMocks.lockClientForRemoval.mockResolvedValue(false);
+
+      const { status, body } = await parseResponse(await deleteWithPassword());
+
+      expect(status).toBe(404);
+      expect(body.error).toBe("Client not found");
+      expect(retentionMocks.countClientRemovalBlockers).not.toHaveBeenCalled();
+      expect(retentionMocks.anonymizeClientData).not.toHaveBeenCalled();
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["55P03 (lock_timeout) z blokady", "lock", "55P03", pgError],
+      ["40P01 (zakleszczenie) z blokady", "lock", "40P01", pgError],
+      ["55P03 opakowany w cause, z anonimizacji", "anonymize", "55P03", wrappedPgError],
+      ["40P01 opakowany w cause, z DELETE", "delete", "40P01", wrappedPgError],
+    ] as const)("503 + Retry-After: 2 — %s", async (_label, where, code, makeError) => {
+      const { logger } = await import("@/lib/logger");
+      const warnSpy = vi.spyOn(logger, "warn");
+      const error = makeError(code);
+      if (where === "lock") retentionMocks.lockClientForRemoval.mockRejectedValue(error);
+      if (where === "anonymize") retentionMocks.anonymizeClientData.mockRejectedValue(error);
+      if (where === "delete") {
+        mockDbDelete.mockImplementation(() => {
+          throw error;
+        });
+      }
+
+      const response = await deleteWithPassword();
+      const { status, body } = await parseResponse<Record<string, unknown>>(response);
+
+      expect(status).toBe(503);
+      expect(response.headers.get("Retry-After")).toBe("2");
+      expect(body).toEqual({ success: false, code: "CLIENT_DELETE_RETRY", error: "Spróbuj ponownie za chwilę" });
+      // Bez ponawiania w serwerze: jedna próba blokady.
+      expect(retentionMocks.lockClientForRemoval).toHaveBeenCalledTimes(1);
+      // W logu tylko kod błędu — bez message, stacku i parametrów zapytania.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(expect.any(String), { code });
+      warnSpy.mockRestore();
+    });
+
+    it("500: inny błąd bazy w transakcji (np. 23503) → ogólny komunikat, bez Retry-After", async () => {
+      retentionMocks.anonymizeClientData.mockRejectedValue(wrappedPgError("23503"));
+
+      const response = await deleteWithPassword();
+      const { status, body } = await parseResponse(response);
+
+      expect(status).toBe(500);
+      expect(body.error).toBe("Failed to delete client");
+      expect(response.headers.get("Retry-After")).toBeNull();
+    });
+
+    it("403: recepcja bez czasowego dostępu → bez sprawdzania hasła i bez transakcji", async () => {
+      mockGetSalonContext.mockResolvedValueOnce({
+        salonId: TEST_IDS.SALON_UUID,
+        role: "receptionist",
+        employeeId: null,
+        userId: "user-1",
+      });
+
+      const { status } = await parseResponse(await deleteWithPassword());
+
+      expect(status).toBe(403);
+      expect(mockVerifyPassword).not.toHaveBeenCalled();
+      expect(retentionMocks.lockClientForRemoval).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // =======================================================
@@ -974,5 +1154,357 @@ describe("Faza 3 role — /api/clients (employee 403)", () => {
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data).toHaveLength(1);
+  });
+});
+
+// -------------------------------------------------------
+// Zgoda na zapis informacji o zdrowiu (allergies)
+// -------------------------------------------------------
+
+/** Tekst zapytania z atrapy `sql` (tagged template): fragmenty sklejone, wartości jako ${…}. */
+function sqlText(value: unknown): string {
+  const v = value as { type?: string; args?: unknown[] };
+  if (v?.type !== "sql" || !Array.isArray(v.args)) return String(value);
+  const [strings, ...values] = v.args as [string[], ...unknown[]];
+  return strings.reduce((acc, s, i) => acc + s + (i < values.length ? "${" + String(values[i]) + "}" : ""), "");
+}
+
+/** Czy warunek `where` (atrapa and/eq/isNotNull) zawiera isNotNull(clients.healthDataConsentAt). */
+function whereRequiresStoredConsent(where: unknown): boolean {
+  const node = where as { type?: string; args?: unknown[] };
+  if (node?.type === "isNotNull") return node.args?.[0] === "clients.healthDataConsentAt";
+  return Array.isArray(node?.args) && node.args.some(whereRequiresStoredConsent);
+}
+
+async function mockNoSession() {
+  const { requireAuth, isAuthError } = await import("@/lib/auth-middleware");
+  const { NextResponse } = await import("next/server");
+  vi.mocked(requireAuth).mockResolvedValueOnce(
+    NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+  );
+  vi.mocked(isAuthError).mockReturnValueOnce(true);
+}
+
+describe("Zgoda na informacje o zdrowiu — POST /api/clients", () => {
+  const BASE = { salonId: TEST_IDS.SALON_UUID, firstName: "Jan", lastName: "Kowalski" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  function post(body: Record<string, unknown>) {
+    return createClient(createMockRequest("http://localhost:3000/api/clients", { method: "POST", body }));
+  }
+
+  function valuesArg(chain: Record<string, unknown>) {
+    return (chain.values as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+  }
+
+  it("allergies bez zgody → 400 z kodem i polskim komunikatem, bez zapisu", async () => {
+    const { status, body } = await parseResponse(await post({ ...BASE, allergies: "Lateks" }));
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect((body as any).code).toBe("HEALTH_DATA_CONSENT_REQUIRED");
+    expect(body.error).toContain("zgod");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("allergies przy healthDataConsent: false → 400, bez zapisu", async () => {
+    const { status } = await parseResponse(await post({ ...BASE, allergies: "Lateks", healthDataConsent: false }));
+
+    expect(status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pusty napis", ""],
+    ["same spacje", "   "],
+    ["null", null],
+  ])("allergies = %s bez zgody → 201, zapis NULL i brak zgody", async (_label, allergies) => {
+    const chain = chainMock([makeClient()]);
+    mockDbInsert.mockReturnValue(chain);
+
+    const { status } = await parseResponse(await post({ ...BASE, allergies }));
+
+    expect(status).toBe(201);
+    const values = valuesArg(chain);
+    expect(values.allergies).toBeNull();
+    expect(values.healthDataConsentAt).toBeNull();
+    expect(values.healthDataConsentBy).toBeNull();
+  });
+
+  it("zgoda zaznaczona → czas z bazy (now()) i konto z sesji; wartości z body ignorowane", async () => {
+    const chain = chainMock([makeClient({ allergies: "Lateks" })]);
+    mockDbInsert.mockReturnValue(chain);
+
+    const { status } = await parseResponse(
+      await post({
+        ...BASE,
+        allergies: "Lateks",
+        healthDataConsent: true,
+        healthDataConsentAt: "2000-01-01T00:00:00.000Z",
+        healthDataConsentBy: "konto-z-body",
+      })
+    );
+
+    expect(status).toBe(201);
+    const values = valuesArg(chain);
+    expect(values.allergies).toBe("Lateks");
+    expect(sqlText(values.healthDataConsentAt)).toBe("now()");
+    expect(values.healthDataConsentBy).toBe(OWNER_CTX.userId);
+    expect(JSON.stringify(values)).not.toContain("2000-01-01");
+    expect(JSON.stringify(values)).not.toContain("konto-z-body");
+  });
+
+  it("zgoda zaznaczona bez allergies → 201, zgoda zapisana, allergies NULL", async () => {
+    const chain = chainMock([makeClient()]);
+    mockDbInsert.mockReturnValue(chain);
+
+    const { status } = await parseResponse(await post({ ...BASE, healthDataConsent: true }));
+
+    expect(status).toBe(201);
+    const values = valuesArg(chain);
+    expect(values.allergies).toBeNull();
+    expect(sqlText(values.healthDataConsentAt)).toBe("now()");
+    expect(values.healthDataConsentBy).toBe(OWNER_CTX.userId);
+  });
+
+  it("healthDataConsent nie-boolean → 400 walidacji, bez zapisu", async () => {
+    const { status } = await parseResponse(await post({ ...BASE, healthDataConsent: "tak" }));
+
+    expect(status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("bez sesji → 401, bez zapisu", async () => {
+    await mockNoSession();
+
+    const { status } = await parseResponse(await post({ ...BASE, allergies: "Lateks", healthDataConsent: true }));
+
+    expect(status).toBe(401);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("pracownik (employee) ze zgodą → 403, bez zapisu", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status } = await parseResponse(await post({ ...BASE, allergies: "Lateks", healthDataConsent: true }));
+
+    expect(status).toBe(403);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("konto bez salonu → 404, bez zapisu", async () => {
+    mockGetSalonContext.mockResolvedValue(null);
+
+    const { status } = await parseResponse(await post({ ...BASE, allergies: "Lateks", healthDataConsent: true }));
+
+    expect(status).toBe(404);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("Zgoda na informacje o zdrowiu — PUT /api/clients/[id]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  function put(body: Record<string, unknown>, id: string = TEST_IDS.CLIENT_UUID) {
+    return updateClient(
+      createMockRequest(`http://localhost:3000/api/clients/${id}`, { method: "PUT", body }),
+      createRouteParams(id)
+    );
+  }
+
+  function setArg(chain: Record<string, unknown>) {
+    return (chain.set as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+  }
+
+  function whereArg(chain: Record<string, unknown>) {
+    return (chain.where as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+  }
+
+  it("allergies bez zgody w żądaniu i bez zgody zapisanej → 400 z kodem (UPDATE z warunkiem zgody nie trafił, klient istnieje)", async () => {
+    const updateChain = chainMock([]); // warunek isNotNull(consent_at) odciął wiersz
+    mockDbUpdate.mockReturnValue(updateChain);
+    mockDbSelect.mockReturnValue(chainMock([{ id: TEST_IDS.CLIENT_UUID }]));
+
+    const { status, body } = await parseResponse(await put({ allergies: "Lateks" }));
+
+    expect(status).toBe(400);
+    expect((body as any).code).toBe("HEALTH_DATA_CONSENT_REQUIRED");
+    expect(body.error).toContain("zgod");
+    expect(whereRequiresStoredConsent(whereArg(updateChain))).toBe(true);
+  });
+
+  it("allergies przy zgodzie zapisanej wcześniej (bez pola zgody w żądaniu) → 200, UPDATE z warunkiem zgody, zgoda bez zmian", async () => {
+    const updateChain = chainMock([makeClient({ allergies: "Lateks" })]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status, body } = await parseResponse(await put({ allergies: "Lateks" }));
+
+    expect(status).toBe(200);
+    expect((body as any).data.allergies).toBe("Lateks");
+    expect(whereRequiresStoredConsent(whereArg(updateChain))).toBe(true);
+    const set = setArg(updateChain);
+    expect(set.allergies).toBe("Lateks");
+    expect(set).not.toHaveProperty("healthDataConsentAt");
+    expect(set).not.toHaveProperty("healthDataConsentBy");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("allergies bez zgody dla nieistniejącego/cudzego klienta → 404 (nie 400)", async () => {
+    mockDbUpdate.mockReturnValue(chainMock([]));
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const { status } = await parseResponse(await put({ allergies: "Lateks" }));
+
+    expect(status).toBe(404);
+  });
+
+  it("zaznaczenie zgody → serwer nadaje czas (now(), zachowuje wcześniejszy) i konto z sesji; wartości z body ignorowane", async () => {
+    const updateChain = chainMock([makeClient({ allergies: "Lateks" })]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status } = await parseResponse(
+      await put({
+        allergies: "Lateks",
+        healthDataConsent: true,
+        healthDataConsentAt: "2000-01-01T00:00:00.000Z",
+        healthDataConsentBy: "konto-z-body",
+      })
+    );
+
+    expect(status).toBe(200);
+    // Zgoda w żądaniu → bez warunku zgody zapisanej.
+    expect(whereRequiresStoredConsent(whereArg(updateChain))).toBe(false);
+    const set = setArg(updateChain);
+    expect(set.allergies).toBe("Lateks");
+    expect(sqlText(set.healthDataConsentAt)).toBe("coalesce(${clients.healthDataConsentAt}, now())");
+    expect(sqlText(set.healthDataConsentBy)).toContain("THEN ${" + OWNER_CTX.userId + "}");
+    expect(sqlText(set.healthDataConsentBy)).toContain("ELSE ${clients.healthDataConsentBy}");
+    expect(JSON.stringify(set)).not.toContain("2000-01-01");
+    expect(JSON.stringify(set)).not.toContain("konto-z-body");
+  });
+
+  it("konto zgody bierze z sesji recepcji, nie właściciela", async () => {
+    mockGetSalonContext.mockResolvedValue({ ...EMPLOYEE_CTX, role: "receptionist" as const });
+    const updateChain = chainMock([makeClient()]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status } = await parseResponse(await put({ healthDataConsent: true }));
+
+    expect(status).toBe(200);
+    expect(sqlText(setArg(updateChain).healthDataConsentBy)).toContain("THEN ${" + EMPLOYEE_CTX.userId + "}");
+  });
+
+  it("cofnięcie zgody → w tym samym UPDATE allergies = NULL i oba pola zgody = NULL", async () => {
+    const updateChain = chainMock([makeClient({ allergies: null })]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status, body } = await parseResponse(await put({ healthDataConsent: false, firstName: "Anna" }));
+
+    expect(status).toBe(200);
+    expect((body as any).data.allergies).toBeNull();
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    const set = setArg(updateChain);
+    expect(set.allergies).toBeNull();
+    expect(set.healthDataConsentAt).toBeNull();
+    expect(set.healthDataConsentBy).toBeNull();
+    expect(set.firstName).toBe("Anna");
+  });
+
+  it("cofnięcie zgody z jednoczesnym wpisem allergies → 400, bez UPDATE", async () => {
+    const { status, body } = await parseResponse(await put({ healthDataConsent: false, allergies: "Lateks" }));
+
+    expect(status).toBe(400);
+    expect((body as any).code).toBe("HEALTH_DATA_CONSENT_REQUIRED");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("cofnięcie zgody z pustym allergies → 200, allergies NULL", async () => {
+    const updateChain = chainMock([makeClient({ allergies: null })]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status } = await parseResponse(await put({ healthDataConsent: false, allergies: "" }));
+
+    expect(status).toBe(200);
+    expect(setArg(updateChain).allergies).toBeNull();
+  });
+
+  it.each([
+    ["pusty napis", ""],
+    ["same spacje", "  "],
+    ["null", null],
+  ])("allergies = %s bez zgody → 200, zapis NULL bez warunku zgody", async (_label, allergies) => {
+    const updateChain = chainMock([makeClient()]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status } = await parseResponse(await put({ allergies }));
+
+    expect(status).toBe(200);
+    expect(setArg(updateChain).allergies).toBeNull();
+    expect(whereRequiresStoredConsent(whereArg(updateChain))).toBe(false);
+  });
+
+  it("zmiana innych pól bez allergies → bez warunku zgody i bez zmian zgody", async () => {
+    const updateChain = chainMock([makeClient({ firstName: "Ewa" })]);
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const { status } = await parseResponse(await put({ firstName: "Ewa" }));
+
+    expect(status).toBe(200);
+    const set = setArg(updateChain);
+    expect(set).not.toHaveProperty("allergies");
+    expect(set).not.toHaveProperty("healthDataConsentAt");
+    expect(whereRequiresStoredConsent(whereArg(updateChain))).toBe(false);
+  });
+
+  it("healthDataConsent nie-boolean → 400 walidacji, bez UPDATE", async () => {
+    const { status } = await parseResponse(await put({ healthDataConsent: "nie" }));
+
+    expect(status).toBe(400);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("bez sesji → 401, bez UPDATE", async () => {
+    await mockNoSession();
+
+    const { status } = await parseResponse(await put({ healthDataConsent: true }));
+
+    expect(status).toBe(401);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("pracownik (employee) → 403, bez UPDATE", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status } = await parseResponse(await put({ healthDataConsent: false }));
+
+    expect(status).toBe(403);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("cofnięcie zgody u cudzego/nieistniejącego klienta → 404", async () => {
+    mockDbUpdate.mockReturnValue(chainMock([]));
+
+    const { status } = await parseResponse(await put({ healthDataConsent: false }));
+
+    expect(status).toBe(404);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("błąd bazy w UPDATE zgody → 500", async () => {
+    const errorChain = chainMock([]);
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB error"));
+    mockDbUpdate.mockReturnValue(errorChain);
+
+    const { status, body } = await parseResponse(await put({ healthDataConsent: true }));
+
+    expect(status).toBe(500);
+    expect(body.error).toContain("Failed to update client");
   });
 });

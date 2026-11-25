@@ -66,11 +66,11 @@ const RLS = loadRlsRequirements();
 const fullRls = (): RlsRow[] => RLS.map((r) => ({ table: r.table, rls: true, policies: [r.policy] }));
 
 describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)", () => {
-  it("40 tabel: 38 z 0005 i deposit_status_events z 0014 z tenant_isolation, salons z tenant_self", () => {
-    expect(RLS).toHaveLength(40);
-    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(39);
+  it("41 tabel: 38 z 0005, deposit_status_events z 0014 i legal_acceptances z 0015 z tenant_isolation, salons z tenant_self", () => {
+    expect(RLS).toHaveLength(41);
+    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(40);
     expect(RLS).toContainEqual({ table: "salons", policy: "tenant_self" });
-    for (const t of ["appointments", "deposit_payments", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
+    for (const t of ["appointments", "deposit_payments", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions", "legal_acceptances"]) {
       expect(RLS).toContainEqual({ table: t, policy: "tenant_isolation" });
     }
   });
@@ -125,15 +125,15 @@ describe("strażnik — decyzja", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("push po migracjach (RLS zdjęte na wszystkich 40) → odmowa z liczbą tabel", () => {
+  it("push po migracjach (RLS zdjęte na wszystkich 41) → odmowa z liczbą tabel", () => {
     const rows = RLS.map((r) => ({ table: r.table, rls: false, policies: [] }));
     const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.missing).toHaveLength(41);
-    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z migracji");
+    expect(r.missing).toHaveLength(42);
+    expect(r.missing).toContain("tabel z RLS w bazie 0 < 41 z migracji");
     expect(r.message).toMatch(
-      /^RLS z migracji niekompletne \(41\): .* i 36 więcej — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push\. .* Odbuduj: pnpm db:reset \(lokalnie\) albo pnpm db:migrate na pustej bazie\.$/
+      /^RLS z migracji niekompletne \(42\): .* i 37 więcej — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push\. .* Odbuduj: pnpm db:reset \(lokalnie\) albo pnpm db:migrate na pustej bazie\.$/
     );
   });
 
@@ -151,7 +151,7 @@ describe("strażnik — decyzja", () => {
     const rows = fullRls().map((x) => (x.table === "appointments" ? { ...x, rls: false } : x));
     const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 39 < 40 z migracji");
+    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 40 < 41 z migracji");
   });
 
   it("D3: liczba tabel z RLS w bazie mniejsza mimo kompletu wymagań → odmowa (osobna gałąź)", () => {
@@ -249,7 +249,7 @@ describe("db:reset — plan (bez połączenia)", () => {
     expect(planReset([], LOCAL, { VERCEL_ENV: "production" }).ok).toBe(false);
   });
 
-  // B2 (Ethan): sterownik pg w drizzle-kit bierze host z `?host=`, a
+  // B2 (recenzja): sterownik pg w drizzle-kit bierze host z `?host=`, a
   // bezpieczniki oceniają adres jak postgres.js — localhost przeszedłby, pg
   // połączyłby się z Neonem.
   it.each([
@@ -291,7 +291,7 @@ describe("db:reset — plan (bez połączenia)", () => {
   });
 });
 
-describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", () => {
+describe("db:reset — przebieg (L1, recenzja): każdy krok na resetowanej bazie", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -339,7 +339,7 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  // L8 (Leo): druga warstwa po kontroli hosta — serwer z ustawieniami neon.*
+  // L8 (recenzja): druga warstwa po kontroli hosta — serwer z ustawieniami neon.*
   // albo sonda bez wyniku → odmowa przed DROP.
   it.each([
     ["serwer z ustawieniami neon.*", [{ database: "postgres", neon_settings: 1 }]],
@@ -355,7 +355,7 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     expect(err.mock.calls.flat().join(" ")).toContain("serwer ma ustawienia neon.*");
   });
 
-  // Ethan do c16a7fd: checkSeedClientOptions na kliencie admina stoi przed sondą i DROP.
+  // recenzja do c16a7fd: checkSeedClientOptions na kliencie admina stoi przed sondą i DROP.
   it.each([
     ["host Neon w opcjach klienta", { host: ["ep-x.eu-central-1.aws.neon.tech"], path: undefined }],
     ["host spoza localhost", { host: ["db.example.com"], path: undefined }],
@@ -427,7 +427,7 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
     expect(unsafe).toHaveBeenCalledWith(PUSH_GATE_SQL);
   });
 
-  describe("adres bramki = adres pusha (uwaga Leo do ff8d306: ?host= w sterowniku pg)", () => {
+  describe("adres bramki = adres pusha (uwaga z recenzji do ff8d306: ?host= w sterowniku pg)", () => {
     afterEach(() => {
       vi.restoreAllMocks();
     });
@@ -466,7 +466,7 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
       expect(await pushGateMain({ POSTGRES_URL: LOCAL }, connect)).toBe(1);
     });
 
-    // Ethan do c16a7fd: gałąź błędu — zapytanie odrzucone (np. brak połączenia).
+    // recenzja do c16a7fd: gałąź błędu — zapytanie odrzucone (np. brak połączenia).
     it.each([
       ["błąd z kodem", "ECONNREFUSED", " (ECONNREFUSED)"],
       ["błąd bez kodu", undefined, ""],

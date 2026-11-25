@@ -11,7 +11,7 @@ import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions - List promotions of the session salon
 export async function GET(request: Request) {
   try {
-    // Faza 3 (role) + P0 (przegląd Ryana): promocje tylko owner albo czasowy
+    // Faza 3 (role) + P0 (przegląd bezpieczeństwa): promocje tylko owner albo czasowy
     // grant "promotions", ZAWSZE salon z sesji. Wcześniej właściciel czytał
     // salon z query (dowolny), a bez salonId — promocje wszystkich salonów.
     const { searchParams } = new URL(request.url);
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
-    // Faza 3 (role) + P0 (przegląd Ryana): tworzenie promocji tylko owner albo
+    // Faza 3 (role) + P0 (przegląd bezpieczeństwa): tworzenie promocji tylko owner albo
     // czasowy grant "promotions", ZAWSZE w salonie z sesji. Wcześniej właściciel
     // był zwolniony z porównania salonId — owner salonu A tworzył promocję w B.
     const guard = await requireSalonStaff({

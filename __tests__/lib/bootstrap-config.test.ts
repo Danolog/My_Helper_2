@@ -9,12 +9,12 @@
  *    --data-file), hasła bazy nigdy nie są argumentem ani wyjściem;
  *  - zasobnik: allUsers wyłącznie roles/storage.legacyObjectReader (#118 pkt 5);
  *  - Cloud SQL: jawnie --edition=enterprise (koszt), ochrona przed usunięciem,
- *    zonal, kopie i PITR, ENCRYPTED_ONLY, bez autoryzowanych sieci (Ethan, 0.4);
+ *    zonal, kopie i PITR, ENCRYPTED_ONLY, bez autoryzowanych sieci (recenzja, 0.4);
  *  - secretAccessor osobno na każdy sekret, nigdy na projekcie; zero ról
  *    owner/editor; run.developer tylko na zasobach;
  *  - WIF: warunek z pliku, czysta koniunkcja równości (#140), z dziewięcioma
- *    obowiązkowymi członami (Ryan 6899923012);
- *  - region przypięty do europe-central2 we wszystkich `create` (Ethan);
+ *    obowiązkowymi członami (audyt bezpieczeństwa 6899923012);
+ *  - region przypięty do europe-central2 we wszystkich `create` (recenzja);
  *  - hasło: błąd odczytu wersji sekretu przerywa etap, ścieżka samonaprawy
  *    (login istnieje, sekret bez wersji → set-password), wywołania haseł
  *    bez lokalnego logu gcloud (B-1);
@@ -208,7 +208,7 @@ describe("G-D1: dry-run i parametry", () => {
     expect(r.calls).toEqual([]);
   });
 
-  it("każde tworzenie zasobu regionalnego idzie z europe-central2 (Ethan: region przypięty)", () => {
+  it("każde tworzenie zasobu regionalnego idzie z europe-central2 (recenzja: region przypięty)", () => {
     const creates = STAGES.flatMap((s) => bootstrap([...base(s), "--apply"]).calls).filter((c) =>
       / (repositories create|buckets create|secrets create|instances create|run deploy|jobs create) /.test(c),
     );
@@ -220,7 +220,7 @@ describe("G-D1: dry-run i parametry", () => {
     }
   });
 
-  it("parametry instancji SQL nie są przełączalne z linii poleceń (decyzja Ethana)", () => {
+  it("parametry instancji SQL nie są przełączalne z linii poleceń (decyzja z recenzji)", () => {
     for (const flag of ["--sql-tier=db-custom-4-16384", "--pg-version=POSTGRES_16", "--db-user=root"]) {
       expect(bootstrap([...base("sql"), flag]).status).toBe(2);
     }
@@ -342,7 +342,7 @@ describe("G-D1: sekrety i konta", () => {
   });
 });
 
-describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
+describe("G-D1: Cloud SQL (recenzja, 0.4)", () => {
   const r = bootstrap([...base("sql"), "--apply"]);
   const create = r.calls.find((c) => c.includes("sql instances create"))!;
 
@@ -452,7 +452,7 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(SOURCE).toMatch(/CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "\$\{GC\[@\]\}" sql users/);
   });
 
-  // N2 (Ryan, K-1b): `secrets versions add` z hasłem w stdin też bez lokalnego logu gcloud.
+  // N2 (audyt bezpieczeństwa, K-1b): `secrets versions add` z hasłem w stdin też bez lokalnego logu gcloud.
   it("N2: każde secrets versions add (postgres-url, postgres-admin-password) bez lokalnego logu gcloud", () => {
     const adds = r.calls.filter((c) => c.includes("versions add"));
     expect(adds).toHaveLength(2);
@@ -713,7 +713,7 @@ describe("G-D1: WIF", () => {
   });
 });
 
-// N2 (Ryan, K-1b): runbook D-5 — wartości sekretów wyłącznie przez stdin,
+// N2 (audyt bezpieczeństwa, K-1b): runbook D-5 — wartości sekretów wyłącznie przez stdin,
 // przez tr -d '\r\n' i bez lokalnego logu gcloud (jedna funkcja add).
 describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () => {
   const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
@@ -733,7 +733,7 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     expect(d5).not.toMatch(/mktemp/);
   });
 
-  it("blok D-5 zaczyna się od `set +x; set -o pipefail` (K-1d B1, Ethan N1)", () => {
+  it("blok D-5 zaczyna się od `set +x; set -o pipefail` (K-1d B1, recenzja N1)", () => {
     expect(lines.find((l) => l.trim() !== "" && !l.startsWith("```"))).toBe("set +x; set -o pipefail");
   });
 
@@ -746,7 +746,7 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     expect(block).not.toContain("tr -d '\\n'");
   });
 
-  // K-1d (Ryan): w D-5 żadnego zapisu wartości na dysk (TMPDIR, plik z kluczem, tee),
+  // K-1d (audyt bezpieczeństwa): w D-5 żadnego zapisu wartości na dysk (TMPDIR, plik z kluczem, tee),
   // żadnego pobierania z npm bez wersji (npx), a rm oryginału tylko po udanym add (&&).
   it("D-5: bez zapisu do $TMPDIR ani do pliku, bez npx; rm oryginału wyłącznie po `&&` udanego add", () => {
     expect(d5).not.toMatch(/TMPDIR/);
@@ -885,9 +885,9 @@ esac
       expect(w.read("gcloud.argv").split("\n")).toEqual(expect.arrayContaining(["versions", "add", "nazwa", "--data-file=-"]));
     });
 
-    // N1 (Ethan): xtrace włączony przed wklejeniem — `set +x` w pierwszej linii bloku wyłącza go,
+    // N1 (recenzja): xtrace włączony przed wklejeniem — `set +x` w pierwszej linii bloku wyłącza go,
     // zanim wartość trafi do zmiennej lokalnej (przypisanie i printf byłyby inaczej śledzone na stderr).
-    it.each(["add", "add_multiline"])("%s pod `set -x` włączonym przed blokiem: wartość nie trafia na stderr (Ethan N1)", (fn) => {
+    it.each(["add", "add_multiline"])("%s pod `set -x` włączonym przed blokiem: wartość nie trafia na stderr (recenzja N1)", (fn) => {
       const w = world();
       const value = "WARTOSC-TESTOWA-123";
       const r = w.run(shell, `set -x\n${PRELUDE}\n${fn} nazwa`, {}, `${value}\n`);
@@ -897,7 +897,7 @@ esac
       expect(r.stdout + r.stderr).not.toContain(value);
     });
 
-    it("VAPID cały blok pod `set -x` włączonym przed blokiem: prywatny nie trafia na stderr (Ethan N1)", () => {
+    it("VAPID cały blok pod `set -x` włączonym przed blokiem: prywatny nie trafia na stderr (recenzja N1)", () => {
       const w = world();
       const r = w.run(shell, `set -x\n${PRELUDE}\n${VAPID}`);
       expect(r.status, r.stderr).toBe(0);
@@ -1017,10 +1017,10 @@ esac
     expect(w.leftovers()).toEqual([]);
   }, 15_000);
 
-  // Z1 (Ethan): interaktywny zsh Darka ma `interactivecomments` wyłączone — `#` nie zaczyna komentarza
+  // Z1 (recenzja): interaktywny zsh dewelopera ma `interactivecomments` wyłączone — `#` nie zaczyna komentarza
   // nawet na początku linii. Cały blok przez stdin do `zsh -f -i` (czyta linia po linii jak przy wpisywaniu).
   it.skipIf(!existsSync("/bin/zsh"))(
-    "cały blok D-5 w interaktywnym `zsh -f -i` (interactivecomments wyłączone): bez błędów i obcych poleceń, „VAPID: para OK” (Ethan Z1)",
+    "cały blok D-5 w interaktywnym `zsh -f -i` (interactivecomments wyłączone): bez błędów i obcych poleceń, „VAPID: para OK” (recenzja Z1)",
     () => {
       const w = world();
       const secure = join(w.env().HOME, "secure");
@@ -1033,7 +1033,7 @@ esac
       });
       const out = r.stdout + r.stderr;
       expect(r.stdout, "warunek testu: opcja wyłączona").toContain("INTERACTIVECOMMENTS-OFF");
-      // Ethan Z1: cztery wzorce z recenzji; plus „no such file” (komentarz z `<` wykonany jako przekierowanie, :388 @483cff3).
+      // Z1: cztery wzorce z recenzji; plus „no such file” (komentarz z `<` wykonany jako przekierowanie, :388 @483cff3).
       for (const bad of ["command not found", "parse error", "no matches found", "unknown", "no such file"]) expect(out, out).not.toContain(bad);
       expect(r.stdout, out).toContain("VAPID: para OK");
       expect(readdirSync(secure), "oryginały usunięte po udanym add").toEqual([]);
@@ -1064,7 +1064,7 @@ esac
   });
 });
 
-// Z1/N1 (Ethan, K-1d) + zakres Olivera, rozszerzone w K-1e: KAŻDY płot kodu runbooka kroku D
+// Z1/N1 (recenzja, K-1d) + zakres produktowy, rozszerzone w K-1e: KAŻDY płot kodu runbooka kroku D
 // (```bash, ```sh, ```zsh, płot bez języka i każdy inny) jest blokiem do wklejenia w interaktywnym zsh
 // bez `interactivecomments` — chyba że stoi na jawnej liście wyjątków niżej (nie-powłoka).
 // Zero komentarzy (objaśnienia w prozie); bloki dotykające sekretów zaczynają się od `set +x`.

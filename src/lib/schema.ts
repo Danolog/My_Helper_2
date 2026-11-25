@@ -150,6 +150,13 @@ export const clients = pgTable(
     notes: text("notes"),
     preferences: text("preferences"),
     allergies: text("allergies"),
+    // Wyraźna zgoda klienta na zapis informacji o zdrowiu (`allergies`).
+    // Oba pola nadaje wyłącznie serwer (czas bazy i konto personelu z sesji);
+    // NULL = brak zgody, a wtedy `allergies` musi być NULL (reguła w trasach
+    // POST/PUT /api/clients). `consent_by` bez FK: dowód zgody ma przetrwać
+    // usunięcie konta personelu.
+    healthDataConsentAt: timestamp("health_data_consent_at", { withTimezone: true }),
+    healthDataConsentBy: text("health_data_consent_by"),
     favoriteEmployeeId: text("favorite_employee_id"),
     birthday: text("birthday"), // ISO date string "YYYY-MM-DD" for birthday
     requireDeposit: boolean("require_deposit").default(false),
@@ -166,6 +173,10 @@ export const clients = pgTable(
     index("clients_email_idx").on(table.email),
     index("clients_phone_idx").on(table.phone),
     index("clients_birthday_idx").on(table.birthday),
+    // Druga tama pod regułą tras: informacja o zdrowiu tylko przy zapisanej
+    // zgodzie, a czas i konto zgody występują wyłącznie razem.
+    check("clients_allergies_require_consent", sql`${table.allergies} IS NULL OR ${table.healthDataConsentAt} IS NOT NULL`),
+    check("clients_health_consent_pair", sql`(${table.healthDataConsentAt} IS NULL) = (${table.healthDataConsentBy} IS NULL)`),
   ]
 );
 
@@ -342,6 +353,38 @@ export const depositStatusEvents = pgTable(
     check("deposit_status_events_value_changed", sql`${table.depositPaid} <> ${table.previousDepositPaid}`),
     check("deposit_status_events_direction", sql`(${table.source} IN ('manual_mark', 'stripe_confirmation') AND ${table.depositPaid}) OR (${table.source} IN ('manual_unmark', 'refund') AND NOT ${table.depositPaid}) OR ${table.source} = 'owner_edit'`),
     check("deposit_status_events_actor", sql`(${table.source} IN ('stripe_confirmation', 'refund') AND ${table.actorUserId} IS NULL AND ${table.actorRole} IS NULL) OR (${table.source} IN ('manual_mark', 'manual_unmark') AND ${table.actorUserId} IS NOT NULL AND ${table.actorRole} IN ('owner', 'receptionist')) OR (${table.source} = 'owner_edit' AND ${table.actorUserId} IS NOT NULL AND ${table.actorRole} = 'owner')`),
+  ]
+);
+
+/**
+ * Akceptacje regulaminu i umowy powierzenia (DPA) przez salon: dokument, wersja
+ * treści, czas, konto i salon. Dowód akceptacji ma przetrwać salon i konto
+ * (umowa powierzenia każe go trzymać po zakończeniu umowy), więc `salon_id`
+ * i `user_id` są bez FK, a nowa wersja dokumentu to nowy wiersz, nie zmiana
+ * starego. Dla roli aplikacji tylko do dopisywania (migracja odbiera
+ * UPDATE/DELETE); RLS i uprawnienia są w migracji 0015 (Drizzle ich nie wyraża).
+ * Wpisy z trasy dodaje tylko `recordLegalAcceptances`.
+ */
+export const LEGAL_ACCEPTANCE_DOCUMENTS = ["terms", "dpa"] as const;
+export const LEGAL_ACCEPTANCE_SOURCES = ["registration", "create_salon", "email_pilot"] as const;
+export const legalAcceptances = pgTable(
+  "legal_acceptances",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id").notNull(),
+    userId: text("user_id").notNull(),
+    document: text("document").notNull(),
+    version: text("version").notNull(),
+    source: text("source").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("legal_acceptances_salon_accepted_idx").on(table.salonId, table.acceptedAt),
+    index("legal_acceptances_user_accepted_idx").on(table.userId, table.acceptedAt),
+    check("legal_acceptances_document_valid", sql`${table.document} IN ('terms', 'dpa')`),
+    check("legal_acceptances_source_valid", sql`${table.source} IN ('registration', 'create_salon', 'email_pilot')`),
+    check("legal_acceptances_version_nonempty", sql`length(${table.version}) BETWEEN 1 AND 64`),
+    check("legal_acceptances_user_nonempty", sql`length(${table.userId}) > 0`),
   ]
 );
 
@@ -590,6 +633,12 @@ export const reviews = pgTable(
     index("reviews_client_id_idx").on(table.clientId),
     index("reviews_employee_id_idx").on(table.employeeId),
     index("reviews_status_idx").on(table.status),
+    // Co najwyzej jedna opinia na wizyte. Indeks czesciowy, bo FK ma ON DELETE SET NULL:
+    // po usunieciu wizyt wiele opinii moze miec appointment_id = NULL.
+    // Trasa klienta zamienia naruszenie (23505) na 409.
+    uniqueIndex("reviews_appointment_id_uq")
+      .on(table.appointmentId)
+      .where(sql`${table.appointmentId} is not null`),
   ]
 );
 

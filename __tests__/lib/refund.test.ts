@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * refund.ts — decyzja Ethana (#98):
+ * refund.ts — decyzja z recenzji (#98):
  *   - processAutomaticRefund zwraca JEDNĄ wskazaną płatność (id + wizyta +
  *     status 'succeeded'), klucz idempotencji deposit-refund:<id>;
  *   - Stripe bez klienta / bez PaymentIntentu / błąd => płatność zostaje
@@ -416,7 +416,7 @@ describe("refundAppointmentDeposits — wszystkie 'succeeded' wizyty", () => {
     expect(appointmentSets()).toHaveLength(0);
   });
 
-  it("failedAmount (Leo, #98): pełna porażka 1 × 50 => 50; częściowa 2 × 25 => 25", async () => {
+  it("failedAmount (recenzja, #98): pełna porażka 1 × 50 => 50; częściowa 2 × 25 => 25", async () => {
     queuePayments(payment());
     mockStripeRefundsCreate.mockRejectedValueOnce(new Error("boom"));
     const full = await refundAppointmentDeposits("appt-1", "powod");

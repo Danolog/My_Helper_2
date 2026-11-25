@@ -11,7 +11,7 @@
  * Kody trasy (201 sukces, nie 200; 401/403 — patrz opis przy testach):
  * 201, 400, "401" (gość bez sesji = 400, nie 401), "403" (nie-personel →
  * clientId ignorowany, nie 403), 404, 409 (kolizja wizyty i blokada czasu),
- * 500. Telefon zapisywany w E.164 (#64 pkt 4, Ryan N1).
+ * 500. Telefon zapisywany w E.164 (#64 pkt 4, audyt bezpieczeństwa N1).
  */
 import { DrizzleQueryError } from "drizzle-orm";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -358,7 +358,7 @@ describe("kody odpowiedzi trasy", () => {
   });
 
   // "403": nie-personel nie dostaje 403 za clientId — pole jest ignorowane
-  // (P1 Ryana, wzorzec z #39); obce refy salonu → 400 z assertSalonRefs.
+  // (P1 z audytu bezpieczeństwa, wzorzec z #39); obce refy salonu → 400 z assertSalonRefs.
   it("klient portalu z cudzym clientId → clientId ignorowany (bez 403), 201", async () => {
     mockGetOptionalSession.mockResolvedValue(LOGGED_IN);
     const res = await post({ ...buildDepositBody(formState()), clientId: CLIENT_UUID });
@@ -422,7 +422,7 @@ describe("kody odpowiedzi trasy", () => {
 // fix/deposit-hardening: kolizje, trim, limity, daty, logi
 // -------------------------------------------------------
 
-describe("409: obie ścieżki kolizji (Ethan, #65)", () => {
+describe("409: obie ścieżki kolizji (recenzja, #65)", () => {
   beforeEach(() => mockGetOptionalSession.mockResolvedValue(LOGGED_IN));
 
   it("409: termin zajęty przez inną wizytę, nic nie zapisane", async () => {
@@ -450,7 +450,7 @@ describe("409: obie ścieżki kolizji (Ethan, #65)", () => {
   });
 });
 
-describe("pola gościa: trim, limity, komunikaty (Quinn)", () => {
+describe("pola gościa: trim, limity, komunikaty", () => {
   beforeEach(() => mockGetOptionalSession.mockResolvedValue(null));
 
   // Builder frontu przycina sam — ten test omija go i wysyła surowe body,
@@ -661,7 +661,7 @@ describe("#69: usługa usunięta lub wyłączona", () => {
 });
 
 // -------------------------------------------------------
-// #69 (Ethan): symulacja płatności bez klucza Stripe jest opt-in.
+// #69 (recenzja): symulacja płatności bez klucza Stripe jest opt-in.
 // Środowisko ustawiane jawnie w każdym teście; globalny beforeEach włącza
 // flagę, więc tu najpierw ją czyścimy. VERCEL_ENV nie ma już znaczenia.
 // -------------------------------------------------------

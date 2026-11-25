@@ -1,5 +1,5 @@
 /**
- * POST + GET /api/albums — izolacja salonu (P1/P2 z przeglądu Ryana).
+ * POST + GET /api/albums — izolacja salonu (P1/P2 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą salonId z body/query => forSalon(salonId): zalogowane konto
  * tworzyło i listowało albumy galerii cudzego salonu. Teraz salon z sesji;

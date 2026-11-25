@@ -21,7 +21,7 @@ import { forSalon } from "@/lib/server/repository";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
-    // P0 (przeglad Ryana): salon z sesji, query salonId tylko porownywany.
+    // P0 (przeglad bezpieczeństwa): salon z sesji, query salonId tylko porownywany.
     // Zadatki z nazwiskami + platnosci abonamentu = finanse salonu.
     const guard = await requireSalonStaff({
       feature: "finance",

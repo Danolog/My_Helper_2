@@ -151,15 +151,38 @@ afterEach(() => {
 });
 
 describe("BlikDepositSection — formularz zapisu (zapis otwarty)", () => {
-  it("renderuje 6 zdań i etykietę dokładnie ze stałych, każde zdanie w osobnym akapicie", async () => {
+  it("renderuje 8 zdań i etykietę dokładnie ze stałych, każde zdanie w osobnym akapicie", async () => {
     queueResponses(getOk(EMPTY));
     render(<BlikDepositSection />);
 
     const box = await screen.findByTestId("blik-consent-sentences");
     const paragraphs = Array.from(box.querySelectorAll("p")).map((p) => p.textContent);
-    expect(actualConsent.BLIK_CONSENT_SENTENCES).toHaveLength(6);
-    expect(paragraphs.slice(0, 6)).toEqual([...actualConsent.BLIK_CONSENT_SENTENCES]);
+    expect(actualConsent.BLIK_CONSENT_SENTENCES).toHaveLength(8);
+    expect(paragraphs.slice(0, 8)).toEqual([...actualConsent.BLIK_CONSENT_SENTENCES]);
     expect(screen.getByText(actualConsent.BLIK_CONSENT_LABEL).tagName).toBe("LABEL");
+  });
+
+  it("tekst karty: zdanie o numerze służbowym, link do polityki zaraz pod zdaniem o administratorze, bez „Zgadzam się” i bez słowa „zgoda”", async () => {
+    queueResponses(getOk(EMPTY));
+    render(<BlikDepositSection />);
+
+    const card = await screen.findByTestId("blik-deposit-section");
+    await screen.findByLabelText(actualConsent.BLIK_CONSENT_LABEL);
+    const text = card.textContent ?? "";
+    expect(text).toContain("Najlepiej podaj numer służbowy, nie prywatny.");
+    expect(text).not.toMatch(/zgadzam się/i);
+    expect(text).not.toMatch(/zgod/i);
+
+    const paragraphs = Array.from(
+      screen.getByTestId("blik-consent-sentences").querySelectorAll("p")
+    );
+    const adminIndex = paragraphs.findIndex((p) =>
+      p.textContent?.includes("administratorem danych jest MyHelper")
+    );
+    expect(adminIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      paragraphs[adminIndex + 1]?.querySelector("a")?.getAttribute("href")
+    ).toBe(POLICY_HREF);
   });
 
   it("checkbox zgody jest odznaczony na starcie, a zapis nieaktywny bez numeru i bez zgody", async () => {
@@ -226,7 +249,7 @@ describe("BlikDepositSection — formularz zapisu (zapis otwarty)", () => {
         error: "Validation failed",
         details: {
           blikPhone: "Numer BLIK musi byc numerem komorkowym",
-          consentVersion: "Brak wersji tresci zgody. Odswiez strone",
+          consentVersion: "Brak wersji treści potwierdzenia. Odśwież stronę",
         },
       })
     );
@@ -235,7 +258,7 @@ describe("BlikDepositSection — formularz zapisu (zapis otwarty)", () => {
     await fillAndSave(user, "221234567");
 
     expect(await screen.findByText("Numer BLIK musi byc numerem komorkowym")).toBeInTheDocument();
-    expect(screen.getByText("Brak wersji tresci zgody. Odswiez strone")).toBeInTheDocument();
+    expect(screen.getByText("Brak wersji treści potwierdzenia. Odśwież stronę")).toBeInTheDocument();
     expect(screen.getByLabelText("Numer telefonu BLIK")).toHaveAttribute("aria-invalid", "true");
     expect(toastMock.error).not.toHaveBeenCalled();
   });
@@ -251,8 +274,10 @@ describe("BlikDepositSection — formularz zapisu (zapis otwarty)", () => {
     await fillAndSave(user);
 
     expect(
-      await screen.findByText("Treść zgody została zaktualizowana. Odśwież stronę.")
+      await screen.findByText("Treść potwierdzenia została zaktualizowana. Odśwież stronę.")
     ).toBeInTheDocument();
+    expect(screen.getByRole("alert").textContent ?? "").not.toMatch(/zgod/i);
+    expect(screen.getByTestId("blik-deposit-section").textContent ?? "").not.toMatch(/zgod/i);
     expect(screen.getByRole("button", { name: "Odśwież stronę" })).toBeInTheDocument();
     expect(screen.getByLabelText(actualConsent.BLIK_CONSENT_LABEL)).not.toBeChecked();
   });
@@ -341,8 +366,10 @@ describe("BlikDepositSection — formularz zapisu (zapis otwarty)", () => {
     render(<BlikDepositSection />);
 
     expect(
-      await screen.findByText("Treść zgody się zmieniła. Przeczytaj ją i zaznacz zgodę ponownie.")
+      await screen.findByText("Treść potwierdzenia się zmieniła. Przeczytaj ją i zaznacz pole ponownie.")
     ).toBeInTheDocument();
+    expect(screen.getByRole("status").textContent ?? "").not.toMatch(/zgod/i);
+    expect(screen.getByTestId("blik-deposit-section").textContent ?? "").not.toMatch(/zgod/i);
     expect(screen.getByLabelText("Numer telefonu BLIK")).toHaveValue(PHONE);
     expect(screen.getByLabelText(actualConsent.BLIK_CONSENT_LABEL)).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Usuń numer" })).toBeInTheDocument();
@@ -439,6 +466,10 @@ describe("BlikDepositSection — zapis zamknięty przy prawdziwej stałej", () =
     const box = screen.getByTestId("blik-consent-sentences");
     const paragraphs = Array.from(box.querySelectorAll("p")).map((p) => p.textContent);
     expect(paragraphs).toEqual([...actualConsent.BLIK_CONSENT_SENTENCES]);
+    const cardText = screen.getByTestId("blik-deposit-section").textContent ?? "";
+    expect(cardText).toContain("Najlepiej podaj numer służbowy, nie prywatny.");
+    expect(cardText).not.toMatch(/zgadzam się/i);
+    expect(cardText).not.toMatch(/zgod/i);
     expect(screen.queryByLabelText("Numer telefonu BLIK")).not.toBeInTheDocument();
     const save = screen.queryByRole("button", { name: "Zapisz numer" });
     if (save) expect(save).toBeDisabled();
@@ -452,6 +483,8 @@ describe("BlikDepositSection — zapis zamknięty przy prawdziwej stałej", () =
     render(<BlikDepositSection />);
 
     expect(await screen.findByTestId("blik-saved-phone")).toHaveTextContent(PHONE);
+    expect(screen.getByText(/^Potwierdzono: /)).toBeInTheDocument();
+    expect(screen.getByTestId("blik-deposit-section").textContent ?? "").not.toMatch(/zgod/i);
     expect(screen.getByTestId("blik-save-closed")).toBeInTheDocument();
     expect(screen.getByTestId("blik-consent-sentences")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zmień numer" })).not.toBeInTheDocument();

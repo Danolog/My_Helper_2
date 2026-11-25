@@ -1,5 +1,5 @@
 /**
- * #168 pkt 4 (decyzja Olivera, wariant A): acceptEarlierSlot z ofertą bez
+ * #168 pkt 4 (decyzja produktowa, wariant A): acceptEarlierSlot z ofertą bez
  * `offeredEmployeeId` (pracownik usunięty po wysłaniu oferty, FK ON DELETE
  * SET NULL) → odmowa „Proponowany termin nie jest juz dostepny”. Żadna wizyta
  * nie powstaje ani się nie zmienia, wpis bez zmian (accepted = null), bez

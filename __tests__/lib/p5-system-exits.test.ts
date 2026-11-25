@@ -7,7 +7,7 @@
  *   wołającego crona) wołają wyjścia z rejestru `@/lib/server/system`
  *   (moduły notifications / deposits-cleanup);
  * - `notifications/{birthday,low-stock,we-miss-you}` działają na jednym salonie
- *   z obowiązkowym `salonId`, więc idą przez `forSalon(salonId)` (decyzja CTO
+ *   z obowiązkowym `salonId`, więc idą przez `forSalon(salonId)` (decyzja z recenzji
  *   przed kodem P5a-2), bez wyjść `system/`.
  * `register-subscription` to P5c (po P1c), a plans/seed to P5b — poza tym plikiem.
  *
@@ -72,7 +72,7 @@ describe("#193 P5a-2: trasy bez puli żądań", () => {
     expect(existsSync(path.join(ROOT, "src/lib/server/system", `${mod}.ts`))).toBe(true);
   });
 
-  it("crony P5 nie trafiają do system/cron.ts (decyzja CTO: cron.ts zostaje z jedną funkcją z P0b)", () => {
+  it("crony P5 nie trafiają do system/cron.ts (decyzja z recenzji: cron.ts zostaje z jedną funkcją z P0b)", () => {
     const exported = [...src("src/lib/server/system/cron.ts").matchAll(/^export\s+(?:async\s+)?function\s+(\w+)/gm)].map((m) => m[1]);
     expect(exported).toEqual(["cleanupExpiredTemporaryAccess"]);
   });

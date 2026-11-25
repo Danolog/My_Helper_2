@@ -2,20 +2,40 @@
 
 import { useState } from "react";
 import { Building2, Crown, Loader2, Zap } from "lucide-react";
+import { LegalAcceptanceFields } from "@/components/legal/legal-acceptance-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
+import {
+  LEGAL_ACCEPTANCE_REQUIRED_CODE,
+  LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
+  isLegalAcceptanceComplete,
+  legalAcceptanceForm,
+  legalAcceptanceRequestFields,
+  type LegalAcceptanceChecks,
+  type LegalAcceptanceForm,
+} from "@/lib/legal/documents";
 import { isPlanOnSale } from "@/lib/plan-catalog";
 import { planHighlights } from "@/lib/plan-features";
 
 interface CreateSalonPromptProps {
   session: { user: { name?: string | null; email: string } };
   onCreated: () => void;
+  /**
+   * Pola akceptacji regulaminu i DPA; domyślnie stan z rejestru dokumentów
+   * (przed publikacją `null`: bez pól). Tu powstaje salon przy potwierdzaniu
+   * e-maila i przy logowaniu Google, więc to główne miejsce akceptacji.
+   */
+  legalForm?: LegalAcceptanceForm | null;
 }
 
-export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps) {
+export function CreateSalonPrompt({
+  session,
+  onCreated,
+  legalForm = legalAcceptanceForm(),
+}: CreateSalonPromptProps) {
   // Listy funkcji pochodza z src/lib/plan-features.ts — tu nie wpisujemy
   // wlasnych pozycji (pilnuje PlanFeaturesSingleSource.test.tsx).
   // Karty sa tylko dla planow, dla ktorych isPlanOnSale zwraca true.
@@ -39,9 +59,14 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
   );
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState("");
+  const [legalChecks, setLegalChecks] = useState<LegalAcceptanceChecks>({
+    terms: false,
+    dpa: false,
+  });
+  const legalAcceptanceComplete = isLegalAcceptanceComplete(legalForm, legalChecks);
 
   const handleCreate = async () => {
-    if (!selectedPlan) return;
+    if (!selectedPlan || !legalAcceptanceComplete) return;
     setIsCreating(true);
     setError("");
 
@@ -52,12 +77,15 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
         body: JSON.stringify({
           planSlug: selectedPlan,
           email: session.user.email,
+          ...legalAcceptanceRequestFields(legalForm, legalChecks, "create_salon"),
         }),
       });
 
       const data = await res.json();
       if (data.success) {
         onCreated();
+      } else if (data.code === LEGAL_ACCEPTANCE_REQUIRED_CODE) {
+        setError(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE);
       } else {
         setError(data.error || "Nie udalo sie utworzyc salonu");
       }
@@ -120,10 +148,17 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
                 </button>
               ))}
             </div>
+            <LegalAcceptanceFields
+              form={legalForm}
+              checks={legalChecks}
+              onChange={setLegalChecks}
+              idPrefix="create-salon"
+              disabled={isCreating}
+            />
             {error && <p className="text-sm text-destructive text-center">{error}</p>}
             <Button
               className="w-full"
-              disabled={!selectedPlan || isCreating}
+              disabled={!selectedPlan || isCreating || !legalAcceptanceComplete}
               onClick={handleCreate}
             >
               {isCreating ? (

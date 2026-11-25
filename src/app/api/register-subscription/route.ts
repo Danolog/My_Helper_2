@@ -5,6 +5,12 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { TRIAL_DAYS } from "@/lib/constants";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
 import { db } from "@/lib/db";
+import {
+  checkLegalAcceptance,
+  recordLegalAcceptances,
+  requiredLegalVersions,
+  type LegalAcceptanceInput,
+} from "@/lib/legal/acceptance";
 import { logger } from "@/lib/logger";
 import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
 import {
@@ -37,13 +43,14 @@ function alreadySubscribed() {
  *    zwraca 401 (UI traktuje to jako niekrytyczne),
  *  - CreateSalonPrompt w panelu, gdy zalogowane konto nie ma salonu.
  *
- * Body: { planSlug, email?: string } — planSlug to element PLANS_ON_SALE
+ * Body: { planSlug, email?: string, termsVersion?, dpaVersion?, acceptanceSource? }
+ * — planSlug to element PLANS_ON_SALE
  * z @/lib/plan-catalog, inna wartość → 400 z walidacji. `email` jest
  * ignorowany: konto zawsze z sesji (authResult.user). Istniejącej
  * subskrypcji ta trasa nie zmienia (409) — zmiana planu tylko przez Stripe
  * (/api/subscriptions/checkout, /api/subscriptions/downgrade).
  *
- * T3b (Ethan §3 — niezmiennik „każdy salon ma dokładnie jeden wiersz” od
+ * T3b (recenzja §3 — niezmiennik „każdy salon ma dokładnie jeden wiersz” od
  * strony zapisu):
  *  - salon i subskrypcja w JEDNEJ transakcji — błąd zapisu subskrypcji nie
  *    zostawia salonu bez wiersza,
@@ -53,6 +60,13 @@ function alreadySubscribed() {
  *  - druga linia obrony: indeksy unikalne `salons_owner_id_uq` i
  *    `salon_subscriptions_salon_current_uq` → 23505 → 409,
  *  - tylko aktywny plan (`isActive`).
+ *
+ * Akceptacja regulaminu i umowy powierzenia (@/lib/legal/acceptance): po
+ * publikacji dokumentów obie bieżące wersje są wymagane (inaczej 400
+ * LEGAL_ACCEPTANCE_REQUIRED, bez zapytań do bazy), a dwa wpisy
+ * `legal_acceptances` powstają w tej samej transakcji co salon i trial. Ta trasa
+ * działa przed istnieniem salonu, więc zapis idzie surowym `db` jak reszta
+ * transakcji (rola właściciela bazy), nie przez `forSalon`.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -63,8 +77,20 @@ export async function POST(request: NextRequest) {
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
     }
-    const { planSlug } = rawBody as { planSlug: string };
+    const { planSlug, termsVersion, dpaVersion, acceptanceSource } = rawBody as {
+      planSlug: string;
+    } & LegalAcceptanceInput;
     const account = authResult.user;
+
+    // Akceptacja regulaminu i DPA przed jakimkolwiek zapytaniem: bez niej salon nie
+    // powstaje. Dopóki dokumenty nie są opublikowane, akceptacja nie obowiązuje.
+    const legal = checkLegalAcceptance(
+      { termsVersion, dpaVersion, acceptanceSource },
+      requiredLegalVersions()
+    );
+    if (!legal.ok) {
+      return NextResponse.json(legal.body, { status: 400 });
+    }
 
     // Find the subscription plan (only plans offered for sale)
     const [plan] = await db
@@ -131,6 +157,11 @@ export async function POST(request: NextRequest) {
           })
           .returning();
         if (!subscription) throw new Error("Register subscription: subscription insert returned no row");
+
+        // Dowód akceptacji w tej samej transakcji co salon i trial: błąd zapisu cofa całość.
+        if (legal.acceptance) {
+          await recordLegalAcceptances(tx, { salonId, userId: account.id, acceptance: legal.acceptance });
+        }
         return { salonId, subscription };
       });
     } catch (error) {

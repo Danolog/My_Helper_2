@@ -634,7 +634,7 @@ describe("createPromotionSchema", () => {
   });
 });
 
-// #66 (P3 Ryana z #67): daty ISO 8601 i limit uwag — jak w create-session.
+// #66 (P3 z audytu bezpieczeństwa z #67): daty ISO 8601 i limit uwag — jak w create-session.
 describe("createAppointmentSchema — daty ISO i limit uwag (#66)", () => {
   const base = {
     salonId: "salon-123",
@@ -659,7 +659,7 @@ describe("createAppointmentSchema — daty ISO i limit uwag (#66)", () => {
     "2026-12-01", // sama data, bez godziny
     "01.12.2026 10:00",
     "2026-13-45T10:00:00Z", // kształt ISO, ale nie data
-    // Follow-up #71 (Ethan): bez strefy Date.parse czyta czas serwera (UTC na Vercelu).
+    // Follow-up #71 (recenzja): bez strefy Date.parse czyta czas serwera (UTC na Vercelu).
     "2026-12-01T10:00",
     "2026-12-01T10:00:00",
     "2026-12-01T10:00:00.000",
@@ -717,7 +717,7 @@ describe("depositCreateSessionSchema — data bez strefy (follow-up #71)", () =>
   });
 });
 
-// Follow-up #71 (Ethan): PUT /api/appointments/[id] — limit i normalizacja notatek.
+// Follow-up #71 (recenzja): PUT /api/appointments/[id] — limit i normalizacja notatek.
 describe("updateAppointmentSchema — notatki (follow-up #71)", () => {
   const parse = (body: Record<string, unknown>) => updateAppointmentSchema.safeParse(body);
 
@@ -757,7 +757,7 @@ describe("updateAppointmentSchema — notatki (follow-up #71)", () => {
   });
 });
 
-// Follow-up #71 (Ethan): pola notatek w panelu nie przepuszczą tekstu, który API odrzuci.
+// Follow-up #71 (recenzja): pola notatek w panelu nie przepuszczą tekstu, który API odrzuci.
 describe("dialogi wizyt — maxLength notatek (follow-up #71)", () => {
   it.each([
     ["src/components/appointments/new-appointment-dialog.tsx", "appointment-notes-input"],

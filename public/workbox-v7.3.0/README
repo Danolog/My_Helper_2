@@ -1,0 +1,43 @@
+Workbox 7.3.0 — vendored runtime libraries
+
+These files are unmodified copies of the build output published on the npm
+registry by the Workbox project (https://github.com/GoogleChrome/workbox).
+They are served by the application itself so the service worker does not
+load any script from a third-party host.
+
+License: MIT, Copyright 2018 Google LLC (full text in LICENSE next to this file).
+
+Source packages (npm, version 7.3.0) and files:
+
+  workbox-sw@7.3.0                  build/workbox-sw.js
+  workbox-core@7.3.0                build/workbox-core.prod.js
+  workbox-routing@7.3.0             build/workbox-routing.prod.js
+  workbox-strategies@7.3.0          build/workbox-strategies.prod.js
+  workbox-expiration@7.3.0          build/workbox-expiration.prod.js
+  workbox-cacheable-response@7.3.0  build/workbox-cacheable-response.prod.js
+
+SHA-256:
+
+  15dc893ceb0c5cbfbddb683d7a729c7128a6de0810a8e0ba12b030ef64567420  workbox-sw.js
+  5b15cdeb2c4c8d46e8f82a768cd85269b6c8fe626b4c2cc0e576b2594202daf1  workbox-core.prod.js
+  ca0b76adc614540c7b5d30c07276cea271a64385301cdd097b955abfc217a040  workbox-routing.prod.js
+  9db41b7e7a32e61920b1a7d5eb8be773e3375f4866b9bb933b7d001028c8306a  workbox-strategies.prod.js
+  f056158a8f55c2405221e2449a82f82b9b9638cae40bbe807f222685fafd9a84  workbox-expiration.prod.js
+  427ec3deb2f250d7c42e2a8f39b94b9c8546832989f5eff3c4438ece962ca91e  workbox-cacheable-response.prod.js
+
+Notes:
+
+- Only the modules that public/sw.js uses are included, in production builds
+  (.prod.js). Source maps are omitted. Adding a new workbox.* module to sw.js
+  requires copying its .prod.js file here as well; otherwise the service
+  worker fails to install.
+- sw.js must call workbox.setConfig({ modulePathPrefix: "/workbox-v7.3.0/",
+  debug: false }) before touching any workbox.* module. Without the prefix
+  workbox-sw.js falls back to its built-in CDN URL; without debug: false it
+  requests .dev.js builds on localhost, which are not shipped.
+- The module builds in the 7.3.0 packages carry the internal marker
+  "workbox:<module>:7.2.0". This is how upstream published them; the files
+  are unchanged.
+- Upgrading: create a new versioned directory (workbox-vX.Y.Z), update
+  importScripts and modulePathPrefix in sw.js, bump CACHE_VERSION and
+  refresh the checksums above.

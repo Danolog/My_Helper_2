@@ -10,13 +10,13 @@
  *    istnienia zadań; nazwa nieznana albo PAUSED → kod 2 przed gcloud;
  *  - --check: dryf przed --resume, zgodność po nim;
  *  - fałszywy gcloud odrzuca pause na nie-ENABLED i resume na nie-PAUSED jak
- *    API (FAILED_PRECONDITION) — ponowne przebiegi muszą to omijać (Ethan 2);
- *  - zadanie ENABLED z harmonogramem zaparkowanym = nowe (Ethan 1);
+ *    API (FAILED_PRECONDITION) — ponowne przebiegi muszą to omijać (recenzja 2);
+ *  - zadanie ENABLED z harmonogramem zaparkowanym = nowe (recenzja 1);
  *  - token: odczyt raz, przed pierwszą zmianą; błąd/pusty → stop (W-1);
  *    wywołania z nagłówkiem bez lokalnego logu gcloud (B-1); update niesie
  *    nagłówek (rotacja); token nigdy w argumentach ani na wyjściu;
  *  - BASE_URL wyłącznie główny adres usługi (#143 pkt 1);
- *  - bez zadań mh-notify-* (Oliver, do R3-C).
+ *  - bez zadań mh-notify-* (decyzja produktowa, do R3-C).
  * Mutacje: wynik w opisie PR.
  */
 import { spawnSync } from "node:child_process";
@@ -56,7 +56,7 @@ if (pos[0] === "secrets") {
 }
 const verb = pos[2], name = verb === "create" || verb === "update" ? pos[4] : pos[3];
 const file = path.join(process.env.FAKE_JOBS, name + ".json");
-// Odrzucenie serii zmian (pomiar Olivera): pierwsze FAKE_ABORTED_TIMES wywołań
+// Odrzucenie serii zmian (pomiar z decyzji produktowej): pierwsze FAKE_ABORTED_TIMES wywołań
 // czasownika FAKE_ABORTED_VERB → ABORTED. Na stderr także treść pliku flag —
 // najgorszy przypadek: skrypt nie może jej przepuścić na wyjście.
 const counter = path.join(process.env.FAKE_JOBS, ".aborted");
@@ -170,7 +170,7 @@ const nameOf = (c: string[]) => {
 };
 
 describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
-  it("tabela: 5 zadań systemowych /api/cron/*, bez mh-notify-* (Oliver: do R3-C)", () => {
+  it("tabela: 5 zadań systemowych /api/cron/*, bez mh-notify-* (decyzja produktowa: do R3-C)", () => {
     expect(TABLE.map((j) => j.name).sort()).toEqual(
       ["mh-cleanup-pending-deposits", "mh-cleanup-temporary-access", "mh-push-reminders", "mh-push-reminders-24h", "mh-sms-reminders"],
     );
@@ -340,7 +340,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.state);
   });
 
-  it("Ethan 1: istniejące zadanie ENABLED z harmonogramem zaparkowanym (przerwany przebieg) → pauza przed właściwym harmonogramem", () => {
+  it("recenzja 1: istniejące zadanie ENABLED z harmonogramem zaparkowanym (przerwany przebieg) → pauza przed właściwym harmonogramem", () => {
     const w = world();
     const job = TABLE[0]!;
     w.seed(job.name, { schedule: "0 0 29 2 *", timeZone: "Europe/Warsaw", uri: SERVICE_URL + job.path, method: "GET", state: "ENABLED" });
@@ -351,7 +351,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(mine.map((c) => verbOf(c).split(" ")[0])).toEqual(["pause", "update"]);
   });
 
-  it("Ethan 1: istniejące zadanie PAUSED z harmonogramem zaparkowanym → bez pause (API by odrzuciło), właściwy harmonogram", () => {
+  it("recenzja 1: istniejące zadanie PAUSED z harmonogramem zaparkowanym → bez pause (API by odrzuciło), właściwy harmonogram", () => {
     const w = world();
     const job = TABLE[0]!;
     w.seed(job.name, { schedule: "0 0 29 2 *", timeZone: "Europe/Warsaw", uri: SERVICE_URL + job.path, method: "GET", state: "PAUSED" });
@@ -360,7 +360,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule });
   });
 
-  // Ethan (#137 @ b4bf4d0): odczyt harmonogramu bez `|| true` — błąd odczytu
+  // Recenzja (#137 @ b4bf4d0): odczyt harmonogramu bez `|| true` — błąd odczytu
   // nie może dać pustego tekstu, który pominąłby pauzę zaparkowanego zadania.
   it.each(["fail", "empty"])("odczyt harmonogramu istniejącego zadania: %s → kod ≠ 0, bez pause/update/create", (mode) => {
     const w = world();
@@ -382,7 +382,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(w.count()).toBe(0);
   });
 
-  // Ryan (#137): wyjście gcloud z zasobem zadania — każde create/update http
+  // Audyt bezpieczeństwa (#137): wyjście gcloud z zasobem zadania — każde create/update http
   // z --format=none, każde wywołanie gcloud bez logu plikowego.
   it("create/update http zawsze z --format=none; każde wywołanie gcloud z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1", () => {
     const w = world();
@@ -413,7 +413,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(r.stdout).toContain(TOKEN);
   });
 
-  // Oliver (pomiar): Scheduler odrzuca szybkie serie zmian kodem ABORTED.
+  // Decyzja produktowa (pomiar): Scheduler odrzuca szybkie serie zmian kodem ABORTED.
   it("ABORTED dwa razy, potem sukces → ponowienie z odstępami 10, 20 s; wynik jak bez błędu", () => {
     const w = world();
     const r = w.run([], { FAKE_ABORTED_VERB: "update", FAKE_ABORTED_TIMES: "2" });

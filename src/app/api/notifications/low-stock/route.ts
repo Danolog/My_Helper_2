@@ -4,7 +4,7 @@ import { isValidUuid, validateBody, lowStockNotificationSchema } from "@/lib/api
 import { requireCronSecret } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 import { products, notifications } from "@/lib/schema";
-// #193 P5a-2 (decyzja CTO D1): jeden salon z obowiązkowego salonId → brama salonu;
+// #193 P5a-2 (decyzja z recenzji D1): jeden salon z obowiązkowego salonId → brama salonu;
 // w raw jawny warunek salonu w każdym zapytaniu.
 import { forSalon } from "@/lib/server/repository";
 /**

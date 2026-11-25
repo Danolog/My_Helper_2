@@ -9,18 +9,47 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { formatConsentDate } from "./health-data-consent-form";
+
+/** Treść pola zgody pokazywana personelowi. */
+export const HEALTH_DATA_CONSENT_LABEL =
+  "Klient wyraził wyraźną zgodę na zapis informacji o zdrowiu";
+
+/** Zgoda zapisana w bazie: kiedy i przez kogo (do wyświetlenia). */
+export interface SavedHealthDataConsent {
+  at: string;
+  byLabel: string;
+}
 
 interface ClientHealthPreferencesCardProps {
   allergiesList: string[];
   preferencesList: string[];
   formNotes: string;
+  /** Stan pola zgody w formularzu. */
+  healthConsentChecked: boolean;
+  /** Zgoda zapisana w danych wczytanych do formularza (`null` = brak). */
+  savedHealthConsent: SavedHealthDataConsent | null;
+  /** Komunikat błędu zapisu dotyczący zgody (np. 400 z serwera). */
+  healthConsentError: string | null;
+  onHealthConsentChange: (checked: boolean) => void;
   onAllergiesChange: (allergies: string[]) => void;
   onPreferencesChange: (preferences: string[]) => void;
   onNotesChange: (notes: string) => void;
@@ -29,19 +58,47 @@ interface ClientHealthPreferencesCardProps {
 /**
  * Card for managing client health information (allergies),
  * preferences, and general notes.
+ *
+ * Alergie to informacja o zdrowiu: pole jest zablokowane, dopóki personel nie
+ * zaznaczy zgody klienta. Odznaczenie zgody przy wpisanych alergiach wymaga
+ * potwierdzenia, bo po zapisie alergie zostaną usunięte.
  */
 export function ClientHealthPreferencesCard({
   allergiesList,
   preferencesList,
   formNotes,
+  healthConsentChecked,
+  savedHealthConsent,
+  healthConsentError,
+  onHealthConsentChange,
   onAllergiesChange,
   onPreferencesChange,
   onNotesChange,
 }: ClientHealthPreferencesCardProps) {
   const [newAllergyInput, setNewAllergyInput] = useState("");
   const [newPreferenceInput, setNewPreferenceInput] = useState("");
+  const [confirmWithdrawOpen, setConfirmWithdrawOpen] = useState(false);
+
+  const allergiesLocked = !healthConsentChecked;
+
+  const handleConsentChange = (checked: boolean) => {
+    if (!checked && allergiesList.length > 0) {
+      // Najpierw potwierdzenie — pole zostaje zaznaczone do decyzji personelu.
+      setConfirmWithdrawOpen(true);
+      return;
+    }
+    if (!checked) setNewAllergyInput("");
+    onHealthConsentChange(checked);
+  };
+
+  const handleConfirmWithdraw = () => {
+    setConfirmWithdrawOpen(false);
+    setNewAllergyInput("");
+    onHealthConsentChange(false);
+  };
 
   const handleAddAllergy = () => {
+    if (allergiesLocked) return;
     const trimmed = newAllergyInput.trim();
     if (!trimmed) {
       toast.error("Wpisz nazwe alergii");
@@ -107,6 +164,35 @@ export function ClientHealthPreferencesCard({
             <Label className="text-base font-medium">Alergie</Label>
           </div>
 
+          {/* Zgoda klienta na zapis informacji o zdrowiu */}
+          <div className="mb-3 rounded-md border p-3" data-testid="health-consent-section">
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="health-data-consent"
+                checked={healthConsentChecked}
+                onCheckedChange={handleConsentChange}
+                className="mt-0.5"
+                data-testid="health-consent-checkbox"
+              />
+              <Label htmlFor="health-data-consent" className="text-sm font-normal leading-snug cursor-pointer">
+                {HEALTH_DATA_CONSENT_LABEL}
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2" data-testid="health-consent-status">
+              {renderConsentStatus()}
+            </p>
+          </div>
+
+          {healthConsentError && (
+            <p
+              role="alert"
+              className="text-sm text-destructive mb-3"
+              data-testid="health-consent-error"
+            >
+              {healthConsentError}
+            </p>
+          )}
+
           {allergiesList.length === 0 ? (
             <p
               className="text-sm text-muted-foreground mb-3"
@@ -144,10 +230,16 @@ export function ClientHealthPreferencesCard({
           {/* Add allergy form */}
           <div className="flex items-center gap-2">
             <Input
-              placeholder="np. Latex, Parafenylodiamina (PPD)"
+              placeholder={
+                allergiesLocked
+                  ? "Najpierw zaznacz zgodę klienta"
+                  : "np. Latex, Parafenylodiamina (PPD)"
+              }
               value={newAllergyInput}
               onChange={(e) => setNewAllergyInput(e.target.value)}
               onKeyDown={handleAllergyKeyDown}
+              disabled={allergiesLocked}
+              aria-label="Nowa alergia"
               className="max-w-sm"
               data-testid="new-allergy-input"
             />
@@ -156,6 +248,7 @@ export function ClientHealthPreferencesCard({
               variant="outline"
               size="sm"
               onClick={handleAddAllergy}
+              disabled={allergiesLocked}
               data-testid="add-allergy-btn"
             >
               <Plus className="h-4 w-4 mr-1" />
@@ -252,6 +345,43 @@ export function ClientHealthPreferencesCard({
           />
         </div>
       </CardContent>
+
+      <AlertDialog open={confirmWithdrawOpen} onOpenChange={setConfirmWithdrawOpen}>
+        <AlertDialogContent data-testid="health-consent-withdraw-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cofnąć zgodę i usunąć alergie?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Po zapisaniu kartoteki zgoda zostanie cofnięta, a wpisane alergie
+              klienta zostaną trwale usunięte.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="health-consent-withdraw-cancel">
+              Anuluj
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleConfirmWithdraw}
+              data-testid="health-consent-withdraw-confirm"
+            >
+              Cofnij zgodę i usuń alergie
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
+
+  function renderConsentStatus() {
+    if (savedHealthConsent && healthConsentChecked) {
+      return `Zgoda zapisana ${formatConsentDate(savedHealthConsent.at)}, zapisał(a): ${savedHealthConsent.byLabel}.`;
+    }
+    if (savedHealthConsent && !healthConsentChecked) {
+      return "Po zapisaniu kartoteki zgoda zostanie cofnięta, a alergie usunięte.";
+    }
+    if (healthConsentChecked) {
+      return "Zgoda zostanie zapisana z bieżącą datą po kliknięciu „Zapisz”.";
+    }
+    return "Brak zgody. Pole alergii jest zablokowane do czasu jej zaznaczenia.";
+  }
 }

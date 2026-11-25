@@ -1,5 +1,5 @@
 /**
- * Bezpieczeństwo galerii (P1, przegląd Ryana na #32, komentarz 6887577648).
+ * Bezpieczeństwo galerii (P1, przegląd bezpieczeństwa na #32, komentarz 6887577648).
  *
  * #32 zamknął allowlistę adresów zdjęć i przynależność pracownika/usługi do
  * salonu tylko w POST /api/gallery. Te testy pilnują pozostałych dróg:
@@ -13,11 +13,11 @@
  *     (i gallery/thumbs/); traversal odrzucany BEZ unlink.
  *  3. DELETE na Vercel Blob — del() NIE jest wołane (jak na main): plik nie
  *     jest powiązany z salonem, więc salon A mógłby skasować plik salonu B
- *     (B1 Ryana/Leo na #45). Wiersz usuwany, 200.
+ *     (B1 z audytu bezpieczeństwa i recenzji na #45). Wiersz usuwany, 200.
  *  4. GET /api/gallery — salon z sesji; salonId z query tylko porównany (403).
  *  5. POST/PATCH — adres przypięty już do innego wpisu TEGO salonu = 400
  *     (inaczej DELETE jednego wpisu kasowałby plik drugiego).
- *  6. showProductsToClients wraca w GET listy i odpowiedzi PATCH (B2 Leo).
+ *  6. showProductsToClients wraca w GET listy i odpowiedzi PATCH (B2 z recenzji).
  *
  * Walidacja jest PRAWDZIWA (bez mocka @/lib/api-validation) — test ma złapać
  * zmianę schematu, nie tylko trasy.

@@ -5,14 +5,14 @@
  * - `next.config.ts` buduje serwer samodzielny (`output: "standalone"`) tylko
  *   przy `BUILD_STANDALONE=1`, a tę zmienną ustawia wyłącznie etap `builder`
  *   w `Dockerfile` — Vercel (`vercel.json`) i CI (`.github/workflows/`) budują
- *   bez zmian do C4 (werdykt Ethana na #108);
+ *   bez zmian do C4 (werdykt z recenzji na #108);
  * - etap `runner` w `Dockerfile` jest domyślnym celem i działa jako
  *   użytkownik inny niż root;
  * - żaden etap nie kopiuje plików `.env*` i nie deklaruje `ARG`/`ENV`
  *   o nazwie sekretu (sekrety przychodzą w czasie działania);
  * - `.dockerignore` wycina pliki `.env*` na każdym poziomie katalogów (wpis
  *   z prefiksem `**` — nie tylko w katalogu głównym) i nie ma wyjątku
- *   `!.env…` (werdykt Ryana na #108).
+ *   `!.env…` (werdykt z audytu bezpieczeństwa na #108).
  *
  * Test czyta pliki jako tekst — nie buduje obrazu.
  */
@@ -40,7 +40,7 @@ const SECRET_NAMES = [
   "GOOGLE_AI_API_KEY",
 ];
 // Nazwy wyglądające na sekret, nawet spoza listy; porównanie bez wielkości liter
-// (Ryan, #110 P3). NEXT_PUBLIC_* trafiają do przeglądarki, więc z definicji nie
+// (audyt bezpieczeństwa, #110 P3). NEXT_PUBLIC_* trafiają do przeglądarki, więc z definicji nie
 // mogą być sekretem — nazwa z SECRET/TOKEN/PASSWORD/PRIVATE to błąd, nie wyjątek.
 const SECRET_LIKE = /(SECRET|TOKEN|PASSWORD|PRIVATE|API_KEY)/i;
 const PUBLIC_SECRET_LIKE = /(SECRET|TOKEN|PASSWORD|PRIVATE)/i;

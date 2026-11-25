@@ -1,6 +1,11 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useFormRecovery } from "@/hooks/use-form-recovery";
+import {
+  DRAFT_MAX_AGE_MS,
+  NEVER_PERSIST_KEYS,
+  sweepExpiredDrafts,
+  useFormRecovery,
+} from "@/hooks/use-form-recovery";
 
 /**
  * Create a fully-controllable localStorage mock that replaces
@@ -30,29 +35,47 @@ function createLocalStorageMock() {
   };
 }
 
+const START = new Date("2026-03-10T08:00:00.000Z").getTime();
+const MINUTE_MS = 60 * 1000;
+
+/** Builds the stored draft envelope the hook writes. */
+function envelope(data: Record<string, unknown>, savedAt: number = Date.now()): string {
+  return JSON.stringify({ v: 1, savedAt, data });
+}
+
+/** Reads back the form data of a stored envelope. */
+function storedData(raw: string | undefined): unknown {
+  expect(raw).toBeDefined();
+  const parsed = JSON.parse(raw as string) as { v: number; savedAt: number; data: unknown };
+  expect(parsed.v).toBe(1);
+  expect(typeof parsed.savedAt).toBe("number");
+  return parsed.data;
+}
+
+function setLocalStorage(value: unknown) {
+  Object.defineProperty(window, "localStorage", {
+    value,
+    writable: true,
+    configurable: true,
+  });
+}
+
 describe("useFormRecovery", () => {
   let lsMock: ReturnType<typeof createLocalStorageMock>;
   let originalLocalStorage: Storage;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.setSystemTime(START);
     lsMock = createLocalStorageMock();
     originalLocalStorage = window.localStorage;
-    Object.defineProperty(window, "localStorage", {
-      value: lsMock.mock,
-      writable: true,
-      configurable: true,
-    });
+    setLocalStorage(lsMock.mock);
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    Object.defineProperty(window, "localStorage", {
-      value: originalLocalStorage,
-      writable: true,
-      configurable: true,
-    });
+    setLocalStorage(originalLocalStorage);
   });
 
   // --- Initialization ---
@@ -81,7 +104,7 @@ describe("useFormRecovery", () => {
 
   it("should recover state from localStorage on mount", () => {
     const savedData = { name: "John", email: "john@example.com" };
-    lsMock.store["form_recovery_register"] = JSON.stringify(savedData);
+    lsMock.store["form_recovery_register"] = envelope(savedData);
 
     const { result } = renderHook(() =>
       useFormRecovery<{ name: string; email: string }>({
@@ -129,9 +152,25 @@ describe("useFormRecovery", () => {
       vi.advanceTimersByTime(500);
     });
 
-    expect(lsMock.store["form_recovery_save-test"]).toBe(
-      JSON.stringify({ name: "Alice" })
+    expect(storedData(lsMock.store["form_recovery_save-test"])).toEqual({ name: "Alice" });
+  });
+
+  it("should store the time of the write as savedAt", () => {
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "saved-at" })
     );
+
+    act(() => {
+      result.current.saveFormState({ name: "Alice" });
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const parsed = JSON.parse(lsMock.store["form_recovery_saved-at"] as string) as {
+      savedAt: number;
+    };
+    expect(parsed.savedAt).toBe(START + 500);
   });
 
   it("should debounce multiple rapid saves", () => {
@@ -160,9 +199,7 @@ describe("useFormRecovery", () => {
       vi.advanceTimersByTime(500);
     });
 
-    expect(lsMock.store["form_recovery_debounce-test"]).toBe(
-      JSON.stringify({ name: "ABC" })
-    );
+    expect(storedData(lsMock.store["form_recovery_debounce-test"])).toEqual({ name: "ABC" });
   });
 
   it("should respect custom debounce delay", () => {
@@ -186,17 +223,177 @@ describe("useFormRecovery", () => {
     act(() => {
       vi.advanceTimersByTime(500);
     });
-    expect(lsMock.store["form_recovery_custom-debounce"]).toBe(
-      JSON.stringify({ name: "test" })
+    expect(storedData(lsMock.store["form_recovery_custom-debounce"])).toEqual({ name: "test" });
+  });
+
+  // --- Health data and free text are never persisted ---
+
+  it("should list exactly the keys that are never persisted", () => {
+    expect([...NEVER_PERSIST_KEYS]).toEqual(["allergies", "notes", "healthDataConsent"]);
+  });
+
+  it("should never write allergies, notes or healthDataConsent to localStorage", () => {
+    const { result } = renderHook(() =>
+      useFormRecovery<Record<string, unknown>>({ storageKey: "add-client-form" })
     );
+
+    act(() => {
+      result.current.saveFormState({
+        firstName: "Anna",
+        allergies: "lateks",
+        notes: "ciaza, 2. trymestr",
+        healthDataConsent: true,
+      });
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const raw = lsMock.store["form_recovery_add-client-form"];
+    expect(storedData(raw)).toEqual({ firstName: "Anna" });
+    // No write at all may carry the values, including the raw string.
+    for (const [, value] of vi.mocked(lsMock.mock.setItem).mock.calls) {
+      expect(value).not.toContain("lateks");
+      expect(value).not.toContain("trymestr");
+      expect(value).not.toContain("healthDataConsent");
+    }
+  });
+
+  it("should not save the excluded keys even when they are the only fields", () => {
+    const { result } = renderHook(() =>
+      useFormRecovery<Record<string, unknown>>({ storageKey: "only-notes" })
+    );
+
+    act(() => {
+      result.current.saveFormState({ notes: "alergia na orzechy" });
+    });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(storedData(lsMock.store["form_recovery_only-notes"])).toEqual({});
+  });
+
+  it("should drop excluded keys that appear in a stored envelope", () => {
+    lsMock.store["form_recovery_tampered"] = envelope({ name: "Ola", allergies: "pylki" });
+
+    const { result } = renderHook(() =>
+      useFormRecovery<Record<string, unknown>>({ storageKey: "tampered" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.getRecoveredState()).toEqual({ name: "Ola" });
+  });
+
+  // --- 24-hour expiry ---
+
+  it("should restore a draft saved 23:59 h ago", () => {
+    lsMock.store["form_recovery_fresh"] = envelope({ name: "Ewa" });
+    vi.setSystemTime(START + DRAFT_MAX_AGE_MS - MINUTE_MS);
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "fresh" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.wasRecovered).toBe(true);
+    expect(result.current.getRecoveredState()).toEqual({ name: "Ewa" });
+    expect(lsMock.store["form_recovery_fresh"]).toBeDefined();
+  });
+
+  it("should remove a draft saved 24:01 h ago and not restore it", () => {
+    lsMock.store["form_recovery_stale"] = envelope({ name: "Ewa" });
+    vi.setSystemTime(START + DRAFT_MAX_AGE_MS + MINUTE_MS);
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "stale" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.wasRecovered).toBe(false);
+    expect(result.current.getRecoveredState()).toBeNull();
+    expect(lsMock.store["form_recovery_stale"]).toBeUndefined();
+  });
+
+  it("should treat a draft of exactly 24 h as expired", () => {
+    lsMock.store["form_recovery_boundary"] = envelope({ name: "Ewa" });
+    vi.setSystemTime(START + DRAFT_MAX_AGE_MS);
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "boundary" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.wasRecovered).toBe(false);
+    expect(lsMock.store["form_recovery_boundary"]).toBeUndefined();
+  });
+
+  it("should remove a draft whose savedAt lies in the future", () => {
+    lsMock.store["form_recovery_future"] = envelope({ name: "Ewa" }, START + MINUTE_MS);
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "future" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.wasRecovered).toBe(false);
+    expect(lsMock.store["form_recovery_future"]).toBeUndefined();
+  });
+
+  // --- Legacy and malformed entries ---
+
+  it("should remove a legacy draft without envelope and not restore it", () => {
+    lsMock.store["form_recovery_legacy"] = JSON.stringify({ name: "John", notes: "x" });
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "legacy" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.wasRecovered).toBe(false);
+    expect(result.current.getRecoveredState()).toBeNull();
+    expect(lsMock.store["form_recovery_legacy"]).toBeUndefined();
+  });
+
+  it.each([
+    ["unknown version", JSON.stringify({ v: 2, savedAt: START, data: { name: "x" } })],
+    ["missing savedAt", JSON.stringify({ v: 1, data: { name: "x" } })],
+    ["non-numeric savedAt", JSON.stringify({ v: 1, savedAt: "2026-03-10", data: { name: "x" } })],
+    ["array data", JSON.stringify({ v: 1, savedAt: START, data: ["x"] })],
+    ["null data", JSON.stringify({ v: 1, savedAt: START, data: null })],
+    ["JSON array", JSON.stringify([1, 2])],
+    ["JSON null", "null"],
+    ["JSON string", JSON.stringify("text")],
+  ])("should remove a malformed envelope (%s)", (_label, raw) => {
+    lsMock.store["form_recovery_malformed"] = raw;
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "malformed" })
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(result.current.wasRecovered).toBe(false);
+    expect(lsMock.store["form_recovery_malformed"]).toBeUndefined();
   });
 
   // --- Clearing saved form ---
 
   it("should clear localStorage and reset state on clearSavedForm()", () => {
-    lsMock.store["form_recovery_clear-test"] = JSON.stringify({
-      name: "Old",
-    });
+    lsMock.store["form_recovery_clear-test"] = envelope({ name: "Old" });
 
     const { result } = renderHook(() =>
       useFormRecovery<{ name: string }>({ storageKey: "clear-test" })
@@ -290,20 +487,67 @@ describe("useFormRecovery", () => {
 
   // --- Error handling ---
 
-  it("should handle invalid JSON in localStorage gracefully", () => {
+  it("should remove invalid JSON in localStorage without throwing", () => {
     lsMock.store["form_recovery_bad-json"] = "not valid json{{{";
 
     const { result } = renderHook(() =>
       useFormRecovery<{ name: string }>({ storageKey: "bad-json" })
     );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
 
     // Should not crash, wasRecovered remains false
     expect(result.current.wasRecovered).toBe(false);
     expect(result.current.getRecoveredState()).toBeNull();
     // Invalid data should be cleaned up
-    expect(lsMock.mock.removeItem).toHaveBeenCalledWith(
-      "form_recovery_bad-json"
+    expect(lsMock.mock.removeItem).toHaveBeenCalledWith("form_recovery_bad-json");
+    expect(lsMock.store["form_recovery_bad-json"]).toBeUndefined();
+  });
+
+  it("should not throw when removing invalid JSON also fails", () => {
+    lsMock.store["form_recovery_bad-json"] = "not valid json{{{";
+    lsMock.mock.removeItem = vi.fn(() => {
+      throw new Error("Storage error");
+    });
+
+    expect(() =>
+      renderHook(() => useFormRecovery<{ name: string }>({ storageKey: "bad-json" }))
+    ).not.toThrow();
+  });
+
+  it("should not throw when localStorage.getItem throws on mount", () => {
+    lsMock.mock.getItem = vi.fn(() => {
+      throw new DOMException("SecurityError");
+    });
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "blocked" })
     );
+
+    expect(result.current.wasRecovered).toBe(false);
+  });
+
+  it("should not throw when reading window.localStorage throws", () => {
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("SecurityError");
+      },
+      configurable: true,
+    });
+
+    const { result } = renderHook(() =>
+      useFormRecovery<{ name: string }>({ storageKey: "no-storage" })
+    );
+
+    expect(() => {
+      act(() => {
+        result.current.saveFormState({ name: "data" });
+        vi.advanceTimersByTime(500);
+        result.current.clearSavedForm();
+      });
+    }).not.toThrow();
+    expect(result.current.wasRecovered).toBe(false);
   });
 
   it("should not crash when localStorage.setItem throws", () => {
@@ -347,7 +591,7 @@ describe("useFormRecovery", () => {
   // --- Edge cases ---
 
   it("should use the correct storage key prefix", () => {
-    lsMock.store["form_recovery_my-key"] = JSON.stringify({ x: 1 });
+    lsMock.store["form_recovery_my-key"] = envelope({ x: 1 });
 
     renderHook(() =>
       useFormRecovery<{ x: number }>({ storageKey: "my-key" })
@@ -372,5 +616,115 @@ describe("useFormRecovery", () => {
       vi.advanceTimersByTime(1000);
     });
     expect(lsMock.store["form_recovery_unmount-test"]).toBeUndefined();
+  });
+});
+
+describe("sweepExpiredDrafts", () => {
+  let lsMock: ReturnType<typeof createLocalStorageMock>;
+  let originalLocalStorage: Storage;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(START);
+    lsMock = createLocalStorageMock();
+    originalLocalStorage = window.localStorage;
+    setLocalStorage(lsMock.mock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    setLocalStorage(originalLocalStorage);
+  });
+
+  it("removes only expired, legacy and corrupted drafts and keeps other keys", () => {
+    const now = START + DRAFT_MAX_AGE_MS + MINUTE_MS;
+    lsMock.store["form_recovery_fresh"] = envelope({ a: 1 }, now - MINUTE_MS);
+    lsMock.store["form_recovery_almost"] = envelope({ a: 1 }, now - DRAFT_MAX_AGE_MS + MINUTE_MS);
+    lsMock.store["form_recovery_expired"] = envelope({ a: 1 }, START);
+    lsMock.store["form_recovery_legacy"] = JSON.stringify({ name: "John" });
+    lsMock.store["form_recovery_corrupt"] = "{{{";
+    lsMock.store["form_recovery_future"] = envelope({ a: 1 }, now + MINUTE_MS);
+    // Foreign keys, including ones that only resemble the prefix.
+    lsMock.store["theme"] = "dark";
+    lsMock.store["other_form_recovery_x"] = "{{{";
+    lsMock.store["FORM_RECOVERY_upper"] = JSON.stringify({ name: "x" });
+
+    sweepExpiredDrafts(now);
+
+    expect(Object.keys(lsMock.store).sort()).toEqual(
+      [
+        "FORM_RECOVERY_upper",
+        "form_recovery_almost",
+        "form_recovery_fresh",
+        "other_form_recovery_x",
+        "theme",
+      ].sort()
+    );
+  });
+
+  it("uses the current time by default", () => {
+    lsMock.store["form_recovery_expired"] = envelope({ a: 1 }, START);
+    lsMock.store["form_recovery_fresh"] = envelope({ a: 1 }, START + DRAFT_MAX_AGE_MS);
+    vi.setSystemTime(START + DRAFT_MAX_AGE_MS + MINUTE_MS);
+
+    sweepExpiredDrafts();
+
+    expect(Object.keys(lsMock.store)).toEqual(["form_recovery_fresh"]);
+  });
+
+  it("does nothing when there are no drafts", () => {
+    lsMock.store["theme"] = "dark";
+
+    sweepExpiredDrafts();
+
+    expect(lsMock.mock.removeItem).not.toHaveBeenCalled();
+    expect(lsMock.store).toEqual({ theme: "dark" });
+  });
+
+  it("does not throw when window.localStorage is missing", () => {
+    setLocalStorage(undefined);
+
+    expect(() => sweepExpiredDrafts()).not.toThrow();
+  });
+
+  it("does not throw when reading window.localStorage throws", () => {
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("SecurityError");
+      },
+      configurable: true,
+    });
+
+    expect(() => sweepExpiredDrafts()).not.toThrow();
+  });
+
+  it("does not throw when enumerating keys throws", () => {
+    lsMock.store["form_recovery_legacy"] = JSON.stringify({ name: "x" });
+    lsMock.mock.key = vi.fn(() => {
+      throw new DOMException("SecurityError");
+    });
+
+    expect(() => sweepExpiredDrafts()).not.toThrow();
+  });
+
+  it("removes an unreadable draft and keeps sweeping when one removal fails", () => {
+    lsMock.store["form_recovery_unreadable"] = envelope({ a: 1 });
+    lsMock.store["form_recovery_stuck"] = JSON.stringify({ name: "x" });
+    lsMock.store["form_recovery_legacy"] = JSON.stringify({ name: "y" });
+
+    const originalGet = lsMock.mock.getItem;
+    lsMock.mock.getItem = vi.fn((key: string) => {
+      if (key === "form_recovery_unreadable") throw new DOMException("SecurityError");
+      return originalGet(key);
+    });
+    const originalRemove = lsMock.mock.removeItem;
+    lsMock.mock.removeItem = vi.fn((key: string) => {
+      if (key === "form_recovery_stuck") throw new DOMException("QuotaExceededError");
+      originalRemove(key);
+    });
+
+    expect(() => sweepExpiredDrafts()).not.toThrow();
+    expect(Object.keys(lsMock.store)).toEqual(["form_recovery_stuck"]);
   });
 });

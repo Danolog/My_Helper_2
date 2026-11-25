@@ -12,7 +12,7 @@
  *   a kod rabatowy powiązany z promocją zamrożoną jest nieważny.
  *
  * Lista typów zamrożonych jest tu wpisana świadomie (`FROZEN`, decyzja
- * Darka + aneks B2), a nie brana z rejestru: zdjęcie typu z
+ * produktowa + aneks B2), a nie brana z rejestru: zdjęcie typu z
  * `FROZEN_PROMOTION_TYPES` (np. „package”) ma zaczerwienić zachowanie —
  * POST 400, GET bez wiersza, kod nieważny — a nie tylko porównanie list.
  */

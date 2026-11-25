@@ -4,10 +4,10 @@ import { isValidUuid } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 import { appointments, clients, employees, salons, services } from "@/lib/schema";
-// #193 (decyzja CTO): podgląd (GET) dotyczy jednego salonu z obowiązkowym
+// #193 (decyzja z recenzji): podgląd (GET) dotyczy jednego salonu z obowiązkowym
 // salonId → brama salonu; w raw jawny warunek salonu w where i w każdym złączeniu.
 import { forSalon } from "@/lib/server/repository";
-// #193 P5a-2 (decyzja CTO): wysyłka (POST) z sekretem crona, salonId to opcjonalny
+// #193 P5a-2 (decyzja z recenzji): wysyłka (POST) z sekretem crona, salonId to opcjonalny
 // filtr (bez niego wszystkie salony) → wyjścia systemowe, nie pula żądań.
 import { findDueAppointmentReminders, markAppointmentRemindersSent } from "@/lib/server/system";
 import { sendAppointmentReminder24hSms } from "@/lib/sms";

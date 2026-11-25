@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
  * #193 P0b: zachowanie nowych wyjść systemowych na `dbSystem`:
- * - session.ts `isSalonOwner` (zapytanie z requireAdmin, warunek Ryana z #206),
- * - cron.ts `cleanupExpiredTemporaryAccess` (warunek Ryana z #206),
+ * - session.ts `isSalonOwner` (zapytanie z requireAdmin, warunek z audytu bezpieczeństwa z #206),
+ * - cron.ts `cleanupExpiredTemporaryAccess` (warunek z audytu bezpieczeństwa z #206),
  * - health.ts `pingDatabase` (health) i `checkDatabase` (diagnostics).
  * Surowe `db` jest pułapką: każde użycie = czerwony test.
  */

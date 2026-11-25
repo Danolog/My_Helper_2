@@ -227,15 +227,6 @@ export function isPlanPurchaseOpen(): boolean {
 }
 
 /**
- * Czy dokumenty prawne (polityka prywatności, regulamin, kontakt) są
- * opublikowane. Jedna flaga dla wszystkich tych stron i odnośników do nich:
- * dopóki zwraca false, stopka nie linkuje do stron, których jeszcze nie ma.
- */
-export function areLegalDocsPublished(): boolean {
-  return false;
-}
-
-/**
  * Informacja w Ustawienia → Moduły o funkcjach, których salon mógł używać
  * przed zamrożeniem, i o tym, co dzieje się z jego danymi. Żeby ją zdjąć,
  * wystarczy ustawić `null` — strona jej wtedy nie pokazuje.
@@ -252,14 +243,14 @@ export const FROZEN_MODULES_NOTICE: string | null =
  * rabatu — ani w zadatku liczonym przez serwer, ani przez kod rabatowy.
  * Wiersze w bazie zostają.
  *
- * PROCEDURA ODMROŻENIA (przegląd Leo N3, B2.1):
+ * PROCEDURA ODMROŻENIA (przegląd z recenzji N3, B2.1):
  * 1. Zanim zdejmiesz `hardOff` z `complexPromotions`: promocje tych typów,
  *    które były aktywne przed zamrożeniem, wrócą do życia ze swoimi starymi
  *    datami i warunkami (`is_active`, `start_date`, `end_date` się nie
  *    zmieniły) — naliczą rabat w portalu, zadatku i przez powiązane kody.
  *    Trzeba je najpierw wyłączyć (`is_active = false`) albo przejrzeć
  *    z każdym salonem.
- * 2. To zmiana danych na produkcji — wymaga słowa Darka, przed wdrożeniem.
+ * 2. To zmiana danych na produkcji — wymaga zgody właściciela produktu, przed wdrożeniem.
  * 3. Dopiero potem zdjęcie `hardOff` w jednym miejscu (ten plik). Typy,
  *    trasy `check-*`, `book-package` i zadatek odmrażają się razem — pilnuje
  *    `__tests__/lib/frozen-promotions-unfreeze.test.ts`.

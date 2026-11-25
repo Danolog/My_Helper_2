@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signIn, useSession } from "@/lib/auth-client"
 import { sanitizeAuthError } from "@/lib/error-messages"
+import type { ClientAccountLegalNotice } from "@/lib/legal/documents"
 
 /**
  * Validate returnTo URL to prevent open redirects.
@@ -29,6 +30,13 @@ interface SignInButtonProps {
    * przycisk prowadziłby do błędu.
    */
   googleEnabled?: boolean
+  /**
+   * Zdanie o regulaminie i polityce prywatności pod przyciskiem Google. Podaje
+   * je tylko logowanie klienta (`clientAccountLegalNotice()`): pierwsze logowanie
+   * Google zakłada konto klienta. Przy `null` (domyślnie i przed publikacją
+   * dokumentów) zdania nie ma.
+   */
+  googleLegalNotice?: ClientAccountLegalNotice | null
 }
 
 export function SignInButton({
@@ -36,6 +44,7 @@ export function SignInButton({
   defaultRedirect = "/dashboard",
   registerHref = "/register",
   googleEnabled = false,
+  googleLegalNotice = null,
 }: SignInButtonProps) {
   const { data: session, isPending: sessionPending } = useSession()
   const router = useRouter()
@@ -217,6 +226,32 @@ export function SignInButton({
             </svg>
             {isGooglePending ? "Logowanie..." : "Zaloguj sie przez Google"}
           </Button>
+          {googleLegalNotice && (
+            <p
+              className="text-center text-xs text-muted-foreground"
+              data-testid="google-legal-notice"
+            >
+              Kontynuując, akceptujesz{" "}
+              <Link
+                href={googleLegalNotice.terms.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                regulamin
+              </Link>{" "}
+              i{" "}
+              <Link
+                href={googleLegalNotice.privacy.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline-offset-2 hover:underline"
+              >
+                politykę prywatności
+              </Link>
+              .
+            </p>
+          )}
         </>
       )}
       <div className="text-center text-sm text-muted-foreground">

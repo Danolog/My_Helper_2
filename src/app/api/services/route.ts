@@ -93,7 +93,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create service",
   },
   async ({ body }) => {
-    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // P1 (przegląd bezpieczeństwa): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
     // pozwalał każdemu zalogowanemu kontu dodać usługę (z ceną) do cudzego salonu.
     // body.salonId tylko porównywany (inny => 403). Tworzenie usług: tylko
     // właściciel, bez grantów — jak PUT/DELETE /api/services/[id].

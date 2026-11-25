@@ -39,6 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # __tests__/lint/drizzle-journal-base.test.ts czyta dziennik migracji
+      # z origin/main (git show). Wystarczy sam czubek main, bez historii.
+      - name: Fetch main for migration journal check
+        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4

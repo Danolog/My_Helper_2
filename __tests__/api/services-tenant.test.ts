@@ -1,5 +1,5 @@
 /**
- * POST /api/services — izolacja salonu (P1 z przeglądu Ryana).
+ * POST /api/services — izolacja salonu (P1 z przeglądu bezpieczeństwa).
  *
  * Przed naprawą forSalon(body.salonId): dowolne zalogowane konto tworzyło
  * usługę (z ceną) w cudzym salonie, widoczną w jego portalu rezerwacji.

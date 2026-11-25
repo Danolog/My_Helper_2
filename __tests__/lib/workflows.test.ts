@@ -48,7 +48,7 @@ function triggers(yaml: string): string[] {
   return [...block[1]!.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]!);
 }
 
-/** Jedyna nazwa środowiska wdrożeń Cloud Run (decyzja Olivera 15:52). */
+/** Jedyna nazwa środowiska wdrożeń Cloud Run (decyzja produktowa 15:52). */
 const DEPLOY_ENVIRONMENT = "production-gcp";
 
 const code = (text: string) =>
@@ -747,7 +747,7 @@ exit 0
     expect(r.stdout).not.toContain("tag_url=");
   });
 
-  // Ryan (#144): mapowane są tylko klasy secret (→ --set-secrets) i var
+  // Audyt bezpieczeństwa (#144): mapowane są tylko klasy secret (→ --set-secrets) i var
   // (→ --env-vars-file); vercel-only, build, image, platform, ci-only nigdy.
   it("tylko klasy secret i var trafiają do usługi; describe dokładnie dla sekretów z manifestu", () => {
     const manifest = JSON.parse(read("infra/gcp/env-manifest.json")) as { variables: Record<string, { class: string; secretName?: string }> };
@@ -781,7 +781,7 @@ exit 0
     expect(r.envFile).toEqual(['V_VAR: "v"']);
   });
 
-  // Leo (#151 pkt 2): strażnik „no secrets to map” — osiągalny tylko bez
+  // Recenzja (#151 pkt 2): strażnik „no secrets to map” — osiągalny tylko bez
   // wymaganych sekretów w manifeście.
   it("żaden sekret do zmapowania → kod 2 przed gcloud run deploy", () => {
     const m = join(dir, "manifest-none.json");
@@ -792,7 +792,7 @@ exit 0
     expect(r.run).toBeUndefined();
   });
 
-  // Ethan (#144): pusty wynik odczytu (kod 0) nie jest ENABLED; od K-1b = brak wersji.
+  // Recenzja (#144): pusty wynik odczytu (kod 0) nie jest ENABLED; od K-1b = brak wersji.
   it("pusty stan wersji: wymagany → kod 2 przed deployem; opcjonalny → pominięty", () => {
     const req = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
     expect(req.status).toBe(2);

@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Strażnik G-C2b (brief C, decyzja Ethana na #111):
+ * Strażnik G-C2b (brief C, decyzja z recenzji na #111):
  *  1. Inwariant okrężny: adres zwrócony przez lib/storage.upload dla KAŻDEGO
  *     sterownika (gcs z mockiem SDK, vercel-blob z mockiem put, local z mockiem fs)
  *     przyjmuje isOwnUploadUrl — z właściwym źródłem i nazwą obiektu.

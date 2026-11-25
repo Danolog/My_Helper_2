@@ -19,7 +19,7 @@
  *
  * Skutek jest nieodwracalny w wielu salonach (anulowanie wizyty, płatność →
  * `failed`), więc importerzy tego wyjścia są na liście DOKŁADNIE migawki L7
- * (zmianę akceptują CTO i CRCO).
+ * (zmianę akceptują recenzja i przegląd zgodności).
  */
 import { and, eq, exists, gte, inArray, lt, ne, notExists, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";

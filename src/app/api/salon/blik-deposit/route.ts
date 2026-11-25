@@ -145,7 +145,7 @@ export async function PUT(request: Request) {
         return conflict(
           salonId,
           BLIK_CONSENT_VERSION_STALE,
-          "Tresc zgody zostala zaktualizowana. Odswiez strone"
+          "Treść potwierdzenia została zaktualizowana. Odśwież stronę"
         );
       }
     }

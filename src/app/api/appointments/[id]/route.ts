@@ -140,7 +140,7 @@ export async function PUT(
 
     // Server-side validation with Zod schema. Zapis czyta SPARSOWANE dane
     // (jak POST): preprocess schematu zamienia same spacje w notes na null —
-    // surowe body zapisałoby "   " bez zmian (Ryan, przegląd #90).
+    // surowe body zapisałoby "   " bez zmian (audyt bezpieczeństwa, przegląd #90).
     const parsed = parseBody(updateAppointmentSchema, body);
     if (!parsed.ok) {
       return NextResponse.json(parsed.error, { status: 400 });
@@ -177,7 +177,7 @@ export async function PUT(
       );
     }
 
-    // P1 (Ryan): klient, pracownik i usluga z body musza nalezec do salonu
+    // P1 (audyt bezpieczeństwa): klient, pracownik i usluga z body musza nalezec do salonu
     // z sesji — inaczej wizyta wskazywalaby cudzego klienta (dane w GET) lub
     // blokowala kalendarz pracownika innego salonu. null = wyczyszczenie pola.
     const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId });
@@ -433,7 +433,7 @@ export async function DELETE(
     // RF1: odwołanie przez salon = pełny zwrot, niezależnie od reguły 24 h.
     let refundResult: AppointmentDepositsRefund | null = null;
     if (hasDeposit && depositPaid) {
-      // Każda płatność `succeeded` osobno, od najstarszej (Ethan, #98).
+      // Każda płatność `succeeded` osobno, od najstarszej (recenzja, #98).
       refundResult = await refundAppointmentDeposits(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
       if (!refundResult.success) {
         logger.error("[Appointments API] Deposit refund failed after salon cancellation — manual refund", {
@@ -544,7 +544,7 @@ export async function DELETE(
           processed: refundResult.refunded,
           refundId: refundResult.refundId,
           amount: refundResult.amount,
-          // Kwota, która nie wróciła (toast przy refundFailed — Leo, #98).
+          // Kwota, która nie wróciła (toast przy refundFailed — recenzja, #98).
           failedAmount: refundResult.failedAmount ?? null,
           message: refundResult.message,
         } : null,

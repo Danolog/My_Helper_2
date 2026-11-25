@@ -2,7 +2,7 @@
 /**
  * #193 P0b: `dbSystem`.
  *
- * - Do P6 `dbSystem` to DOKŁADNIE ten sam klient co `db` (decyzja Ethana
+ * - Do P6 `dbSystem` to DOKŁADNIE ten sam klient co `db` (decyzja z recenzji
  *   16.11): test tożsamości `toBe` na prawdziwych modułach (bez mocków),
  *   bez otwierania połączenia (leniwość z db.ts).
  * - Bezpiecznik w __tests__/setup.ts: test jednostkowy bez własnego mocka

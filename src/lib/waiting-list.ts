@@ -23,7 +23,7 @@ import { buildWaitingListSms, sendSms, SMS_TIME_ZONE } from "@/lib/sms";
 import { isTestPhoneNumber } from "@/lib/test-phone";
 import { buildWaitingListPush, type WaitingListPushContent } from "@/lib/waiting-list-message";
 
-// #193 P5a-1 (decyzja CTO 4): bez puli `db`. notifyWaitingList działa w
+// #193 P5a-1 (decyzja z recenzji 4): bez puli `db`. notifyWaitingList działa w
 // forSalon(params.salonId); accept/decline ustalają salon wyłącznie przez
 // wyjście `resolveWaitingListToken` i dalej idą przez forSalon(salonId).
 // Każde polecenie to osobne `raw(...)` — jak przed zmianą, gdzie każde było
@@ -686,7 +686,7 @@ export async function acceptEarlierSlot(
 
   const offeredStart = new Date(entry.offeredStartTime);
   const offeredEnd = new Date(entry.offeredEndTime);
-  // #168 pkt 4 (decyzja Olivera, wariant A): oferta dotyczy terminu zwolnionego
+  // #168 pkt 4 (decyzja produktowa, wariant A): oferta dotyczy terminu zwolnionego
   // u KONKRETNEGO pracownika (notifyWaitingList zapisuje go razem z tokenem).
   // Puste offeredEmployeeId = pracownik usunięty po wysłaniu oferty (FK ON
   // DELETE SET NULL) — oferta nieważna: odmowa, nic nie zapisane, wpis bez

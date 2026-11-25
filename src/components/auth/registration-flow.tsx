@@ -1,5 +1,6 @@
 "use client"
 
+import type { LegalAcceptanceForm } from "@/lib/legal/documents"
 import { StepAccountDetails } from "./_components/StepAccountDetails"
 import { StepConfirmation } from "./_components/StepConfirmation"
 import { StepPlanSelection } from "./_components/StepPlanSelection"
@@ -7,9 +8,14 @@ import { useRegistration } from "./_hooks/use-registration"
 
 interface RegistrationFlowProps {
   preselectedPlan: string | null
+  /** Pola akceptacji regulaminu i DPA; bez wartości stan z rejestru dokumentów. */
+  legalForm?: LegalAcceptanceForm | null
 }
 
-export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
+export function RegistrationFlow({
+  preselectedPlan,
+  legalForm: legalFormOverride,
+}: RegistrationFlowProps) {
   const {
     step,
     selectedPlan,
@@ -30,6 +36,11 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
     fieldErrors,
     isPending,
     showVerificationMessage,
+    salonSetupError,
+    legalForm,
+    legalChecks,
+    setLegalChecks,
+    legalAcceptanceComplete,
     wasRecovered,
     clearSavedForm,
     handleSelectPlan,
@@ -39,7 +50,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
     handleSubmit,
     handleRestoreForm,
     router,
-  } = useRegistration(preselectedPlan)
+  } = useRegistration(preselectedPlan, legalFormOverride)
 
   // Verification message after successful signup
   if (showVerificationMessage) {
@@ -48,6 +59,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
         email={email}
         selectedPlan={selectedPlan}
         selectedPlanData={selectedPlanData}
+        salonSetupError={salonSetupError}
         onNavigateToDashboard={() => {
           router.replace("/dashboard")
           router.refresh()
@@ -84,6 +96,10 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
       fieldErrors={fieldErrors}
       isPending={isPending}
       wasRecovered={wasRecovered}
+      legalForm={legalForm}
+      legalChecks={legalChecks}
+      legalAcceptanceComplete={legalAcceptanceComplete}
+      onLegalChecksChange={setLegalChecks}
       onNameChange={setName}
       onEmailChange={setEmail}
       onPasswordChange={setPassword}

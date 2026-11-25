@@ -8,7 +8,7 @@ import {
 } from "@/lib/features";
 
 /**
- * Druga linia obrony zamrożenia (uwaga Ryana z przeglądu B1): trasa modułu
+ * Druga linia obrony zamrożenia (uwaga z audytu bezpieczeństwa z przeglądu B1): trasa modułu
  * zamrożonego sama pyta rejestr, zanim zrobi cokolwiek innego — zanim
  * sprawdzi sesję, policzy limit, sięgnie do bazy albo wywoła model.
  * Pierwsza linia to `src/proxy.ts`; ta działa, gdyby proxy zostało

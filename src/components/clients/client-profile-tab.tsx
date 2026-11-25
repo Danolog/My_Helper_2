@@ -5,7 +5,10 @@ import { ClientConsentsCard } from "./client-consents-card";
 import { ClientContactCard } from "./client-contact-card";
 import { ClientDepositCard } from "./client-deposit-card";
 import { ClientFavoriteEmployeeCard } from "./client-favorite-employee-card";
-import { ClientHealthPreferencesCard } from "./client-health-preferences-card";
+import {
+  ClientHealthPreferencesCard,
+  type SavedHealthDataConsent,
+} from "./client-health-preferences-card";
 import type { ClientData, Employee } from "./types";
 
 interface ClientProfileTabProps {
@@ -21,6 +24,9 @@ interface ClientProfileTabProps {
   formNotes: string;
   allergiesList: string[];
   preferencesList: string[];
+  healthConsentChecked: boolean;
+  savedHealthConsent: SavedHealthDataConsent | null;
+  healthConsentError: string | null;
   employees: Employee[];
   selectedFavoriteEmployeeId: string;
   formRequireDeposit: boolean;
@@ -34,6 +40,7 @@ interface ClientProfileTabProps {
   onBirthdayChange: (value: string) => void;
   onClearFieldError: (field: string) => void;
   onNotesChange: (notes: string) => void;
+  onHealthConsentChange: (checked: boolean) => void;
   onAllergiesChange: (allergies: string[]) => void;
   onPreferencesChange: (preferences: string[]) => void;
   onFavoriteEmployeeChange: (value: string) => void;
@@ -59,6 +66,9 @@ export function ClientProfileTab({
   formNotes,
   allergiesList,
   preferencesList,
+  healthConsentChecked,
+  savedHealthConsent,
+  healthConsentError,
   employees,
   selectedFavoriteEmployeeId,
   formRequireDeposit,
@@ -71,6 +81,7 @@ export function ClientProfileTab({
   onBirthdayChange,
   onClearFieldError,
   onNotesChange,
+  onHealthConsentChange,
   onAllergiesChange,
   onPreferencesChange,
   onFavoriteEmployeeChange,
@@ -114,6 +125,10 @@ export function ClientProfileTab({
         allergiesList={allergiesList}
         preferencesList={preferencesList}
         formNotes={formNotes}
+        healthConsentChecked={healthConsentChecked}
+        savedHealthConsent={savedHealthConsent}
+        healthConsentError={healthConsentError}
+        onHealthConsentChange={onHealthConsentChange}
         onAllergiesChange={onAllergiesChange}
         onPreferencesChange={onPreferencesChange}
         onNotesChange={onNotesChange}

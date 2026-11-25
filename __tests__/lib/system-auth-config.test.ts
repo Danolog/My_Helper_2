@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * #193 P0b, warunek 2 Ethana do testu adaptera: adapter ma jawny schemat
+ * #193 P0b, warunek 2 z recenzji do testu adaptera: adapter ma jawny schemat
  * 4 tabel auth, więc PRODUKCYJNA konfiguracja Better Auth nie może mieć
  * wtyczki z modelem spoza tych tabel ani limitu żądań w tabeli bazy —
  * zepsułoby to logowanie na produkcji. (Wtyczka z `salons` żyje wyłącznie

@@ -381,7 +381,7 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     });
 
     expect(result.success).toBe(false);
-    // Ryan: szczegół dostawcy tylko w logu, wołający dostaje ogólny komunikat
+    // Audyt bezpieczeństwa: szczegół dostawcy tylko w logu, wołający dostaje ogólny komunikat
     expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
     expect(result.error).not.toContain("Authorization failed");
     // #75: do logu tylko kod błędu — `message` dostawcy bywa echem danych wejściowych
@@ -471,7 +471,7 @@ describe("sendSms (real delivery via SMSAPI)", () => {
   });
 });
 
-describe("sendSms: logi bez pełnego numeru i bez treści (Ryan)", () => {
+describe("sendSms: logi bez pełnego numeru i bez treści (audyt bezpieczeństwa)", () => {
   const PHONE = "+48 512 345 678";
   const CONTENT = "Anna Nowak, koloryzacja u Ewy jutro o 10:00";
 

@@ -192,6 +192,18 @@
     "sha256": "41e9594b194b65ecff6107cac351c938f6b1b4636402d31f09196149d00472ff"
   },
   {
+    "table": "legal_acceptances",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "0fd2236c29cf7aac8eea35911018e3b3cf22192d118e34aad2499a62bd7d8c7f"
+  },
+  {
     "table": "loyalty_points",
     "name": "tenant_isolation",
     "cmd": "ALL",

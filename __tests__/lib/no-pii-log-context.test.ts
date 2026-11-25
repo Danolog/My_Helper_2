@@ -8,7 +8,7 @@
  * i `body.length`. Siatka w `src/lib/logger.ts` redaguje klucze osobowe, ale
  * nie zgadnie, że `data` to wolny tekst o kliencie — stąd zakaz u źródła.
  *
- * Skanuje .ts/.tsx/.js/.jsx/.mjs/.cjs (Ryan: luka „tylko .ts” z G6).
+ * Skanuje .ts/.tsx/.js/.jsx/.mjs/.cjs (audyt bezpieczeństwa: luka „tylko .ts” z G6).
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";

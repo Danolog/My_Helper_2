@@ -14,6 +14,9 @@ drizzle/
 *.min.js
 *.min.css
 
+# Vendored Workbox libraries (unmodified upstream files)
+public/workbox-*/
+
 # Template (has its own formatting)
 create-agentic-app/
 

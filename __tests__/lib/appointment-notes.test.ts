@@ -15,7 +15,7 @@ describe("notesChange — notatki w PUT tylko po zmianie (#90)", () => {
     ["puste i null", "", null],
     ["same spacje i null", "   ", null],
     ["same spacje i pusty tekst", "  ", ""],
-    // Surowe body przed poprawką Ryana zapisywało same spacje bez zmian.
+    // Surowe body przed poprawką z audytu bezpieczeństwa zapisywało same spacje bez zmian.
     ["same spacje zapisane przed poprawką PUT", "   ", "   "],
   ])("%s => brak pola", (_name, edited, original) => {
     expect(notesChange(edited, original)).toEqual({});

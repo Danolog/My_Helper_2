@@ -2,7 +2,7 @@ import '@testing-library/jest-dom';
 import { configure } from '@testing-library/react';
 import { vi } from 'vitest';
 
-// #193 P0b — bezpiecznik delegujący puli systemowej (Ethan, „Mocki — DECYZJA 2”).
+// #193 P0b — bezpiecznik delegujący puli systemowej (recenzja, „Mocki — DECYZJA 2”).
 // Do P6 `dbSystem` to ten sam klient co `db` (re-eksport w db-system.ts):
 // - `@/lib/db` zmockowane w pliku testu → `dbSystem` = to samo zmockowane `db`
 //   (jak prawdziwy re-eksport; dziś kontekst też idzie przez ten mock);

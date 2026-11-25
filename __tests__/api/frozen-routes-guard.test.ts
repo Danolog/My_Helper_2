@@ -1,5 +1,5 @@
 /**
- * Druga linia obrony zamrożenia (B2, uwaga Ryana z przeglądu B1).
+ * Druga linia obrony zamrożenia (B2, uwaga z audytu bezpieczeństwa z przeglądu B1).
  *
  * Proxy (`src/proxy.ts`) blokuje trasy modułów zamrożonych — to pilnują
  * `frozen-modules.test.ts` i `proxy-frozen-modules.test.ts`. Ten plik

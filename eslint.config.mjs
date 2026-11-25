@@ -68,6 +68,8 @@ const config = [
       "scripts/**",
       "test-results*/**",
       "playwright-report/**",
+      // Zewnętrzne, zminifikowane pliki Workboxa (bez zmian względem npm).
+      "public/workbox-*/**",
     ],
   },
   ...nextConfig,

@@ -1,7 +1,7 @@
 /**
  * Wyjście systemowe (#193): zadania okresowe działające ponad salonami.
  * Każda nowa funkcja tutaj zmienia migawkę `system/` (R-Z1), więc jest
- * widoczna w diffie i w recenzji Ryana.
+ * widoczna w diffie i w recenzji z audytu bezpieczeństwa.
  */
 import { lt } from "drizzle-orm";
 import { logger } from "@/lib/logger";

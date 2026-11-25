@@ -1,5 +1,5 @@
 /**
- * PUT/GET /api/clients/[id]/consents — P2 (Ryan): zgody RODO klientów salonu.
+ * PUT/GET /api/clients/[id]/consents — P2 (audyt bezpieczeństwa): zgody RODO klientów salonu.
  *
  * Przed naprawą schemat walidacji opisywał inne pola (marketingEmail...) niż
  * body z UI ({ consents: { email|sms|phone: boolean } }), więc nie sprawdzał

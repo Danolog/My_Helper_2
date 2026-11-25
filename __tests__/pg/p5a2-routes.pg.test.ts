@@ -1,6 +1,6 @@
 /**
  * #193 P5a-2 na PRAWDZIWYM Postgresie: trasy z sekretem crona po przeniesieniu
- * z puli żądań (decyzja CTO D1, warunek 5) — salony A i B.
+ * z puli żądań (decyzja z recenzji D1, warunek 5) — salony A i B.
  *
  * Trasy jednego salonu przez `forSalon(salonId)` (rola bez BYPASSRLS +
  * `app.current_salon_id`): wywołane dla salonu A nie czytają danych salonu B

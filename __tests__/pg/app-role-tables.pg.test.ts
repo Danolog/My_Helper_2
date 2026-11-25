@@ -259,7 +259,7 @@ describe("listy wyjątków tabel: format #230 (#193)", () => {
     ["GLOBAL_TABLES", GLOBAL_TABLES],
     ["DEBT_TABLES", DEBT_TABLES],
     ["NO_ACCESS_TABLES", NO_ACCESS_TABLES],
-  ] as Array<[string, ExceptionEntry[]]>)("%s: nazwa, jednozdaniowe uzasadnienie, akceptacja CTO i CRCO, numer PR", (_n, list) => {
+  ] as Array<[string, ExceptionEntry[]]>)("%s: nazwa, jednozdaniowe uzasadnienie, obie role akceptujące w acceptedBy, numer PR", (_n, list) => {
     expect(exceptionFormatViolations(list)).toEqual([]);
   });
 

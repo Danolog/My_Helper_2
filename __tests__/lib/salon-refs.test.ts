@@ -1,5 +1,5 @@
 /**
- * assertSalonRefs — każde id z body musi należeć do salonu (P1, przegląd Ryana).
+ * assertSalonRefs — każde id z body musi należeć do salonu (P1, przegląd bezpieczeństwa).
  *
  * Fałszywy `tx` odpowiada wierszami z "bazy" STORE zawężonej do salonu:
  * rekord zwraca się tylko, gdy zapytanie zawiera eq(id) ORAZ eq(salonId)
