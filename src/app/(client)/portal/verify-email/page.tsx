@@ -74,11 +74,13 @@ function VerifyEmailContent() {
               <Button
                 className="w-full"
                 onClick={() => {
-                  router.replace("/dashboard")
+                  // Portal klienta: konto klienta nie ma salonu, więc kierujemy
+                  // na listę salonów, nie do panelu salonu.
+                  router.replace("/salons")
                   router.refresh()
                 }}
               >
-                Continue to dashboard
+                Browse salons
               </Button>
             </>
           )}

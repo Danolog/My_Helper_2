@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CommandPalette } from "@/components/dashboard/command-palette";
+import { CreateSalonPrompt } from "@/components/dashboard/create-salon-prompt";
 import { DashboardBottomNav } from "@/components/dashboard/dashboard-bottom-nav";
 import { DashboardBreadcrumbs } from "@/components/dashboard/dashboard-breadcrumbs";
 import { DashboardSidebar, DashboardMobileHeader } from "@/components/dashboard/dashboard-sidebar";
@@ -16,11 +18,30 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   // Faza 3 — do dashboardu wchodzi wlasciciel ORAZ aktywny pracownik/recepcja
-  // z podpietym kontem; pozostali jak dotychczas na /salons.
-  const { allowed, role } = await requireDashboardAccess();
+  // z podpietym kontem. Konto bez salonu i bez powiazania widzi wylacznie
+  // zakladanie salonu (bez paska bocznego i bez podstrony): po potwierdzeniu
+  // e-maila wlasciciel loguje sie bez salonu i tu go zaklada. Przekierowanie
+  // na /salons zostawialo go bez drogi do salonu.
+  const { session, allowed, role } = await requireDashboardAccess();
 
+  // Ta gałąź nie przerywa odpowiedzi, więc wynik serwerowej podstrony i tak
+  // trafia do payloadu RSC: każda podstrona panelu musi być kliencka albo mieć
+  // własną bramkę (pilnuje __tests__/app/dashboard-pages-guard.test.ts).
   if (!allowed) {
-    redirect("/salons");
+    const user = session?.user;
+    if (!user) redirect("/login");
+    // Do komponentu klienckiego tylko imie i e-mail — nie caly obiekt sesji
+    // (token sesji trafilby do danych RSC wysylanych do przegladarki).
+    return (
+      <main>
+        <CreateSalonPrompt session={{ user: { name: user.name, email: user.email } }} />
+        <p className="pb-8 text-center text-sm text-muted-foreground">
+          <Link href="/salons" className="underline underline-offset-4 hover:text-foreground">
+            Jestem klientem — przejdź do salonów
+          </Link>
+        </p>
+      </main>
+    );
   }
 
   // Feature flags salonu (Faza 2) — rozwiązane raz na request, dostępne

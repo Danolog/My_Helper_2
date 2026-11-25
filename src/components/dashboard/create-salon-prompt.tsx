@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Building2, Crown, Loader2, Zap } from "lucide-react";
 import { LegalAcceptanceFields } from "@/components/legal/legal-acceptance-fields";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +23,12 @@ import { planHighlights } from "@/lib/plan-features";
 
 interface CreateSalonPromptProps {
   session: { user: { name?: string | null; email: string } };
-  onCreated: () => void;
+  /**
+   * Po założeniu salonu; domyślnie `router.refresh()`. Layout panelu (komponent
+   * serwerowy) nie może przekazać funkcji, a odświeżenie każe mu policzyć
+   * dostęp na nowo i pokazać panel zamiast tego okna.
+   */
+  onCreated?: () => void;
   /**
    * Pola akceptacji regulaminu i DPA; domyślnie stan z rejestru dokumentów
    * (przed publikacją `null`: bez pól). Tu powstaje salon przy potwierdzaniu
@@ -36,6 +42,7 @@ export function CreateSalonPrompt({
   onCreated,
   legalForm = legalAcceptanceForm(),
 }: CreateSalonPromptProps) {
+  const router = useRouter();
   // Listy funkcji pochodza z src/lib/plan-features.ts — tu nie wpisujemy
   // wlasnych pozycji (pilnuje PlanFeaturesSingleSource.test.tsx).
   // Karty sa tylko dla planow, dla ktorych isPlanOnSale zwraca true.
@@ -83,7 +90,8 @@ export function CreateSalonPrompt({
 
       const data = await res.json();
       if (data.success) {
-        onCreated();
+        if (onCreated) onCreated();
+        else router.refresh();
       } else if (data.code === LEGAL_ACCEPTANCE_REQUIRED_CODE) {
         setError(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE);
       } else {
