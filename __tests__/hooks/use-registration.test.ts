@@ -2,6 +2,8 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { useRegistration } from "@/components/auth/_hooks/use-registration";
 import { mutationFetch } from "@/lib/api-client";
+import { signUp } from "@/lib/auth-client";
+import { LEGAL_DOCUMENTS, legalAcceptanceForm } from "@/lib/legal/documents";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 
 // Hak formularza rejestracji: krok i plan na starcie, plan po przywróceniu
@@ -40,8 +42,9 @@ vi.mock("@/hooks/use-form-recovery", () => ({
   }),
 }));
 
+// Domyślnie potwierdzanie e-maila wyłączone: better-auth zwraca token sesji.
 vi.mock("@/lib/auth-client", () => ({
-  signUp: { email: vi.fn(async () => ({ data: {}, error: null })) },
+  signUp: { email: vi.fn(async () => ({ data: { token: "session-token" }, error: null })) },
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -236,5 +239,133 @@ describe('useRegistration — PLANS_ON_SALE podmieniona na ["basic", "pro"]', ()
     recovery.state = { step: 1, selectedPlan: "pro", name: "", email: "" };
     const { result } = await renderLoaded(null);
     expect(result.current.wasRecovered).toBe(true);
+  });
+});
+
+// Przy włączonym potwierdzaniu e-maila better-auth zwraca token: null (także przy
+// zajętym adresie), więc po rejestracji nie ma sesji: trasa zakładająca salon
+// odpowiedziałaby 401. Hak wtedy jej nie woła i pokazuje ekran „sprawdź pocztę”.
+describe("useRegistration — sesja po rejestracji", () => {
+  const PUBLISHED_FORM = legalAcceptanceForm(true, {
+    ...LEGAL_DOCUMENTS,
+    privacy: { ...LEGAL_DOCUMENTS.privacy, version: "2026-12-03" },
+    terms: { ...LEGAL_DOCUMENTS.terms, version: "2026-12-01" },
+    dpa: { ...LEGAL_DOCUMENTS.dpa, version: "2026-12-02" },
+  });
+
+  function signUpReturnsNoSession() {
+    vi.mocked(signUp.email).mockResolvedValueOnce({
+      data: { token: null, user: { email: "anna@example.com" } },
+      error: null,
+    } as never);
+  }
+
+  it("token null: bez wywołania /api/register-subscription, ekran potwierdzenia bez błędów", async () => {
+    signUpReturnsNoSession();
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(signUp.email).toHaveBeenCalledTimes(1);
+    expect(mutationFetch).not.toHaveBeenCalled();
+    expect(result.current.showVerificationMessage).toBe(true);
+    expect(result.current.salonSetupError).toBe("");
+    expect(result.current.error).toBe("");
+    expect(result.current.isPending).toBe(false);
+  });
+
+  it("token null przy opublikowanych dokumentach i zaznaczonej akceptacji: bez żądania z akceptacją regulaminu i DPA", async () => {
+    expect(PUBLISHED_FORM).not.toBeNull();
+    signUpReturnsNoSession();
+    const hook = renderHook(() => useRegistration(null, PUBLISHED_FORM));
+    await waitFor(() => expect(hook.result.current.plansLoading).toBe(false));
+    act(() => {
+      hook.result.current.setLegalChecks({ terms: true, dpa: true });
+    });
+    await fillAndSubmit(hook.result);
+    expect(mutationFetch).not.toHaveBeenCalled();
+    expect(hook.result.current.showVerificationMessage).toBe(true);
+  });
+
+  it("token null dwa razy (nowy i zajęty adres dają tę samą odpowiedź): ten sam stan haka", async () => {
+    signUpReturnsNoSession();
+    const first = await renderLoaded(null);
+    await fillAndSubmit(first.result);
+    signUpReturnsNoSession();
+    const second = await renderLoaded(null);
+    await fillAndSubmit(second.result);
+    const pick = (r: ReturnType<typeof useRegistration>) => ({
+      showVerificationMessage: r.showVerificationMessage,
+      salonSetupError: r.salonSetupError,
+      error: r.error,
+    });
+    expect(pick(second.result.current)).toEqual(pick(first.result.current));
+    expect(mutationFetch).not.toHaveBeenCalled();
+  });
+
+  it("token obecny: jedno wywołanie /api/register-subscription i ekran potwierdzenia", async () => {
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(sentPlanSlug()).toBe("basic");
+    expect(result.current.showVerificationMessage).toBe(true);
+    expect(result.current.salonSetupError).toBe("");
+  });
+
+  it("token obecny przy opublikowanych dokumentach: żądanie z akceptacją", async () => {
+    const hook = renderHook(() => useRegistration(null, PUBLISHED_FORM));
+    await waitFor(() => expect(hook.result.current.plansLoading).toBe(false));
+    act(() => {
+      hook.result.current.setLegalChecks({ terms: true, dpa: true });
+    });
+    await fillAndSubmit(hook.result);
+    expect(mutationFetch).toHaveBeenCalledTimes(1);
+    const body: unknown = JSON.parse(String(vi.mocked(mutationFetch).mock.calls[0]?.[1]?.body));
+    expect(body).toEqual({
+      planSlug: "basic",
+      email: "anna@example.com",
+      termsVersion: "2026-12-01",
+      dpaVersion: "2026-12-02",
+      acceptanceSource: "registration",
+    });
+  });
+
+  it("token obecny, błąd sieci przy POST: ekran potwierdzenia z komunikatem o salonie", async () => {
+    vi.mocked(mutationFetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(mutationFetch).toHaveBeenCalledTimes(1);
+    expect(result.current.showVerificationMessage).toBe(true);
+    expect(result.current.salonSetupError).toBe(
+      "Nie udało się założyć salonu. Po zalogowaniu załóż go w panelu."
+    );
+    expect(result.current.error).toBe("");
+  });
+
+  it("błąd signUp: komunikat błędu, bez wywołania /api/register-subscription i bez ekranu potwierdzenia", async () => {
+    vi.mocked(signUp.email).mockResolvedValueOnce({
+      data: null,
+      error: { message: "Invalid email", status: 400, statusText: "Bad Request" },
+    } as never);
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(mutationFetch).not.toHaveBeenCalled();
+    expect(result.current.showVerificationMessage).toBe(false);
+    expect(result.current.error).not.toBe("");
+    expect(result.current.isPending).toBe(false);
+  });
+
+  it("signUp rzuca wyjątek: komunikat nieoczekiwanego błędu, bez wywołania /api/register-subscription", async () => {
+    vi.mocked(signUp.email).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(mutationFetch).not.toHaveBeenCalled();
+    expect(result.current.showVerificationMessage).toBe(false);
+    expect(result.current.error).toBe("Wystapil nieoczekiwany blad");
+  });
+
+  it("odpowiedź bez pola token (data: {}): traktowana jak brak sesji", async () => {
+    vi.mocked(signUp.email).mockResolvedValueOnce({ data: {}, error: null } as never);
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(mutationFetch).not.toHaveBeenCalled();
+    expect(result.current.showVerificationMessage).toBe(true);
   });
 });

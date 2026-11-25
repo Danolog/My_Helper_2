@@ -35,7 +35,8 @@ vi.mock("@/hooks/use-form-recovery", () => ({
 }));
 
 vi.mock("@/lib/auth-client", () => ({
-  signUp: { email: vi.fn(async () => ({ data: {}, error: null })) },
+  // Potwierdzanie e-maila wyłączone: better-auth zwraca token sesji, salon powstaje od razu.
+  signUp: { email: vi.fn(async () => ({ data: { token: "session-token" }, error: null })) },
   sendVerificationEmail: vi.fn(),
 }));
 
