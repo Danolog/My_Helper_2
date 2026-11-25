@@ -36,7 +36,7 @@ test.describe('Panel: konto bez salonu', () => {
       const clientLink = page.getByRole('link', { name: /Jestem klientem/ });
 
       // 2. /dashboard i dowolna podstrona: tylko zakładanie salonu, bez przekierowania.
-      for (const path of ['/dashboard', '/dashboard/appointments']) {
+      for (const path of ['/dashboard', '/dashboard/clients']) {
         await page.goto(path, { waitUntil: 'domcontentloaded' });
         await expect(page).toHaveURL(new RegExp(`${path}$`));
         await expect(createHeading).toBeVisible({ timeout: 15000 });
