@@ -1065,6 +1065,8 @@ infra/gcp/logging.sh --project=my-helper-2-488419
 infra/gcp/logging.sh --project=my-helper-2-488419 --apply
 ```
 
+Nie uruchamiaj `--apply` z rewizji sprzed poprawki kontroli wykluczenia (PR #466); uruchamiaj tylko z aktualnego `main`.
+
 Dry-run: najpierw `referrer-policy: ok …` (inaczej `--apply` odmówi — stop:
 wpisy z `next.config.ts` zniknęły albo skrypt nie jest uruchomiony z `main`), potem `? … sinks describe _Default`, potem lista `+ …` z punktami
 0–4 (w tej kolejności: `buckets create|update myhelper-logs`, `sinks update

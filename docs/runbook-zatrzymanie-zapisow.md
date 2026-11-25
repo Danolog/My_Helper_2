@@ -121,7 +121,7 @@ Skutki:
 | | Decyzja | Kroki |
 |---|---|---|
 | L1 | Zatrzymanie zapisów Vercela = reguła zapory Vercela (Firewall → Custom Rules) na poziomie projektu: `Deny` dla wszystkich żądań (każda ścieżka, każda metoda), bez wyjątków. Tworzona przed oknem jako wyłączona; w oknie włączana i publikowana; cofnięcie = wyłączenie. Bez kodu i bez wdrożenia. Blokuje też `GET`, bo `GET` odświeża sesję. Zmienna środowiskowa odpada (wymaga wdrożenia w oknie). Jeśli plan Vercela nie daje reguł własnych z `Deny` (F2 = nie): stop, nowa decyzja przed próbą (wariant zapasowy: tryb utrzymania w aplikacji, osobny PR w pełnym procesie). W wariancie bez kopii (plan 1.4) F2 nie jest warunkiem okna: przy F2 = nie — blok na górze („Zapora (L1) przy F2 = nie”). Zapora projektu wystarczy. Pierwsze włączenie reguły dla całego projektu następuje w oknie (W1); przed oknem nie testuje się jej na domenie produkcyjnej (sekcja 0.3) | W1, R1, K1.2 |
-| L2 | Crony Vercela: Settings → Cron Jobs → „Disable Cron Jobs” (oba crony, `vercel.json:9-12`); cofnięcie = „Enable”. Okno poza 02:00–03:30 UTC (plan Hobby: poza 02:00–04:00 UTC, bo cron startuje w dowolnej chwili zadanej godziny). Po udanym oknie crony Vercela zostają wyłączone na stałe (pracę przejmuje Cloud Scheduler); usunięcie ich z `vercel.json` — osobny krok porządkowy po oknie. W wariancie bez kopii (plan 1.4) przy F3 = nie (plan Hobby nie ma przełącznika): „nie dotyczy, okno poza 02:00–04:00 UTC” (na Hobby cron `0 3 * * *` może ruszyć do 03:59 — dokumentacja Vercela, „Hobby scheduling limits”). Uzasadnienie: crony Vercela piszą tylko do Neona; Neona nie kopiujemy ani nie zamrażamy; Cloud SQL startuje pusty; na GCP pracę cronów przejmuje Cloud Scheduler (W6/R5), więc nic nie wykona się dwa razy na tej samej bazie. Usunięcie klucza `crons` z `vercel.json` — osobny krok porządkowy po oknie (sekcja 7 pkt 2) | W3, R3 |
+| L2 | Crony Vercela: plan Hobby nie ma przełącznika cronów (F3 = nie), więc L2 nie dotyczy i crony nie są wyłączane. Okno poza 02:00–04:00 UTC (na Hobby cron `0 3 * * *` może ruszyć do 03:59 — dokumentacja Vercela, „Hobby scheduling limits”). Po przekierowaniu (K1) wywołania cronów Vercela dostają `307` i się nie wykonują. Zadań cyklicznych na GCP (Cloud Scheduler) do czasu ich utworzenia nie ma, więc żadne zadanie cykliczne nie działa. Dopuszczalne tylko dopóki nie ma prawdziwych salonów: zadania Scheduler (R5) muszą powstać przed pierwszym prawdziwym salonem. Uzasadnienie: crony Vercela piszą tylko do Neona; Neona nie kopiujemy ani nie zamrażamy; Cloud SQL startuje pusty, więc nic nie wykona się dwa razy na tej samej bazie. Usunięcie klucza `crons` z `vercel.json` — osobny krok porządkowy po oknie (sekcja 7 pkt 2) | W3, R3 |
 | L3 | Przed oknem, na stałe: Deployment Protection = „Standard Protection” (Vercel Authentication — blokuje Preview i wygenerowane adresy starszych wdrożeń Production, domena produkcyjna działa dalej) oraz usunięcie `POSTGRES_URL` z zakresu Preview. Preview nie dostaje go z powrotem (nowe Preview nie powstają, `vercel.json:3-7`; gdy wrócą — osobna gałąź Neona). Istniejących wdrożeń Preview nie usuwa się. W oknie W2 = odczyt stanu | P11, W2, R2 |
 | L4 | Zmiana domeny (wyżej). Rekord `A app` → `<LB_IP>`, **DNS only** (bez proxy Cloudflare — `TRUSTED_PROXIES` ustawiony z pomiaru adresów LB, `env.example:70-81`), TTL 60 s. Droga B = usunięcie rekordu. Przekierowanie starej domeny = K1 po 2.10 z kodem 0 albo po drodze C (sekcja 3, K1); w wariancie bez kopii (plan 1.4) K1 po 2.9 i po 2.8 z kodem 0 | P7, T4–T6, B1–B3, K1 |
 | L5 | Google OAuth: według F5/F6. Jeśli logowanie Google działa na Vercelu — przed oknem **dopisać** (nie podmieniać) adres przekierowania i origin `app.nordsignal.cc` do tego samego klienta OAuth; wersja `google-client-secret` i `GOOGLE_CLIENT_ID` w `production-gcp` przed przebiegiem z P5. Wersja sekretu jak w L6: `pbpaste \| CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions add google-client-secret --data-file=-`, potem `pbcopy </dev/null`. Jeśli nie działa — GCP startuje bez Google, P8 = „nie dotyczy”, a przed P10 osobne sprawdzenie w kodzie, że przycisk Google nie pokazuje się bez `GOOGLE_CLIENT_ID`. Logowania Google na GCP nie testuje się przed oknem (zapis do pustego Cloud SQL rozbiłby `--expect-empty`) — pierwsza próba po 2.10. W wariancie bez kopii (plan 1.4) Google jest wyłączony na betę niezależnie od F5/F6: GCP startuje bez Google, P8 = „nie dotyczy”, bez dopisywania adresów do klienta OAuth i bez wersji `google-client-secret`; sprawdzenie w kodzie przed P10 obowiązuje (warunek P10). Zdanie o pierwszej próbie po 2.10 nie obowiązuje | P4, P5, P8, P10 |
@@ -500,7 +500,7 @@ K1.2 i K1.4 = „nie dotyczy”.
 | Krok | Działanie | Polecenie | Oczekiwane |
 |---|---|---|---|
 | K1.1 | scalenie PR z P13 | PR dodaje do `vercel.json` jedno przekierowanie w `redirects`: `{"source": "/:path*", "destination": "https://app.nordsignal.cc/:path*", "permanent": false}` (tymczasowe, żeby powrót z sekcji 6 nie walczył z pamięcią przeglądarek) | wdrożenie Vercel Production `Ready` |
-| K1.2 | zawężenie reguły zapory | panel Vercela → Firewall: reguła z L1 zawężona do metod innych niż `GET`/`HEAD`, opublikowana (zapora działa przed przekierowaniem — `Deny` dla wszystkiego zablokowałby też przekierowanie) | reguła włączona, warunek metody |
+| K1.2 | zawężenie reguły zapory | panel Vercela → Firewall: zmieniasz ISTNIEJĄCĄ regułę `okno-deny` (nie dodajesz nowej): w jej wierszu „If” zamieniasz pole „Request Path” na „Method”, operator „Is not any of”, wartości `GET` i `HEAD`; Publish (zapora działa przed przekierowaniem — `Deny` dla wszystkiego zablokowałby też przekierowanie). Po Publish na liście reguł projektu jest dokładnie jedna reguła. Przed K1.3 wykonaj odczyt `GET` (`curl -sI "https://<domena Vercel Production>/salon/x"`): wynik `403` z nagłówkiem `x-vercel-mitigated: deny` oznacza, że zawężenie nie działa | jedna reguła, warunek metody; `GET` bez `403` i bez `x-vercel-mitigated: deny` |
 | K1.3 | przekierowanie działa | `curl -sI "https://<domena Vercel Production>/salon/x" \| grep -i '^location:'` | `location: https://app.nordsignal.cc/salon/x` |
 | K1.4 | zapisy na Vercelu nadal blokowane | `curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://<domena Vercel Production>/api/health"` (do potwierdzenia przy K1) | `403`; inny wynik = reguła z powrotem `Deny` dla wszystkiego (zgoda jak K1.2), decyzja właściciela |
 
@@ -591,8 +591,8 @@ w zadaniu inny niż w rewizji (np. rotacja bez ponownego `scheduler.sh`),
 **Okno w przód zakończone (2.10 z kodem 0 albo droga C).** Neon jest
 zamrożony. Vercel: K1 scalony i reguła zapory zawężona do metod innych niż
 `GET`/`HEAD` (K1.2). Wyjątek: droga C bez K1 (sekcja 3, K1), gdzie reguła
-zostaje `Deny` dla wszystkiego. Crony Vercela są wyłączone na stałe (L2).
-Ingress zostaje `all`. Scheduler: tylko R5, a po drodze C według decyzji
+zostaje `Deny` dla wszystkiego. Crony Vercela po K1 dostają `307` i się nie
+wykonują (L2). Ingress zostaje `all`. Scheduler: tylko R5, a po drodze C według decyzji
 właściciela (runbook przełączenia, droga C).
 
 W wariancie bez kopii (plan 1.4) okno kończy się po 2.9, w tej kolejności:
@@ -600,9 +600,12 @@ W wariancie bez kopii (plan 1.4) okno kończy się po 2.9, w tej kolejności:
 na K1.1, gdy K1.1 czeka na minimum SOA. Neon nie jest zamrożony: działa
 dalej za zaporą (przy F2 = nie bez niej) i za K1, bez użytkowników. Wyjątek
 „bez K1” jak wyżej; 2.8 z kodem innym niż 0 = stan „bez K1”, bez R5 (L7).
-Crony Vercela wyłączone na stałe (L2), ingress `all`. Przy F3 = nie crony
-Vercela działają dalej i piszą tylko do Neona, do usunięcia klucza `crons`
-(sekcja 7 pkt 2).
+Ingress `all`. Po K1 wywołania cronów Vercela dostają `307` i się nie
+wykonują (na planie Hobby nie ma przełącznika cronów, więc L2 nie dotyczy).
+Cloud Scheduler do czasu utworzenia zadań nie działa, więc żadne zadanie
+cykliczne nie jest wykonywane. Dopuszczalne tylko do pierwszego prawdziwego
+salonu: zadania Scheduler (R5) muszą powstać przed nim. Klucz `crons`
+usuwa się osobnym krokiem po oknie (sekcja 7 pkt 2).
 
 **Stop w oknie powrotu** — nie obowiązuje w wariancie bez kopii (plan 1.4)
 (3.3 krok 2 „stop” i „Stop w kroku 7 albo 8” — ruch
