@@ -24,6 +24,9 @@ export default async function DashboardLayout({
   // na /salons zostawialo go bez drogi do salonu.
   const { session, allowed, role } = await requireDashboardAccess();
 
+  // Ta gałąź nie przerywa odpowiedzi, więc wynik serwerowej podstrony i tak
+  // trafia do payloadu RSC: każda podstrona panelu musi być kliencka albo mieć
+  // własną bramkę (pilnuje __tests__/app/dashboard-pages-guard.test.ts).
   if (!allowed) {
     const user = session?.user;
     if (!user) redirect("/login");
