@@ -896,6 +896,7 @@ wartość z otoczenia procesu `docker`), nigdy `-e NAZWA=wartość`; hasło
 wyłącznie przez zmienną środowiskową:
 
 ```bash
+set +x
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
   PGOPTIONS='-c default_transaction_read_only=on' \
   docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
