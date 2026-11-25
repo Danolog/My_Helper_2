@@ -236,10 +236,16 @@ export function useRegistration(
       if (result.error) {
         setError(sanitizeAuthError(result.error.message, "Nie udalo sie utworzyc konta"));
       } else {
-        // Po rejestracji zakładamy salon z planem planOnSaleOr(selectedPlan).
+        // Przy włączonym potwierdzaniu e-maila better-auth zwraca token: null, także
+        // przy zajętym adresie (celowo ta sama odpowiedź). Bez sesji trasa salonu
+        // odpowiedziałaby 401, więc jej nie wołamy i nie wysyłamy akceptacji
+        // dokumentów; ekran potwierdzenia jest ten sam w obu przypadkach.
+        const hasSession = typeof result.data?.token === "string";
+
+        // Po rejestracji z sesją zakładamy salon z planem planOnSaleOr(selectedPlan).
         // Konto już istnieje, więc błąd salonu nie cofa rejestracji: przechodzimy
         // do potwierdzenia i tam go pokazujemy (salon można założyć w panelu).
-        if (selectedPlan) {
+        if (hasSession && selectedPlan) {
           setSalonSetupError("");
           try {
             const res = await mutationFetch("/api/register-subscription", {
