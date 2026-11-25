@@ -934,8 +934,14 @@ Najpierw odczyt ujścia `_Default` (błąd odczytu = stop przed jakąkolwiek zmi
    adresy salonów i ich klientów), stdout/stderr i Data Access Secret Managera
    trafiają od tej chwili do zasobnika w `europe-central2`, zgodnie z DPA, a nie do
    zasobnika `_Default` w lokalizacji `global`. Filtr `_Default` i wykluczenia są
-   atrybutami ujścia, więc zostają. Wykluczenie ma zawsze `disabled=false`: ponowne
-   `--apply` przywraca wykluczenie wyłączone w konsoli. Wpis nie trafia do logów
+   atrybutami ujścia, więc zostają. Wykluczenie jest zawsze włączone: ponowne
+   `--apply` przywraca wykluczenie wyłączone w konsoli. gcloud zamienia wartość
+   klucza `disabled` funkcją `bool()` Pythona, więc `disabled=false` (każdy
+   niepusty napis) wykluczenie **wyłącza**. Skrypt podaje `disabled=` z pustą
+   wartością w `--update-exclusion`, a w `--add-exclusion` pomija klucz. Zaraz
+   po zapisie czyta `json(exclusions)` ujścia `_Default`; brak wykluczenia,
+   `disabled: true` albo inny filtr kończy przebieg kodem 2 przed punktem 2.
+   Wpis nie trafia do logów
    wyłącznie wtedy, gdy metoda to **GET** albo **HEAD** i **adres żądania** (od schematu
    i hosta, ścieżka zaraz po hoście) pasuje do wyrażenia RE2:
 
@@ -1062,7 +1068,8 @@ infra/gcp/logging.sh --project=my-helper-2-488419 --apply
 Dry-run: najpierw `referrer-policy: ok …` (inaczej `--apply` odmówi — stop:
 wpisy z `next.config.ts` zniknęły albo skrypt nie jest uruchomiony z `main`), potem `? … sinks describe _Default`, potem lista `+ …` z punktami
 0–4 (w tej kolejności: `buckets create|update myhelper-logs`, `sinks update
-_Default <cel myhelper-logs> --add-exclusion|--update-exclusion=…,disabled=false`,
+_Default <cel myhelper-logs> --add-exclusion=…|--update-exclusion=…,disabled=`,
+`? … sinks describe _Default --format=json(exclusions)` (kontrola po zapisie),
 `buckets update _Default`, `set-iam-policy`, zasobnik i ujście audytu), potem
 `--apply`.
 
