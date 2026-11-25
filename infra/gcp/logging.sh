@@ -34,8 +34,13 @@
 #       adresach). --apply sprawdza te wpisy w next.config.ts i bez nich
 #       odmawia (kod 2) (docs/runbook-krok-d.md, §10b). Dry-run wypisuje
 #       wynik sprawdzenia.
-#       Wykluczenie zawsze z disabled=false: ponowne --apply przywraca
-#       wykluczenie wyłączone w konsoli.
+#       Wykluczenie zawsze włączone: ponowne --apply przywraca wykluczenie
+#       wyłączone w konsoli. gcloud zamienia wartość klucza `disabled` funkcją
+#       bool() Pythona, więc `disabled=false` (każdy niepusty napis) WYŁĄCZA
+#       wykluczenie. Włącza tylko pusta wartość `disabled=` (update), a przy
+#       --add-exclusion klucz pominięty (domyślnie włączone).
+#       Po zapisie skrypt czyta `json(exclusions)` ujścia _Default: brak
+#       wykluczenia, `disabled: true` albo inny filtr = stop (kod 2).
 #   (2) retencja zasobnika `_Default` = 30 dni, jawnie (wpisy sprzed zmiany celu);
 #   (3) Data Access DATA_READ dla secretmanager.googleapis.com (auditConfigs
 #       w polityce IAM projektu; wiązania i etag bez zmian);
@@ -208,14 +213,53 @@ logs_bucket() {
 }
 
 # (1) Ujście _Default: cel myhelper-logs i wykluczenie w jednym wywołaniu.
-# Cel przekazywany zawsze; istniejące wykluczenie dostaje ten sam filtr i
-# disabled=false (bez dryfu, także po wyłączeniu w konsoli).
+# Cel przekazywany zawsze; istniejące wykluczenie dostaje ten sam filtr i jest
+# włączane (bez dryfu, także po wyłączeniu w konsoli).
+# `disabled=` z PUSTĄ wartością: gcloud stosuje bool() do napisu, więc tylko ''
+# daje False; `disabled=false`, `False`, `0` dają True (wykluczenie wyłączone).
+# Bez klucza --update-exclusion zostawia dotychczasową wartość, dlatego klucz
+# jest podany. --add-exclusion bez klucza tworzy wykluczenie włączone.
 exclusion() {
   if [[ ";${DEFAULT_EXCLUSIONS};" == *";${EXCLUSION};"* ]]; then
-    run logging sinks update _Default "$LOGS_DEST" "--update-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER},disabled=false"
+    run logging sinks update _Default "$LOGS_DEST" "--update-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER},disabled="
   else
-    run logging sinks update _Default "$LOGS_DEST" "--add-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER},disabled=false"
+    run logging sinks update _Default "$LOGS_DEST" "--add-exclusion=name=${EXCLUSION},filter=${EXCLUSION_FILTER}"
   fi
+}
+
+# Kontrola po zapisie (1): odczyt wykluczeń ujścia _Default. Stop (kod 2), gdy
+# odczyt się nie uda, wykluczenia brak, ma `disabled` inne niż false/brak albo
+# inny filtr. Dry-run: tylko wypisanie odczytu (stan nie jest sprawdzany).
+verify_exclusion() {
+  echo "? gcloud --project=$PROJECT_ID --quiet logging sinks describe _Default --format=json(exclusions)"
+  if [[ "$APPLY" != 1 ]]; then
+    echo "  state: not checked (dry-run)"
+    return 0
+  fi
+  command -v node >/dev/null 2>&1 || die "node not found — cannot verify exclusion ${EXCLUSION}"
+  local json result
+  json="$("${GC[@]}" logging sinks describe _Default "--format=json(exclusions)" 2>/dev/null)" ||
+    die "cannot read exclusions of _Default — stopped"
+  # JSON jako argument: stdin node zajmuje skrypt z heredoc.
+  result="$(node - "$EXCLUSION" "$EXCLUSION_FILTER" "$json" 2>/dev/null <<'JS'
+const [, , name, filter, raw] = process.argv;
+let s;
+try { s = JSON.parse(raw); } catch { process.stdout.write("invalid"); process.exit(0); }
+const list = s && Array.isArray(s.exclusions) ? s.exclusions : [];
+const e = list.find((x) => x && x.name === name);
+if (!e) { process.stdout.write("missing"); process.exit(0); }
+if (e.disabled !== undefined && e.disabled !== false) { process.stdout.write("disabled"); process.exit(0); }
+if (e.filter !== filter) { process.stdout.write("filter"); process.exit(0); }
+process.stdout.write("ok");
+JS
+)" || die "cannot verify exclusion ${EXCLUSION} — stopped"
+  case "$result" in
+    ok) echo "  state: exclusion ${EXCLUSION} enabled" ;;
+    missing) die "exclusion ${EXCLUSION} missing on _Default after update — stopped" ;;
+    disabled) die "exclusion ${EXCLUSION} is disabled on _Default after update — stopped" ;;
+    filter) die "exclusion ${EXCLUSION} has a different filter on _Default after update — stopped" ;;
+    *) die "unexpected exclusions of _Default — stopped" ;;
+  esac
 }
 
 # (2) Retencja _Default jawnie (zasobnik _Default ma lokalizację global z natury).
@@ -316,6 +360,7 @@ referrer_guard
 read_default_sink
 logs_bucket
 exclusion
+verify_exclusion
 default_retention
 data_access
 audit_sink
