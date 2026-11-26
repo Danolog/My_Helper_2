@@ -937,18 +937,19 @@ przyjęcia. Zmianę robimy od razu przy przyjęciu, a nie 14. dnia, żeby salon
 nigdy nie zobaczył blokady. Każde kolejne przedłużenie idzie tą samą drogą.
 
 **Kto.** To zmiana danych produkcyjnych. Decyzję o wykonaniu podejmuje CTO.
-Zapis wykonuje **wyłącznie właściciel**: blok połączenia z zapisem oraz
-`BEGIN`/`UPDATE`/`COMMIT` z kroku 3. Sesja główna robi tylko trzy rzeczy:
-kopię na żądanie (krok 1, operacja gcloud bez połączenia z bazą),
-przygotowanie parametrów (id salonu, data w UTC) oraz odczyty przed zmianą
-i po niej (kroki 2 i 4) blokiem 7b, czyli w sesji tylko do odczytu. Agenci
-nie wykonują żadnego z kroków.
+Każdy dostęp do bazy w tej procedurze wykonuje **wyłącznie właściciel**:
+blok połączenia z zapisem oraz kroki 2–4 (odczyt przed zmianą, zmiana,
+odczyt po zmianie) w jednej sesji `psql` i w jednej transakcji. Sesja główna
+robi tylko trzy rzeczy: kopię na żądanie (krok 1, operacja gcloud bez
+połączenia z bazą), przygotowanie parametrów dla właściciela (krok 1) oraz
+wpis w dzienniku audytu (krok 5). W ramach tej procedury sesja główna nie
+łączy się z bazą. Agenci nie wykonują żadnego z kroków.
 
 **Połączenie z zapisem — uruchamia wyłącznie właściciel.** Kontrola 7b
 (drugi blok sekcji 9) działa w sesji tylko do odczytu, więc do zapisu się nie
 nadaje. Właściciel używa tego samego bloku z loginem aplikacji, ale **bez**
-`default_transaction_read_only`, tylko na czas kroku 3. Sesja główna i agenci
-tego bloku nie uruchamiają. `P` ustaw jak w drugim bloku sekcji 9; brak `P`
+`default_transaction_read_only`, tylko na czas kroków 2–4. Sesja główna
+i agenci tego bloku nie uruchamiają. `P` ustaw jak w drugim bloku sekcji 9; brak `P`
 = stop, nie kontynuować. Hasło administratora (`postgres`) nie jest tu
 potrzebne.
 
@@ -969,8 +970,8 @@ wyłącznie.
 
 **Kroki.**
 
-1. **Kopia na żądanie przed zmianą** (sesja główna; zasada 30 dni z 3.6a
-   obowiązuje). Brak `P` = stop, nie kontynuować:
+1. **Kopia na żądanie przed zmianą i parametry** (sesja główna; zasada
+   30 dni z 3.6a obowiązuje). Brak `P` = stop, nie kontynuować:
 
    ```bash
    set +x
@@ -980,68 +981,75 @@ wyłącznie.
    ```
 
    Oczekiwane: `ON_DEMAND`, `SUCCESSFUL`. Inny wynik = stop, bez zmiany.
-   Id kopii trafia do wpisu z kroku 5.
+   Id kopii trafia do wpisu z kroku 5. Potem sesja główna przekazuje
+   właścicielowi parametry: id salonu i nową datę w UTC (patrz „Data w UTC”).
 
-2. **Odczyt przed zmianą** (sesja główna, blok 7b, sesja tylko do odczytu):
-
-   ```sql
-   SELECT id, status, trial_ends_at, stripe_subscription_id IS NULL AS bez_stripe
-   FROM salon_subscriptions
-   WHERE salon_id = '<id salonu>' AND status IN ('trialing', 'active');
-   ```
-
-   Oczekiwane: dokładnie jeden wiersz, `status = trialing`, `bez_stripe = t`.
-   Zapisz starą wartość `trial_ends_at`. Inny wynik = stop i pytanie do CTO.
-   Przy `active` salon już płaci i nie ma czego przedłużać. Przy wierszu
-   z subskrypcją Stripe synchronizacja ze Stripe nadpisałaby datę. Po
-   odczycie wyjście z `psql` i `kill %1`. Sesja główna przekazuje
-   właścicielowi id salonu i nową datę w UTC.
-
-3. **Zmiana — uruchamia wyłącznie właściciel**, w sesji `psql` z bloku
-   połączenia z zapisem wyżej:
+2. **Otwarcie transakcji i odczyt przed zmianą** (właściciel, w sesji `psql`
+   z bloku połączenia z zapisem wyżej):
 
    ```sql
    BEGIN;
+   SELECT id, status, trial_ends_at, stripe_subscription_id IS NULL AS bez_stripe
+   FROM salon_subscriptions
+   WHERE salon_id = '<id salonu>' AND status IN ('trialing', 'active')
+   FOR UPDATE;
+   ```
+
+   Oczekiwane: dokładnie jeden wiersz, `status = trialing`, `bez_stripe = t`.
+   Zapisz starą wartość `trial_ends_at`. Inny wynik = `ROLLBACK;`, stop
+   i pytanie do CTO. Przy `active` salon już płaci i nie ma czego przedłużać.
+   Przy wierszu z subskrypcją Stripe (`bez_stripe = f`) synchronizacja ze
+   Stripe nadpisałaby datę, więc też `ROLLBACK;` i stop. `FOR UPDATE`
+   blokuje wiersz do końca transakcji, więc między sprawdzeniem warunków
+   a zmianą nikt go nie zmieni.
+
+3. **Zmiana** (właściciel, ta sama sesja i ta sama transakcja):
+
+   ```sql
    UPDATE salon_subscriptions SET trial_ends_at = '<data UTC, np. 2027-03-01 22:59:59>'
    WHERE salon_id = '<id salonu>' AND status = 'trialing';
    ```
 
-   `psql` ma wypisać `UPDATE 1`. Wtedy `COMMIT;`. Każdy inny wynik oznacza
-   `ROLLBACK;`. Jeśli wyszło `UPDATE 0`, choć odczyt z kroku 2 pokazał ten
-   wiersz, właściciel robi `ROLLBACK;` i sprawa wraca do CTO, bo zapis
-   zablokowało coś innego niż warunek, np. polityka RLS. W migracjach RLS
-   jest włączone bez `FORCE`, więc właściciel tabel (login aplikacji)
-   powinien ją omijać. Potem wyjście z `psql`, a proxy zamyka `kill %1`.
-   Właściciel przekazuje sesji głównej tylko wynik (`UPDATE 1` i `COMMIT`).
+   `psql` ma wypisać `UPDATE 1`. Każdy inny wynik = `ROLLBACK;` i stop.
+   Jeśli wyszło `UPDATE 0`, choć odczyt z kroku 2 pokazał ten wiersz,
+   właściciel robi `ROLLBACK;` i sprawa wraca do CTO, bo zapis zablokowało
+   coś innego niż warunek, np. polityka RLS. W migracjach RLS jest włączone
+   bez `FORCE`, więc właściciel tabel (login aplikacji) powinien ją omijać.
 
-4. **Odczyt po zmianie** (sesja główna, blok 7b, sesja tylko do odczytu):
+4. **Odczyt po zmianie i zatwierdzenie** (właściciel, ta sama sesja i ta
+   sama transakcja):
 
    ```sql
    SELECT status, trial_ends_at FROM salon_subscriptions
    WHERE salon_id = '<id salonu>' AND status = 'trialing';
    ```
 
-   Oczekiwane: jeden wiersz z nową datą. Pełny dostęp przy `trialing`
-   z przyszłą datą potwierdza test „przedłużenie: przesunięcie trialEndsAt
+   Oczekiwane: jeden wiersz z nową datą. Wtedy `COMMIT;`. Każda rozbieżność
+   = `ROLLBACK;` i stop. Po `COMMIT;` wyjście z `psql`, a proxy zamyka
+   `kill %1`. Właściciel przekazuje sesji głównej tylko starą datę, nową datę
+   i wynik („1 wiersz”, `COMMIT`). Pełny dostęp przy `trialing` z przyszłą
+   datą potwierdza test „przedłużenie: przesunięcie trialEndsAt
    z przeszłości na przyszłość…” w `__tests__/lib/subscription-trial-end.test.ts`.
 
-5. **Wpis w dzienniku audytu**, jak przy kopiach na żądanie (komentarz
-   w #121). Wpis zawiera numer porządkowy („przedłużenie pilotażu nr N”),
-   starą i nową wartość `trial_ends_at`, wynik „1 wiersz”, id kopii z kroku 1
-   oraz informację „decyzja CTO, zapis wykonał właściciel”. Wpis nie zawiera
-   id salonu ani jego skrótu, nazwy salonu, adresów e-mail ani danych
-   osobowych. Powiązanie numeru porządkowego z salonem jest prywatne
-   i trzymamy je poza repozytorium, w zgłoszeniu w prywatnym narzędziu do
-   zarządzania zadaniami z dostępem tylko dla zespołu.
+5. **Wpis w dzienniku audytu i powiązanie z salonem** (sesja główna). Wpis
+   jak przy kopiach na żądanie (komentarz w #121) zawiera numer porządkowy
+   („przedłużenie pilotażu nr N”), starą i nową wartość `trial_ends_at`,
+   wynik „1 wiersz”, id kopii z kroku 1 oraz informację „decyzja CTO, zapis
+   wykonał właściciel”. Wpis nie zawiera id salonu ani jego skrótu, nazwy
+   salonu, adresów e-mail ani danych osobowych. Powiązanie numeru
+   porządkowego z salonem jest prywatne i trzymamy je poza repozytorium:
+   sesja główna zakłada i prowadzi zgłoszenie w prywatnym systemie zadań
+   z dostępem tylko dla zespołu.
 
-**Cotygodniowy przegląd** (przy cotygodniowym odczycie kosztów) opiera się
-na wpisach z kroku 5 w dzienniku audytu, bez łączenia się z bazą. Każdy wpis
+**Cotygodniowy przegląd** (sesja główna, przy cotygodniowym odczycie
+kosztów). Sesja główna czyta wpisy z kroku 5 w dzienniku audytu, bez
+łączenia się z bazą, i wypisuje przedłużenia, którym do końca zostało mniej
+niż 7 dni albo termin już minął. Każdy wpis
 zawiera nową datę końca pilotażu, więc najnowszy wpis dla danego numeru
-porządkowego wyznacza obowiązujący termin. Każdy salon pilotażowy, któremu
-zostało mniej niż 7 dni albo termin już minął, dostaje pytanie
-o przedłużenie. Po zgodzie salonu przedłużenie idzie krokami 1–5. Gdy
-potrzebne jest zapytanie do bazy (np. przy podejrzeniu rozbieżności z
-dziennikiem), uruchamia je właściciel:
+porządkowego wyznacza obowiązujący termin. Każdy salon pilotażowy z tej
+listy dostaje pytanie o przedłużenie. Po zgodzie salonu przedłużenie idzie
+krokami 1–5. Gdy potrzebne jest zapytanie do bazy (np. przy podejrzeniu
+rozbieżności z dziennikiem), uruchamia je wyłącznie właściciel:
 
 ```sql
 SELECT salon_id, trial_ends_at FROM salon_subscriptions
