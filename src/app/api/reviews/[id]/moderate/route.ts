@@ -60,6 +60,15 @@ export const PATCH = withApiHandler(
       );
     }
 
+    // Odrzucenie jest ostateczne: odrzuconej opinii nie mozna ponownie
+    // zatwierdzic ani zmienic (regulamin, pkt 8.3.4).
+    if (review.status === "rejected") {
+      return NextResponse.json(
+        { success: false, error: "Odrzucona opinia nie może zostać zmieniona" },
+        { status: 409 }
+      );
+    }
+
     // Update the review status
     const newStatus = action === "approve" ? "approved" : "rejected";
     const updatedReview = await repo.updateOwned(reviews, reviewId, {
