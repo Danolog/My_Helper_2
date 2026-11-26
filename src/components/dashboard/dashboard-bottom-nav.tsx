@@ -130,7 +130,9 @@ export function DashboardBottomNav() {
             <SheetTitle className="text-sidebar-foreground">Menu</SheetTitle>
           </SheetHeader>
           <Separator className="bg-sidebar-border" />
-          <div className="p-4 overflow-y-auto">
+          {/* flex-1 + min-h-0: bez tego lista nie przewija się w panelu
+              (flex-col) i dół menu z wylogowaniem wypada poza ekran. */}
+          <div className="p-4 overflow-y-auto flex-1 min-h-0">
             <SidebarNav
               pathname={pathname}
               onClick={() => setSheetOpen(false)}

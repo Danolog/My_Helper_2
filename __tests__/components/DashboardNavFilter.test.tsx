@@ -38,6 +38,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
+  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
 }));
 
 const ALL_ON = Object.fromEntries(MODULES.map((m) => [m.key, true])) as ModulesState;

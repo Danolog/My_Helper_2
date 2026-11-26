@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Crown, Loader2, Zap } from "lucide-react";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { LegalAcceptanceFields } from "@/components/legal/legal-acceptance-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -112,6 +113,8 @@ export function CreateSalonPrompt({
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Dashboard</h1>
+        {/* Ten widok nie ma nawigacji panelu, więc wylogowanie jest tutaj. */}
+        <SignOutButton />
       </div>
       <div className="max-w-2xl mx-auto space-y-6">
         <Card>

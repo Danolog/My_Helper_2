@@ -25,6 +25,7 @@ import {
   Menu,
   Wallet,
 } from "lucide-react";
+import { SignOutButton } from "@/components/auth/sign-out-button";
 import { useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Badge } from "@/components/ui/badge";
@@ -278,12 +279,16 @@ export function SidebarNav({
         ))}
       </div>
 
-      {/* Settings pinned at the bottom (tylko owner) */}
-      {isRouteAllowedForRole(SETTINGS_ITEM.href, role) && (
-        <div className="mt-4 pt-4 border-t border-sidebar-border">
+      {/* Ustawienia (tylko owner) i wylogowanie (każda rola) na dole */}
+      <div className="mt-4 pt-4 border-t border-sidebar-border flex flex-col gap-0.5">
+        {isRouteAllowedForRole(SETTINGS_ITEM.href, role) && (
           <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
-        </div>
-      )}
+        )}
+        <SignOutButton
+          variant="ghost"
+          className="w-full px-3 text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+        />
+      </div>
     </nav>
   );
 }
