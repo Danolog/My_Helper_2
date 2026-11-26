@@ -531,7 +531,7 @@ odmawia startu z nazwą brakującej zmiennej.
 wersji. Od K-1: `required` w manifeście (wymagane: `postgres-url`,
 `better-auth-secret`); `run-deploy.sh` mapuje wyłącznie sekrety, których
 najnowsza wersja ma stan `ENABLED` (od K-1b odczyt `secrets versions list
-NAZWA --sort-by=~createTime --limit=1`: pusty wynik = brak wersji, bez
+NAZWA --sort-by='~createTime' --limit=1`: pusty wynik = brak wersji, bez
 rozpoznawania błędu po tekście); sekret wymagany bez wersji przerywa
 wdrożenie **przed** `gcloud run deploy` z nazwą sekretu; każdy błąd odczytu
 (np. uprawnienia, brak samego kontenera sekretu) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
@@ -648,6 +648,12 @@ SELECT rolname, rolcanlogin, rolbypassrls, rolsuper,
 
 Oczekiwane: `myhelper_app | f | f | f | f`, `myhelper_svc | t | f | f | f`.
 
+Ta kontrola już przeszła i zostaje jako historia. Gdyby trzeba ją było
+powtórzyć (np. nowa instancja), `pg_roles` i `pg_has_role` są czytelne dla
+każdej roli, więc po zielonym D z sekcji 9b idzie blokiem kontroli 7b
+z sekcji 9 (rola `myhelper_7b_ro`). Do zielonego D kontrolę wykonuje
+właściciel.
+
 **Migracje produkcyjne** idą wyłącznie przez workflow z `run_migrations=true`
 (kopia na żądanie przed migracją w `run-migrate.sh`) albo przez sesję główną.
 Nigdy ręcznie z shella agenta.
@@ -691,6 +697,12 @@ schemacie bez tych tabel i kolumn. `/api/health` sprawdza tylko połączenie
 z bazą, więc tego nie wykryje: rewizja dostanie cały ruch, a zapytania do
 `clients` będą padać.
 
+**Kolejne wdrożenia z migracjami.** Liczby i obiekty w tej sekcji (15 przed,
+18 po, tabele i kolumny z 0015–0017) dotyczą tego jednego wdrożenia. Przy
+kolejnym wdrożeniu z migracjami liczby i obiekty bierzemy z dziennika
+migracji dla tego wdrożenia; wpisane tu wartości dałyby fałszywie czerwony
+wynik.
+
 **Przed wdrożeniem** (baza produkcyjna, tylko odczyt):
 
 Kontrola a i kontrole po wdrożeniu idą przez rolę tylko do odczytu
@@ -727,7 +739,11 @@ SELECT appointment_id, count(*) FROM reviews WHERE appointment_id IS NOT NULL GR
 ```
 
 c) (zamknięte) zapytanie kontrolne 0017 musi dać `alergie_niepuste=0`; inna wartość =
-stop, bo 0017 zeruje wypełnione `allergies` bez możliwości odtworzenia.
+stop, bo 0017 zeruje wypełnione `allergies`. Wyzerowane dane odtwarza
+wyłącznie kopia sprzed joba (trzymana 30 dni). Wynik 0 po migracji niczego
+nie dowodzi, bo kolumna jest już wtedy wyzerowana; liczy się wynik sprzed
+joba. Wynik różny od 0: wdrożenie wstrzymane, ustalenie, czy to dane
+testowe, i decyzja właściciela przed jakimkolwiek dalszym krokiem.
 Zapytanie i wynik trafiają do dziennika migracji (oczekiwana wartość: 0):
 
 ```sql
@@ -770,7 +786,10 @@ błąd 55P03).
   `workflow_dispatch` z `run_migrations=true`, nie ręczne uruchomienie joba
   (`gcloud run jobs execute`): tylko przebieg przez workflow robi kopię na
   żądanie i ustawia job na obraz migratora z tego samego commitu
-  (`infra/gcp/run-migrate.sh`).
+  (`infra/gcp/run-migrate.sh`). Ponowny `workflow_dispatch` buduje bieżący
+  czubek `main`, więc przed ponowieniem czubek `main` = commit z dziennika
+  migracji. Inny czubek: przed ponowieniem nowy wpis w dzienniku z tym
+  commitem i ponownie policzonymi sha256 plików migracji.
 - Obie kopie trzymane maksymalnie 30 dni od migracji; usunięcie z wpisem
   w dzienniku. Starej bazy (Neon) nie usuwać przed zamknięciem okna powrotu
   przełączenia.
@@ -850,6 +869,14 @@ gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-centra
 ```
 
 Po tym kroku `--check` kończy się kodem 0 (wznowione zgodne z tabelą).
+
+**`mh-sms-reminders` w stanie `ENABLED` przed bramką bety** (w liście zadań
+albo w `--check`) = natychmiast pauza, bez czekania na decyzję:
+`gcloud --project="${P}" scheduler jobs pause mh-sms-reminders --location=europe-central2`,
+potem lista zadań ze stanem jak wyżej (oczekiwane `PAUSED`) i zgłoszenie
+właścicielowi. `scheduler.sh` nie ma trybu samej pauzy; przebieg domyślny
+też wstrzymuje wszystkie zadania, ale przy tym czyta sekret i aktualizuje
+nagłówki.
 
 Zadań jest 6 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
 spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
@@ -931,20 +958,97 @@ kodem 1 i `psql` nie ma z czym się połączyć.
 **Blok kontroli 7b — rola `myhelper_7b_ro`.** Jedyna droga sesji głównej do
 bazy. Wbudowana rola `postgres` nie ma praw do schematu `drizzle`, a login
 aplikacji (`myhelper_svc`) ma zapis, więc kontrola 7b idzie rolą tylko do
-odczytu z sekcji 9b. Warunek: rola utworzona i test akceptacyjny z 9b
-zapisany w dzienniku migracji. Zmienne: `P` (identyfikator projektu),
-`REGION`, `INSTANCE` (instancja Cloud SQL); brak którejkolwiek = stop, nie
-kontynuować. Hasło idzie z sekretu prosto do zmiennej środowiskowej procesu
-`psql` — nie trafia na ekran, do argumentów, historii ani pliku:
+odczytu z sekcji 9b. Warunek (dla sesji głównej; w D blok uruchamia
+właściciel): rola utworzona i test akceptacyjny z 9b zapisany w dzienniku
+migracji. Zmienne: `P` (identyfikator projektu),
+`REGION`, `INSTANCE` (instancja Cloud SQL). Cały blok stoi w otoczce
+`if … then … else … fi`: brak którejkolwiek zmiennej = komunikat na stderr
+i żadne polecenie bloku się nie wykonuje (zero `gcloud`, zero proxy).
+Strażnik `: "${P:?}"` tu nie wystarcza: w powłoce interaktywnej (zsh i bash)
+pusta zmienna przerywa tylko tę jedną linię, a kolejne wklejone linie
+wykonują się dalej. Proxy zamyka `kill $!` (PID ostatniego procesu w tle),
+nie `kill %1`: w zsh pierwszym zadaniem jest sama otoczka `if`, a proxy
+dostaje numer 2, więc `%1` go nie trafia. `$!` bez cudzysłowu: w interaktywnym
+zsh `"$!"` uruchamia rozwijanie historii. Komunikat stop jest w ASCII, bo
+readline w terminalu bez UTF-8 psuje znaki spoza ASCII w wklejonej linii.
+Hasło idzie z sekretu prosto do zmiennej środowiskowej procesu
+`psql` — nie trafia na ekran, do argumentów, historii ani pliku. Pętla po
+starcie proxy czeka do 30 s, aż port przyjmie połączenie; pierwsza sekunda
+czekania daje proxy czas na błąd przy zajętym porcie. Po pętli `kill -0 $!`
+sprawdza, że nasze proxy żyje, a drugie `nc -z`, że port jest otwarty. Gdy
+któryś warunek nie jest spełniony, blok kończy się komunikatem stop bez
+odczytu sekretu i bez `psql`. Martwe proxy przy otwartym porcie oznacza, że
+port 6543 zajął inny proces, który mógłby odpowiedzieć zmyślonymi wynikami
+kontroli. To tanie zabezpieczenie: nie wykryje proxy, które padnie później
+niż po pierwszej sekundzie, ani procesu, który zajmie port już po starcie
+naszego proxy. `kill $! 2>/dev/null` zamyka proxy w obu gałęziach. `psql -w` nie pyta
+o hasło: pusty sekret kończy się głośnym błędem logowania, a nie promptem.
+`application_name=runbook-7b` oznacza sesję w `pg_stat_activity`, więc przed
+jobem migracji widać, czy kontrola nie została otwarta. Zalecane jest
+dopisanie `require_auth=scram-sha-256` do napisu połączenia (jak w wariancie
+dla stacji współdzielonej niżej): `psql` odmówi wtedy wysłania hasła
+procesowi, który na porcie 6543 poprosi o inną metodę uwierzytelnienia:
 
 ```bash
 set +x
-: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
-cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
-PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
-  PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
-  psql "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable"
-kill %1
+if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then
+  cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+  for i in {1..30}; do sleep 1; nc -z 127.0.0.1 6543 2>/dev/null && break; done
+  if kill -0 $! 2>/dev/null && nc -z 127.0.0.1 6543 2>/dev/null; then
+    PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
+      PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+      psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
+  else
+    echo "stop: proxy not running or port 6543 closed - psql not run" >&2
+  fi
+  kill $! 2>/dev/null
+else
+  echo "stop: P, REGION or INSTANCE not set - block not run" >&2
+fi
+```
+
+**Stacja współdzielona z innymi użytkownikami** — hasło nie idzie przez
+`PGPASSWORD`, tylko przez plik haseł `psql` z prawami 0600, usuwany na końcu
+bloku. Hasło roli ma wyłącznie litery i cyfry (9b część C), więc nie wymaga
+znaków ucieczki w pliku. Zapis do pliku idzie przez `>|`, a nie `>`: przy
+ustawionym w powłoce `noclobber` (`NO_CLOBBER` w zsh) zwykłe `>` do pliku
+utworzonego przez `mktemp` kończy się błędem „file exists”.
+
+Na takiej stacji inny użytkownik może zająć port 6543 przed naszym proxy:
+proxy wtedy nie wstaje, pętla `nc` widzi otwarty port, a `psql` łączy się
+z obcym procesem bez TLS (`sslmode=disable`). Dlatego napis połączenia ma
+`require_auth=scram-sha-256`: `psql` przyjmuje wyłącznie SCRAM, więc hasło
+nie wyjdzie otwartym tekstem, nawet gdy obcy proces o nie poprosi. Opcja
+wymaga `psql` z libpq 16 lub nowszym; starszy klient kończy się głośnym
+błędem nieznanej opcji połączenia. Wtedy najpierw aktualizacja klienta
+`psql`. Wariantu Docker na stacji współdzielonej nie używamy (niżej).
+
+**Blok przerwany przed końcem** (Ctrl-C, błąd, zamknięty terminal): plik
+haseł zostaje w `$TMPDIR`. Przed czymkolwiek innym: w tej samej powłoce
+`rm -f "$PF"` i `kill $!`; po zamkniętym terminalu usunięcie tego pliku
+ręcznie (nazwa `tmp.` i losowy ciąg, prawa `-rw-------`, czas utworzenia
+z chwili uruchomienia bloku).
+
+```bash
+set +x
+if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then
+  PF="$(mktemp)"
+  chmod 600 "$PF"
+  printf '127.0.0.1:6543:myhelper:myhelper_7b_ro:%s\n' "$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" >| "$PF"
+  cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+  for i in {1..30}; do sleep 1; nc -z 127.0.0.1 6543 2>/dev/null && break; done
+  if kill -0 $! 2>/dev/null && nc -z 127.0.0.1 6543 2>/dev/null; then
+    PGPASSFILE="$PF" PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+      psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable require_auth=scram-sha-256 application_name=runbook-7b"
+  else
+    echo "stop: proxy not running or port 6543 closed - psql not run" >&2
+  fi
+  kill $! 2>/dev/null
+  rm -f "$PF"
+  unset PF
+else
+  echo "stop: P, REGION or INSTANCE not set - block not run" >&2
+fi
 ```
 
 Pierwsze zapytanie w sesji (oczekiwane `myhelper_7b_ro|on`; inny wynik =
@@ -955,22 +1059,43 @@ SELECT current_user, current_setting('default_transaction_read_only');
 ```
 
 Potem wyłącznie zapytania z sekcji 7b: `count(*)`, `migrations_sha256`
-i kontrola obiektów w katalogu. `row_security=off` zamienia odczyt tabeli
+i kontrola obiektów w katalogu, a gdy trzeba ją powtórzyć, kontrola ról
+z sekcji 7. `row_security=off` zamienia odczyt tabeli
 z RLS w głośny błąd 42501 zamiast cichego pustego wyniku. Rola ma
 `CONNECTION LIMIT 1`: druga sesja (np. niezamknięty test z 9b) daje odmowę
 logowania, a nie zawieszenie — wtedy zamknąć tamtą sesję i powtórzyć.
 
-**Bez `psql` na stacji** — ten sam blok, w miejsce linii z `psql` klient
-z obrazu Postgresa. Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
+**Bez `psql` na stacji** — pełny blok z klientem z obrazu Postgresa w miejsce
+`psql` na stacji (otoczka `if` ze sprawdzeniem zmiennych, proxy, czekanie na
+port, kontrola `kill -0 $!` i `kill $!` jak wyżej). Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
 wartość z otoczenia procesu `docker`), nigdy `-e NAZWA=wartość`; hasło
-wyłącznie przez zmienną środowiskową:
+wyłącznie przez zmienną środowiskową. `host.docker.internal` działa tylko
+w Docker Desktop (macOS, Windows); na Linuksie bez Docker Desktop zamiast
+niego `--network host` i `host=127.0.0.1`. Klient z obrazu `pg18` obsługuje
+`require_auth=scram-sha-256`, więc dopisanie tej opcji do napisu połączenia
+jest zalecane jak w pierwszym bloku.
+
+**Na stacji współdzielonej wariant Docker jest niedozwolony:** `PGPASSWORD`
+przekazane przez `-e` widać w `docker inspect`, dopóki kontener działa,
+a dostęp do Dockera ma każdy z grupy `docker`.
 
 ```bash
 set +x
-PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
-  PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
-  docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
-  psql "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable"
+if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then
+  cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+  for i in {1..30}; do sleep 1; nc -z 127.0.0.1 6543 2>/dev/null && break; done
+  if kill -0 $! 2>/dev/null && nc -z 127.0.0.1 6543 2>/dev/null; then
+    PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
+      PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+      docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
+      psql -w "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
+  else
+    echo "stop: proxy not running or port 6543 closed - psql not run" >&2
+  fi
+  kill $! 2>/dev/null
+else
+  echo "stop: P, REGION or INSTANCE not set - block not run" >&2
+fi
 ```
 
 **zsh:** w zapisie `$P:europe-central2` zsh czyta `:e` jako modyfikator
@@ -1007,7 +1132,7 @@ set +x
 cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
   PGOPTIONS='-c lock_timeout=5s -c idle_in_transaction_session_timeout=5min -c statement_timeout=30s' \
-  psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+  psql "host=127.0.0.1 port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
 kill %1
 ```
 
@@ -1022,9 +1147,14 @@ Zmiany nie ma, więc kopia z kroku 1 zostaje ważna. Jeśli `COMMIT;` wypisze
 
 **Data w UTC.** Kolumna `salon_subscriptions.trial_ends_at` nie ma strefy
 czasowej, a aplikacja zapisuje i porównuje w niej czas UTC. Datę podajemy
-więc jawnie w UTC. Koniec dnia D w Polsce to `D 22:59:59` w czasie zimowym
-albo `D 21:59:59` w czasie letnim. Salon ma pełny dostęp do tej chwili,
-wyłącznie.
+więc jawnie w UTC. Koniec dnia D w Polsce (północ czasu polskiego) to
+`D 23:00:00` UTC w czasie zimowym albo `D 22:00:00` UTC w czasie letnim.
+Salon ma pełny dostęp do tej chwili, wyłącznie: porównanie w aplikacji jest
+ostre, więc ostatnia sekunda dnia D zostaje w pilotażu, a okrągłą wartość
+łatwiej sprawdzić w kroku 4. Przed przedłużeniem sprawdź rok w nowej dacie:
+literówka w roku (np. bieżący zamiast następnego) ustawia datę w przeszłości
+i od razu przełącza salon w tryb tylko do odczytu. Krok 4 dodatkowo wymaga,
+żeby nowa data była późniejsza od chwili obecnej i od starej wartości.
 
 **Kroki.**
 
@@ -1047,14 +1177,16 @@ wyłącznie.
 
    ```sql
    BEGIN;
-   SELECT id, status, trial_ends_at, stripe_subscription_id IS NULL AS bez_stripe
+   SELECT current_user, id, status, trial_ends_at, stripe_subscription_id IS NULL AS bez_stripe
    FROM salon_subscriptions
    WHERE salon_id = '<id salonu>' AND status IN ('trialing', 'active')
    FOR UPDATE;
    ```
 
-   Oczekiwane: dokładnie jeden wiersz, `status = trialing`, `bez_stripe = t`.
-   Zapisz starą wartość `trial_ends_at`. Inny wynik = `ROLLBACK;`, stop
+   Oczekiwane: dokładnie jeden wiersz, `current_user = myhelper_svc`,
+   `status = trialing`, `bez_stripe = t`. `current_user` potwierdza rolę,
+   na której opiera się uwaga o RLS w kroku 3. Zapisz starą wartość
+   `trial_ends_at` dokładnie tak, jak ją wypisał `psql` (potrzebna w kroku 4). Inny wynik = `ROLLBACK;`, stop
    i pytanie do CTO. Przy `active` salon już płaci i nie ma czego przedłużać.
    Przy wierszu z subskrypcją Stripe (`bez_stripe = f`) synchronizacja ze
    Stripe nadpisałaby datę, więc też `ROLLBACK;` i stop. `FOR UPDATE`
@@ -1064,26 +1196,35 @@ wyłącznie.
 3. **Zmiana** (właściciel, ta sama sesja i ta sama transakcja):
 
    ```sql
-   UPDATE salon_subscriptions SET trial_ends_at = '<data UTC, np. 2027-03-01 22:59:59>'
+   UPDATE salon_subscriptions SET trial_ends_at = '<data UTC, np. 2027-03-01 23:00:00>'
    WHERE salon_id = '<id salonu>' AND status = 'trialing';
    ```
 
    `psql` ma wypisać `UPDATE 1`. Każdy inny wynik = `ROLLBACK;` i stop.
    Jeśli wyszło `UPDATE 0`, choć odczyt z kroku 2 pokazał ten wiersz,
    właściciel robi `ROLLBACK;` i sprawa wraca do CTO, bo zapis zablokowało
-   coś innego niż warunek, np. polityka RLS. W migracjach RLS jest włączone
-   bez `FORCE`, więc właściciel tabel (login aplikacji) powinien ją omijać.
+   RLS albo inna przyczyna. Przy działającym RLS odczyt z kroku 2 zwróciłby
+   już zero wierszy (ten sam warunek `USING`), a zapis sprzeczny z `WITH
+   CHECK` kończy się błędem 42501, nie `UPDATE 0`. W migracjach RLS jest
+   włączone bez `FORCE`, więc właściciel tabel (login aplikacji) powinien ją
+   omijać.
 
 4. **Odczyt po zmianie i zatwierdzenie** (właściciel, ta sama sesja i ta
    sama transakcja):
 
    ```sql
-   SELECT status, trial_ends_at FROM salon_subscriptions
+   SELECT status, trial_ends_at,
+          trial_ends_at > (now() AT TIME ZONE 'UTC') AS po_teraz,
+          trial_ends_at > '<stara wartość trial_ends_at z kroku 2>' AS po_starej
+   FROM salon_subscriptions
    WHERE salon_id = '<id salonu>' AND status = 'trialing';
    ```
 
-   Oczekiwane: jeden wiersz z nową datą. Wtedy `COMMIT;`. Każda rozbieżność
-   = `ROLLBACK;` i stop. Po `COMMIT;` wyjście z `psql`, a proxy zamyka
+   Oczekiwane: jeden wiersz z nową datą oraz `po_teraz = t`
+   i `po_starej = t`. Wtedy `COMMIT;`. Każda rozbieżność, także `f` albo
+   pusta wartość w `po_teraz` lub `po_starej`, = `ROLLBACK;` i stop.
+   `po_teraz = f` oznacza datę w przeszłości (np. literówka w roku), która po
+   `COMMIT;` od razu przełączyłaby salon w tryb tylko do odczytu. Po `COMMIT;` wyjście z `psql`, a proxy zamyka
    `kill %1`. Właściciel przekazuje sesji głównej tylko starą datę, nową datę
    i wynik („1 wiersz”, `COMMIT`). Pełny dostęp przy `trialing` z przyszłą
    datą potwierdza test „przedłużenie: przesunięcie trialEndsAt
@@ -1264,16 +1405,21 @@ SELECT count(*) FROM pg_auth_members WHERE member = 'myhelper_7b_ro'::regrole;
 SELECT pg_has_role('myhelper_7b_ro','cloudsqlsuperuser','MEMBER'), pg_has_role('myhelper_7b_ro','myhelper_svc','MEMBER'), pg_has_role('myhelper_7b_ro','myhelper_app','MEMBER');
 SELECT has_database_privilege('myhelper_7b_ro', current_database(), 'CREATE'), has_schema_privilege('myhelper_7b_ro','public','CREATE'), has_schema_privilege('myhelper_7b_ro','drizzle','CREATE');
 SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public','drizzle') AND p.prosecdef;
-SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','v','m','S') AND has_table_privilege('myhelper_7b_ro', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE');
+SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','v','m','S') AND has_table_privilege('myhelper_7b_ro', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER');
+SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','v','m') AND has_any_column_privilege('myhelper_7b_ro', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES');
 ```
 
 Oczekiwane, w tej kolejności: `f|f|f|f|f|f|1`; `0`; `f|f|f`; `f|f|f`; `0`;
-`1`. Piąte zapytanie liczy funkcje `SECURITY DEFINER`: przy domyślnym
+`1`; `1`. Piąte zapytanie liczy funkcje `SECURITY DEFINER`: przy domyślnym
 `EXECUTE` dla PUBLIC każda byłaby drogą zapisu, więc wynik większy od 0 =
 stop. Szóste liczy tabele, na których rola ma jakiekolwiek prawo; jedyną ma
 być `__drizzle_migrations`. Funkcja `has_table_privilege` widzi prawa
 niezależnie od tego, kto je nadał (widok `information_schema.role_table_grants`
-pokazałby jako `postgres` 0, bo grantorem jest `myhelper_svc`). Każdy inny
+pokazałby jako `postgres` 0, bo grantorem jest `myhelper_svc`). Siódme
+liczy relacje, na których rola ma prawo choćby do jednej kolumny: prawo
+nadane na pojedyncze kolumny (`GRANT SELECT (kolumna) ON …`) nie wychodzi
+w szóstym zapytaniu, a dałoby odczyt danych. Prawo do całej tabeli też się
+tu liczy, więc jedyną relacją ma być znowu `__drizzle_migrations`. Każdy inny
 wynik = stop i odwrócenie (niżej).
 
 Potem jako `myhelper_7b_ro` (blok kontroli 7b z sekcji 9; sesję `postgres`
@@ -1331,11 +1477,17 @@ REVOKE CONNECT ON DATABASE myhelper FROM myhelper_7b_ro;
 DROP ROLE myhelper_7b_ro;
 ```
 
-Na końcu sekret i wpis w dzienniku migracji:
+Na końcu sekret i wpis w dzienniku migracji. Ta sama otoczka `if` co
+w blokach kontroli 7b: bez `P` polecenie się nie wykonuje (pusty
+`--project=` skierowałby `delete` do domyślnego projektu gcloud):
 
 ```bash
 set +x
-gcloud --project="${P}" secrets delete postgres-7b-ro-password
+if [ -n "${P-}" ]; then
+  gcloud --project="${P}" secrets delete postgres-7b-ro-password
+else
+  echo "stop: P not set - block not run" >&2
+fi
 ```
 
 ## 9c. Rejestr odczytów sekretów bazy przez właściciela
@@ -2005,6 +2157,25 @@ używają polityki tego skryptu.
   logowanie nie działa (`src/components/auth/sign-in-button.tsx:168-206`). Ukrycie
   przycisku bez `GOOGLE_CLIENT_ID` to osobna zmiana przed przełączeniem
   (warunek P10 w `docs/runbook-zatrzymanie-zapisow.md`).
+- Test bloków kontroli 7b: gałąź zsh nie działa na runnerze Ubuntu, bo nie ma
+  tam `/bin/zsh` (lista powłok w teście dodaje zsh tylko wtedy, gdy plik
+  istnieje). W CI test przechodzi tylko dla bash, a przebieg zsh jest
+  lokalny (stacja z macOS). Poprawka: instalacja zsh w workflow albo test,
+  który pada, gdy zsh pominięto po cichu. Próg: następna zmiana bloków 7b
+  albo tego testu.
+- Siedem bloków ze strażnikiem `: "${X:?}"`, który w powłoce interaktywnej
+  nie zatrzymuje kolejnych linii (sekcje 9a, 9b, 9c): pięć bloków właściciela
+  bez otoczki `if` (9a z zapisem, 9b utworzenie sekretu, 9b część C, 9b
+  wyłączenie wersji, 9b trzy odczyty logu audytu), brak `require_auth`
+  w 9a z zapisem i zdanie w 9a „brak `P` = stop”, które nie odpowiada kodowi.
+  Bloki sesji głównej (9a krok 1, 9c) działają, bo powłoka nieinteraktywna
+  kończy się na `:?`. Poprawka: otoczka `if` w pięciu blokach,
+  `require_auth=scram-sha-256` w 9a, test w tym samym zestawie, poprawione
+  zdanie. Próg: przed pierwszym uruchomieniem przez właściciela bloku 9b
+  (sekret lub część C) albo bloku 9a z zapisem, zależnie od tego, które
+  przyjdzie pierwsze, bez przesunięcia. Do czasu poprawki każde zlecenie dla
+  właściciela obejmujące te bloki zaczyna się od kroku: `echo "P=${P:-BRAK}
+  REGION=${REGION:-BRAK} INSTANCE=${INSTANCE:-BRAK}"`; `BRAK` = nie wklejać.
 - Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
 - Pomiar TTFB (plan 0.6): otwarty do pomiaru na domenie po K1 (sekcja 12).
 
