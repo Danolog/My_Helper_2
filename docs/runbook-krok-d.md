@@ -797,22 +797,39 @@ nigdy nie wznawia. Kolejność obowiązkowa:
 (bez ścieżki i bez taga rewizji). Inny host skrypt odrzuca przed pierwszym
 wywołaniem gcloud (#143 pkt 1).
 
-Kolejność w bloku: 1. utworzenie/aktualizacja — wszystkie 5 zadań `PAUSED`;
+Kolejność w bloku: 1. utworzenie/aktualizacja — wszystkie 6 zadań `PAUSED`;
 2. `--check`: dryf ENABLED→PAUSED oczekiwany, innego dryfu brak; 3. `--resume`
-dopiero po decyzji Darka — jawne nazwy (W-3), można wznowić część zadań;
-4. `--check`: kod 0 (wznowione zgodne z tabelą); 5. lista zadań ze stanem.
+dopiero po decyzji właściciela — jawne nazwy (W-3), tu wyłącznie zadania
+porządkowe; 4. `--check`: dryf zostaje tylko dla `mh-sms-reminders` (w tabeli
+`ENABLED`, w Scheduler `PAUSED` do bramki bety), innego dryfu brak; 5. lista
+zadań ze stanem.
 
 ```bash
+set +x
 S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
 env $S infra/gcp/scheduler.sh
 env $S infra/gcp/scheduler.sh --check
-env $S infra/gcp/scheduler.sh --resume mh-sms-reminders \
-  mh-cleanup-pending-deposits mh-cleanup-temporary-access
+env $S infra/gcp/scheduler.sh --resume mh-cleanup-pending-deposits \
+  mh-cleanup-temporary-access mh-cleanup-expired-auth
 env $S infra/gcp/scheduler.sh --check
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
 
-Zadań jest 5 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
+**Osobny krok: `mh-sms-reminders` przy bramce bety, decyzja właściciela.**
+Nie razem z zadaniami porządkowymi. Najpierw warunek niżej („Warunek przed
+`--resume mh-sms-reminders`”), potem:
+
+```bash
+set +x
+S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
+env $S infra/gcp/scheduler.sh --resume mh-sms-reminders
+env $S infra/gcp/scheduler.sh --check
+gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
+```
+
+Po tym kroku `--check` kończy się kodem 0 (wznowione zgodne z tabelą).
+
+Zadań jest 6 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
 spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
 pierwszym wywołaniem gcloud.
 
