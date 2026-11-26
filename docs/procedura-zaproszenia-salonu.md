@@ -11,7 +11,8 @@ adres e-mail jest na liście dozwolonych (`BETA_ALLOWED_OWNER_EMAILS`,
 
 Pusta lista oznacza, że nikt nie założy salonu. Konto spoza listy może się
 zarejestrować, ale przy zakładaniu salonu dostaje komunikat, że beta jest na
-zaproszenie.
+zaproszenie. Bramka działa tylko przy zakładaniu salonu. Jedno konto ma
+najwyżej jeden salon.
 
 **Kto.** Wszystkie kroki z odczytem bazy produkcyjnej i ze zmianą sekretu
 wykonuje **wyłącznie właściciel**, we własnym terminalu i we własnej konsoli
@@ -25,9 +26,41 @@ zespołu.
 
 ---
 
+## 0. Każde połączenie z bazą produkcyjną
+
+Dotyczy wszystkich odczytów w tej procedurze (1a, 2a, 3, 4b, 7) i bloku
+z sekcji 5.
+
+1. **Krok kontrolny przed blokiem połączenia.** Właściciel wpisuje najpierw:
+
+   ```bash
+   echo "P=${P:-BRAK}"
+   ```
+
+   Jeśli wynik to `BRAK`, zmienna nie jest ustawiona i **bloku połączenia nie
+   wklejamy.** Najpierw ustawiamy zmienną, potem ponawiamy krok kontrolny.
+   Dopiero wynik bez `BRAK` pozwala wkleić blok.
+2. **Połączenie.** Blok połączenia administracyjnego (login aplikacji)
+   z runbooka wdrożenia i bazy danych w katalogu docs, sekcja 9a
+   (przedłużenie pilotażu). Rola tylko do odczytu nie widzi tabeli kont i tak
+   zostaje, dlatego odczyty idą tym połączeniem.
+3. **Dwie warstwy tylko do odczytu przy odczytach.** Do `PGOPTIONS` w bloku
+   połączenia dopisujemy `-c default_transaction_read_only=on` (jak
+   w kontrolach po wdrożeniu w tym samym runbooku), a każde zapytanie
+   i tak stoi między `BEGIN READ ONLY;` a `ROLLBACK;`. Pomyłka przy wklejaniu
+   poza transakcją też niczego nie zapisze. Wyjątek: blok zmiany z sekcji 5
+   idzie bez tej opcji, dokładnie według runbooka.
+4. **Bez historii.** `psql` uruchamiamy z `-n` (bez edycji linii, więc bez
+   pliku historii). Wariant z klientem w kontenerze uruchamiamy z `--rm`.
+   Adres zaproszonego nie może zostać w pliku historii na stacji.
+5. **Wynik to liczby.** Wyniku nie kopiujemy poza terminal. Zespół dostaje
+   tylko liczby.
+
+---
+
 ## 1. Warunki twarde przed PIERWSZYM zaproszeniem
 
-Wszystkie trzy muszą być spełnione i zapisane (data, wynik) w prywatnym
+Wszystkie cztery muszą być spełnione i zapisane (data, wynik) w prywatnym
 systemie zadań. Brak któregokolwiek = **pierwszego zaproszenia nie wysyłamy.**
 
 ### 1a. Dane testowe usunięte
@@ -41,9 +74,27 @@ Blok obejmuje:
 - wpisy akceptacji dokumentów tych kont (to dane testowe, a nie dowód wobec
   prawdziwego klienta).
 
+Sam blok przechodzi pełną recenzję przed uruchomieniem. **Bloku nie ma =
+pierwszego zaproszenia nie wysyłamy.**
+
 Dowód: wynik bloku (liczby usuniętych wierszy) w prywatnym systemie zadań
-i odczyt kontrolny po bloku, zgodnie z treścią bloku. Sam blok przechodzi
-pełną recenzję przed uruchomieniem.
+oraz niezależny odczyt kontrolny właściciela po bloku (połączenie jak
+w sekcji 0):
+
+```sql
+BEGIN READ ONLY;
+SELECT
+  (SELECT count(*) FROM salons)            AS salony,
+  (SELECT count(*) FROM appointments)      AS wizyty,
+  (SELECT count(*) FROM clients)           AS klienci,
+  (SELECT count(*) FROM legal_acceptances) AS akceptacje;
+ROLLBACK;
+```
+
+Oczekiwane: cztery zera. Na produkcji nie było prawdziwego salonu, więc każdy
+wiersz jest testowy, także salon demonstracyjny z danych startowych
+i rezerwacje gości. Warunek nie zależy więc od tego, czy blok trafił we
+wszystkie salony testowe. Wynik różny od zera = stop.
 
 ### 1b. Publiczny katalog pusty
 
@@ -77,32 +128,47 @@ done
 Oczekiwane: pięć linii, każda z `200`. Odpowiedź `404` oznacza, że dokumenty
 nie są opublikowane na tej wersji. Wtedy stop.
 
+### 1d. Moduł opinii zamrożony na wdrożonej wersji
+
+Opinie są dziś w rdzeniu aplikacji i nie są zamrożone. Przed pierwszym
+zaproszeniem moduł opinii ma `hardOff: true` w `src/lib/features.ts`
+w rewizji, która obsługuje 100% ruchu.
+
+Dowód w prywatnym systemie zadań: identyfikator wdrożonej rewizji (commit)
+i potwierdzenie, że w tym commicie moduł opinii ma `hardOff: true`. Brak
+zamrożenia na wdrożonej wersji = stop.
+
 ---
 
 ## 2. Przed KAŻDYM zaproszeniem
 
 ### 2a. Na ten adres nie ma jeszcze konta
 
-Właściciel sprawdza w bazie produkcyjnej, że adresu jeszcze nie ma. Wynik to
-tylko liczba, bez adresu w wyniku i bez kopiowania wyniku poza terminal:
+Właściciel sprawdza w bazie produkcyjnej (połączenie jak w sekcji 0), że
+adresu jeszcze nie ma. Wynik to tylko liczby, bez adresu w wyniku:
 
 ```sql
 BEGIN READ ONLY;
-SELECT count(*) FROM "user" WHERE lower(email) = lower('<adres zaproszenia>');
+SELECT
+  count(*)                              AS konta,
+  count(*) FILTER (WHERE email_verified) AS potwierdzone
+FROM "user"
+WHERE lower(email) = lower('<adres zaproszenia>');
 ROLLBACK;
 ```
 
-Oczekiwane: `0`.
+Oczekiwane: `konta` równe `0`.
 
-- `0`: idziemy dalej.
-- `1`: **stop, adresu nie dodajemy do listy.** Konto na ten adres założył już
-  ktoś wcześniej, może sam zaproszony, a może ktoś inny. Właściciel
-  kontaktuje się z zaproszonym innym kanałem niż ten adres (telefon, rozmowa)
-  i ustala, czy to jego konto. Dopiero po potwierdzeniu, że konto należy do
-  zaproszonego i ma potwierdzony adres, wolno dodać adres do listy.
+- `konta` = `0`: idziemy dalej.
+- `konta` = 1 lub więcej: **stop, adresu nie dodajemy do listy.** Konto na
+  ten adres założył już ktoś wcześniej, może sam zaproszony, a może ktoś
+  inny. Właściciel kontaktuje się z zaproszonym innym kanałem niż ten adres
+  (telefon, rozmowa) i ustala, czy to jego konto. Dopiero po potwierdzeniu,
+  że konto należy do zaproszonego, a `potwierdzone` jest równe `konta`, wolno
+  dodać adres do listy.
 
 Odczyt dotyczy danych osobowych, więc wykonuje go wyłącznie właściciel.
-Zespół dostaje tylko wynik: „0” albo „1”.
+Zespół dostaje tylko dwie liczby.
 
 ### 2b. Dodanie adresu do listy dozwolonych (krok właściciela)
 
@@ -110,19 +176,35 @@ Lista dozwolonych to **sekret w chmurze** („sekret listy dozwolonych”). Zmie
 go **tylko właściciel**:
 
 1. Właściciel dodaje nową wersję sekretu listy dozwolonych. Dotychczasowe
-   adresy zostają, a nowy adres dochodzi po przecinku.
+   adresy zostają, a nowy adres dochodzi po przecinku. Adresy do usunięcia
+   (4d) wypadają w tej samej wersji.
 2. Lista żyje wyłącznie w sekrecie. Nie wpisujemy jej do zmiennych jawnych
    CI ani konfiguracji wdrożenia, do repozytorium, do zgłoszeń ani do
    rozmowy z zespołem. Wartości zmiennych jawnych trafiają do logów
    przebiegów.
 3. Kontrola bez ujawniania adresów: właściciel sprawdza tylko **liczbę**
-   adresów w nowej wersji. Oczekiwana liczba to poprzednia plus 1.
-   Zespołowi przekazuje tylko tę liczbę.
-4. Nowa wartość zaczyna działać dopiero wtedy, gdy aplikacja ją odczyta.
-   Jeśli wymaga to nowego wdrożenia, to wdrożenie także robi właściciel.
+   adresów w nowej wersji. Wartość idzie wprost do liczenia, bez ekranu
+   i pliku:
 
-Zaproszenie wysyłamy dopiero **po** kroku 2b. Inaczej zaproszony założy konto,
-a przy zakładaniu salonu dostanie odmowę.
+   ```bash
+   CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" \
+     secrets versions access latest --secret='<sekret listy dozwolonych>' \
+     | tr ',' '\n' | grep -c '[^[:space:]]'
+   ```
+
+   Liczenie pomija puste pozycje, tak jak bramka. Oczekiwana liczba to
+   poprzednia minus liczba usuniętych plus liczba nowych. Zespołowi
+   właściciel przekazuje tylko tę liczbę.
+4. **Zmiana listy działa dopiero po wdrożeniu nowej rewizji, która przejęła
+   100% ruchu.** Sekret jest wpięty jako zmienna środowiskowa w wersji
+   „najnowsza” i odczytywany przy starcie instancji. Działające instancje
+   mają starą listę, a instancja startująca później (także w starej
+   rewizji) może mieć już nową. Do wdrożenia instancje mogą więc mieć różne
+   listy i wynik bramki zależy od tego, która instancja obsłuży żądanie.
+   Wdrożenie wymaga zgody właściciela.
+
+Zaproszenie wysyłamy dopiero **po wdrożeniu z pkt 4**, gdy nowa rewizja ma
+100% ruchu. Inaczej zaproszony może przy zakładaniu salonu dostać odmowę.
 
 ### 2c. Treść zaproszenia
 
@@ -131,7 +213,11 @@ Szablon jest w sekcji 6. W treści muszą być:
 - ostrzeżenie, że konto zakładamy **wyłącznie na adres, na który przyszło
   zaproszenie**;
 - informacja, że adres trzeba potwierdzić linkiem z e-maila;
-- informacja, że zadatki są w pilotażu wyłączone (sekcja 3).
+- informacja, że zadatki (sekcja 3) i opinie (1d) są w pilotażu niedostępne;
+- prośba, żeby salon potwierdził odpowiedzią e-mail, że przyjmuje te
+  ograniczenia pilotażu (brak zadatków, brak opinii). Regulamin obiecuje
+  obie funkcje, więc różnicę zamyka indywidualne ustalenie, a wiąże ono
+  tylko wtedy, gdy salon je przyjął.
 
 ---
 
@@ -140,9 +226,15 @@ Szablon jest w sekcji 6. W treści muszą być:
 Dopóki ścieżka zadatku nie zostanie zatwierdzona, salon pilotażowy **nie
 włącza zadatku**: ani w usłudze („wymagaj zadatku”), ani u klienta.
 
+To kontrola miękka: opiera się na prośbie do salonu i na wykrywaniu. Aplikacja
+technicznie nie blokuje włączenia zadatku. Blokada w kodzie zależy od osobnej
+decyzji.
+
 - Właściciel mówi to wprost w zaproszeniu (sekcja 6).
 - Jeśli salon zgłosi, że włączył zadatek, prosimy o wyłączenie tego samego
-  dnia i sprawdzamy, czy powstały rezerwacje z zadatkiem.
+  dnia i sprawdzamy, czy powstały rezerwacje z zadatkiem. Właściciel robi
+  też odczyt z 4b (zadatek w usługach i u klientów). Oczekiwane po wyłączeniu:
+  `0` i `0`.
 - Zniesienie tego zakazu = osobna decyzja po zatwierdzeniu ścieżki zadatku.
   Wtedy ta sekcja dostaje zmianę w repozytorium, a salony pilotażowe
   wiadomość.
@@ -159,41 +251,68 @@ liczbę nowych okresów próbnych. Odczyt ma pokazać dokładnie tyle nowych
 salonów, ile było zaproszeń, które zakończyły się założeniem salonu.
 
 - Liczba zgodna: idziemy dalej.
-- Liczba większa niż oczekiwana: salon powstał bez naszej wiedzy. Tego samego
-  dnia zgłoszenie do zespołu bezpieczeństwa. Niczego nie usuwamy.
+- Liczba większa niż oczekiwana: salon powstał bez naszej wiedzy. Niczego
+  w bazie nie usuwamy. Tego samego dnia:
+  1. zgłoszenie do zespołu bezpieczeństwa;
+  2. izolacja: właściciel usuwa z listy dozwolonych adresy, przez które salon
+     mógł powstać, a w razie wątpliwości wszystkie adresy niewykorzystane
+     (2b, 4d);
+  3. wdrożenie nowej rewizji tego samego dnia, bo usunięcie działa dopiero po
+     nim (2b pkt 4);
+  4. przerwa w wysyłaniu zaproszeń do wyjaśnienia sprawy.
 - Liczba mniejsza: zaproszony jeszcze nie założył salonu albo trafił na
   odmowę bramki (często inny adres, sekcja 7).
 
 ### 4b. Odczyt akceptacji dokumentów
 
-Właściciel czyta wpisy akceptacji nowego salonu. Wynik bez identyfikatora
-konta i bez danych osobowych:
+Właściciel czyta wpisy akceptacji nowego salonu (połączenie jak w sekcji 0).
+Identyfikator salonu bierze z podzapytania po adresie konta, bez wypisywania
+listy salonów. `<adres konta>` to adres z zaproszenia albo nowy adres
+z sekcji 7. Wynik bez identyfikatora konta i bez danych osobowych:
 
 ```sql
 BEGIN READ ONLY;
 SELECT document, version, source, accepted_at
 FROM legal_acceptances
-WHERE salon_id = '<id salonu>'
+WHERE salon_id = (
+  SELECT s.id FROM salons s JOIN "user" u ON u.id = s.owner_id
+  WHERE lower(u.email) = lower('<adres konta>')
+)
 ORDER BY document;
 ROLLBACK;
 ```
 
-Oczekiwane: **dokładnie 2 wiersze**, `dpa` i `terms`. W obu `version` równa
-bieżącej wersji dokumentu z `src/lib/legal/documents.ts` na wdrożonej wersji
-aplikacji. Inny wynik (0, 1 albo więcej niż 2 wiersze, wersja inna niż
-bieżąca) = stop. Salon nie dostaje przedłużenia pilotażu, a sprawa idzie do
-zespołu bezpieczeństwa tego samego dnia.
+Oczekiwane: **dokładnie 2 wiersze**, `dpa` i `terms`:
 
-W tej samej sesji właściciel może sprawdzić, że salon nie włączył zadatku
-w usługach (sekcja 3):
+- w obu `version` równa bieżącej wersji dokumentu
+  z `src/lib/legal/documents.ts` na wdrożonej wersji aplikacji;
+- w obu `source` równe `registration` albo `create_salon`. U zaproszonego
+  salonu akceptacja powstaje tylko w formularzu. Źródło `email_pilot` jest
+  zarezerwowane dla akceptacji e-mailem, której formularz nie zapisuje, więc
+  u zaproszonego salonu oznacza zapis spoza aplikacji.
+
+Inny wynik (0, 1 albo więcej niż 2 wiersze, wersja inna niż bieżąca, źródło
+`email_pilot` albo inne spoza formularza) = stop. Salon nie dostaje
+przedłużenia pilotażu, a sprawa idzie do zespołu bezpieczeństwa tego samego
+dnia.
+
+W tej samej sesji właściciel sprawdza, że salon nie włączył zadatku ani
+w usługach, ani u klientów (sekcja 3):
 
 ```sql
 BEGIN READ ONLY;
-SELECT count(*) FROM services WHERE salon_id = '<id salonu>' AND deposit_required;
+SELECT
+  (SELECT count(*) FROM services WHERE salon_id = s.id AND deposit_required) AS uslugi,
+  (SELECT count(*) FROM clients  WHERE salon_id = s.id AND require_deposit)  AS klienci
+FROM (
+  SELECT s.id FROM salons s JOIN "user" u ON u.id = s.owner_id
+  WHERE lower(u.email) = lower('<adres konta>')
+) s;
 ROLLBACK;
 ```
 
-Oczekiwane: `0`.
+Oczekiwane: jeden wiersz, `0` i `0`. Brak wiersza oznacza, że na ten adres nie
+ma salonu, i wtedy stop.
 
 ### 4c. Zapis dnia 0
 
@@ -203,10 +322,32 @@ w zgłoszeniu salonu, razem z:
 
 - datą 14. dnia (koniec okresu próbnego bez przedłużenia),
 - datą końca pilotażu ustaloną z salonem e-mailem (regulamin pkt 12.2),
+- potwierdzeniem salonu odpowiedzią e-mail, że przyjmuje ograniczenia
+  pilotażu (brak zadatków, brak opinii; 2c),
 - wynikami z 4a i 4b.
+
+**Bez zapisanego potwierdzenia ograniczeń nie ma przedłużenia z sekcji 5.**
 
 Do repozytorium nie trafia ani data powiązana z salonem, ani jego
 identyfikator.
+
+### 4d. Usunięcie adresu z listy dozwolonych
+
+Po założeniu salonu adres na liście nie ma już żadnej funkcji, a jest daną
+osobową w sekrecie. Zostawiony adres to też ryzyko: po usunięciu konta ktoś,
+kto przejmie skrzynkę, mógłby założyć salon.
+
+- Po zgodnych 4a i 4b adres usuwamy z listy w najbliższej nowej wersji
+  sekretu (2b). Bez osobnego wdrożenia: zmiana wchodzi z najbliższym.
+- Adres z zaproszenia niewykorzystanego przez 14 dni usuwamy tak samo.
+- Przy usunięciu konta na prośbę salonu sprawdzamy, że adresu nie ma na
+  liście.
+- Usunięcie działa dopiero po wdrożeniu (2b pkt 4). Do tego czasu usunięty
+  adres może nadal przejść bramkę. Przy pilnym odebraniu dostępu wdrożenie
+  robimy tego samego dnia.
+- Po wdrożeniu nowej rewizji poprzednie wersje sekretu właściciel wyłącza,
+  bo nadal zawierają usunięte adresy. Wyłączenie, nie zniszczenie,
+  przynajmniej do końca okna cofnięcia wdrożenia.
 
 ---
 
@@ -214,38 +355,33 @@ identyfikator.
 
 Po 14. dniu panel salonu przechodzi w tryb tylko do odczytu. Przedłużenie
 musi więc wejść **przed 14. dniem**. Najlepiej od razu po ustaleniu daty końca
-pilotażu e-mailem, żeby salon nigdy nie zobaczył blokady.
+pilotażu e-mailem, żeby salon nigdy nie zobaczył blokady. Warunek: w zgłoszeniu
+salonu jest zapisane potwierdzenie ograniczeń pilotażu (4c).
 
-Procedura: runbook kroku D, sekcja 9a („Przedłużenie okresu próbnego
-salonu pilotażowego”). Stamtąd obowiązuje wszystko: kopia na żądanie przed
+Procedura: runbook wdrożenia i bazy danych w katalogu docs, sekcja 9a
+(przedłużenie pilotażu). Stamtąd obowiązuje wszystko: kopia na żądanie przed
 zmianą, data w UTC, jedna transakcja, odczyt przed zmianą i po zmianie, wpis
 w dzienniku audytu bez danych salonu.
 
-Krok kontrolny przed blokiem właściciela z sekcji 9a. Właściciel wpisuje
-najpierw:
-
-```bash
-echo "P=${P:-BRAK}"
-```
-
-Jeśli wynik to `BRAK`, zmienna nie jest ustawiona i **bloku nie wklejamy.**
-Najpierw ustawiamy zmienną, potem ponawiamy krok kontrolny. Dopiero wynik bez
-`BRAK` pozwala wkleić blok.
+Przed blokiem właściciela z sekcji 9a obowiązuje krok kontrolny i `psql -n`
+z sekcji 0 (pkt 1 i 4). Opcji tylko do odczytu tu nie dopisujemy, bo blok
+zmienia datę.
 
 ---
 
 ## 6. Szablon treści zaproszenia
 
-Krótko, po polsku. Bez cen. Bez obietnic funkcji zamrożonych (opinie,
-faktury, program lojalnościowy ani inne moduły wyłączone w
-`src/lib/features.ts`). Adres w szablonie to przykład.
+Krótko, po polsku. Bez cen. Bez obietnic funkcji zamrożonych (faktury,
+program lojalnościowy ani inne moduły wyłączone w `src/lib/features.ts`) ani
+opinii (1d). Bez obietnic działania, którego nie sprawdziliśmy na wdrożonej
+wersji. Adres w szablonie to przykład.
 
 > **Temat:** Zaproszenie do pilotażu MyHelper
 >
 > Dzień dobry,
 >
 > zapraszamy Państwa salon do pilotażu MyHelper: kalendarz wizyt, kartoteka
-> klientów, usługi, pracownicy i rezerwacja online z potwierdzeniem SMS.
+> klientów, usługi, pracownicy i rezerwacja online.
 >
 > **Ważne: konto proszę założyć wyłącznie na adres salon@example.com, na który
 > przyszło to zaproszenie.** Na inny adres nie da się założyć salonu. Po
@@ -255,8 +391,14 @@ faktury, program lojalnościowy ani inne moduły wyłączone w
 > W pilotażu nie pobieramy żadnych opłat. Plan jest jeden i prosty. Termin
 > końca pilotażu ustalimy z Państwem w osobnej wiadomości.
 >
-> **Prosimy na razie nie włączać zadatków** ani w usługach, ani u klientów.
-> Napiszemy, kiedy będzie to możliwe.
+> W pilotażu część funkcji jest niedostępna:
+>
+> - **zadatki** – prosimy ich nie włączać ani w usługach, ani u klientów;
+>   napiszemy, kiedy będzie to możliwe;
+> - **opinie klientów** – w pilotażu są niedostępne.
+>
+> Prosimy o krótką odpowiedź na tę wiadomość z potwierdzeniem, że przyjmują
+> Państwo te ograniczenia pilotażu.
 >
 > Jeśli coś nie zadziała, wystarczy odpowiedzieć na tę wiadomość.
 >
@@ -284,9 +426,13 @@ o becie na zaproszenie, albo odczyt dzienny nie pokazuje nowego salonu.
    - właściciel dodaje nowy adres do sekretu listy dozwolonych (krok 2b)
      i w tej samej wersji usuwa adres z zaproszenia. Liczba adresów nie
      zmienia się;
+   - zmiana działa dopiero po wdrożeniu nowej rewizji ze 100% ruchu
+     (2b pkt 4). Do tego czasu adres z zaproszenia może nadal przejść
+     bramkę, a nowy może dostać odmowę;
    - bramka nadal wymaga potwierdzonego adresu, więc zaproszony musi
      kliknąć link potwierdzający na nowy adres.
 4. Zmianę adresu zapisujemy w zgłoszeniu salonu w prywatnym systemie zadań
-   (bez adresów w repozytorium). Dalej sekcja 4 bez zmian.
+   (bez adresów w repozytorium). Dalej sekcja 4 bez zmian, z nowym adresem
+   jako `<adres konta>` w 4b.
 5. Jeśli zaproszony nie potwierdzi tożsamości kanałem z punktu 1, adresu nie
    dopisujemy. Konto na inny adres traktujemy jak każde konto spoza bety.
