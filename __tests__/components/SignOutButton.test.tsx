@@ -15,68 +15,80 @@ vi.mock("next/navigation", () => ({
 
 // Mock auth client
 const mockSignOut = vi.fn();
-let mockSessionData: {
-  data: { user: { name: string } } | null;
-  isPending: boolean;
-} = {
-  data: { user: { name: "Jan" } },
-  isPending: false,
-};
-
 vi.mock("@/lib/auth-client", () => ({
   signOut: (...args: unknown[]) => mockSignOut(...args),
-  useSession: () => mockSessionData,
 }));
+
+const postMessage = vi.fn();
 
 describe("SignOutButton", () => {
   const user = userEvent.setup();
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSessionData = { data: { user: { name: "Jan" } }, isPending: false };
-    // Mock navigator.serviceWorker
     Object.defineProperty(navigator, "serviceWorker", {
-      value: { controller: { postMessage: vi.fn() } },
+      value: { controller: { postMessage } },
       writable: true,
       configurable: true,
     });
   });
 
-  it("renders sign out button when user is logged in", () => {
+  it("renders a Polish sign-out button", () => {
     render(<SignOutButton />);
 
-    expect(
-      screen.getByRole("button", { name: "Sign out" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Wyloguj się" })).toBeEnabled();
   });
 
-  it("shows loading button when session is pending", () => {
-    mockSessionData = { data: null, isPending: true };
-    render(<SignOutButton />);
-
-    expect(
-      screen.getByRole("button", { name: "Loading..." })
-    ).toBeDisabled();
-  });
-
-  it("renders nothing when there is no session", () => {
-    mockSessionData = { data: null, isPending: false };
-    const { container } = render(<SignOutButton />);
-
-    expect(container.innerHTML).toBe("");
-  });
-
-  it("calls signOut and redirects on click", async () => {
-    mockSignOut.mockResolvedValue({});
+  it("clears SW caches, signs out and redirects to /login", async () => {
+    mockSignOut.mockResolvedValue({ data: { success: true }, error: null });
 
     render(<SignOutButton />);
-
-    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await user.click(screen.getByRole("button", { name: "Wyloguj się" }));
 
     await waitFor(() => {
-      expect(mockSignOut).toHaveBeenCalled();
-      expect(mockReplace).toHaveBeenCalledWith("/");
-      expect(mockRefresh).toHaveBeenCalled();
+      expect(mockReplace).toHaveBeenCalledWith("/login");
     });
+    expect(postMessage).toHaveBeenCalledWith({ type: "CLEAR_CACHES" });
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("disables the button while signing out", async () => {
+    let resolve: (v: unknown) => void = () => {};
+    mockSignOut.mockReturnValue(new Promise((r) => (resolve = r)));
+
+    render(<SignOutButton />);
+    await user.click(screen.getByRole("button", { name: "Wyloguj się" }));
+
+    expect(screen.getByRole("button", { name: "Wyloguj się" })).toBeDisabled();
+    resolve({ data: { success: true }, error: null });
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/login"));
+  });
+
+  it("works without a service worker", async () => {
+    Object.defineProperty(navigator, "serviceWorker", {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+    mockSignOut.mockResolvedValue({ data: { success: true }, error: null });
+
+    render(<SignOutButton />);
+    await user.click(screen.getByRole("button", { name: "Wyloguj się" }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/login"));
+  });
+
+  it("on error: shows a message, stays on the page, button enabled again", async () => {
+    mockSignOut.mockResolvedValue({ data: null, error: { message: "boom" } });
+
+    render(<SignOutButton />);
+    await user.click(screen.getByRole("button", { name: "Wyloguj się" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Nie udało się wylogować. Spróbuj ponownie."
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Wyloguj się" })).toBeEnabled();
   });
 });
