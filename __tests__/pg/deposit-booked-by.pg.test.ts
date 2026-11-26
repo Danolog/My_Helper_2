@@ -65,6 +65,12 @@ vi.mock("@/lib/sms", async (orig) => ({
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
+// Zadatek liczony tak, jak po jego włączeniu (isDepositEnabled); dzisiejszy
+// stan: __tests__/lib/deposits-disabled.test.ts.
+vi.mock("@/lib/features", async (orig) => ({
+  ...(await orig<typeof import("@/lib/features")>()),
+  isDepositEnabled: () => true,
+}));
 
 const RUN = randomUUID().slice(0, 8);
 const OWNER_ID = `it-t3-dpbk-${RUN}`;

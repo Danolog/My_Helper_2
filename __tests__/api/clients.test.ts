@@ -557,7 +557,7 @@ describe("PUT /api/clients/[id]", () => {
       preferences: "Morning appointments",
       allergies: "Latex",
       favoriteEmployeeId: employeeUuid,
-      requireDeposit: true,
+      requireDeposit: false,
       depositType: "fixed",
       depositValue: "50.00",
     });
@@ -575,7 +575,7 @@ describe("PUT /api/clients/[id]", () => {
         allergies: "Latex",
         healthDataConsent: true,
         favoriteEmployeeId: employeeUuid,
-        requireDeposit: true,
+        requireDeposit: false,
         depositType: "fixed",
         depositValue: "50.00",
       },
@@ -594,7 +594,7 @@ describe("PUT /api/clients/[id]", () => {
     expect((body as any).data.preferences).toBe("Morning appointments");
     expect((body as any).data.allergies).toBe("Latex");
     expect((body as any).data.favoriteEmployeeId).toBe(employeeUuid);
-    expect((body as any).data.requireDeposit).toBe(true);
+    expect((body as any).data.requireDeposit).toBe(false);
     expect((body as any).data.depositType).toBe("fixed");
     expect((body as any).data.depositValue).toBe("50.00");
   });

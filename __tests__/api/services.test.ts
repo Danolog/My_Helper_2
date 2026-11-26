@@ -428,7 +428,9 @@ describe("PUT /api/services/[id]", () => {
       baseDuration: 90,
       isActive: false,
       categoryId: categoryUuid,
-      depositRequired: true,
+      // Zadatek wyłączony (isDepositEnabled): pełna aktualizacja z false;
+      // true daje 409 — blok „zadatek wyłączony” niżej.
+      depositRequired: false,
       depositPercentage: 30,
     });
     mockDbUpdate.mockReturnValue(chainMock([updated]));
@@ -442,7 +444,7 @@ describe("PUT /api/services/[id]", () => {
         baseDuration: "90",
         isActive: false,
         categoryId: categoryUuid,
-        depositRequired: true,
+        depositRequired: false,
         depositPercentage: "30",
       },
     });
@@ -457,7 +459,7 @@ describe("PUT /api/services/[id]", () => {
     expect((body as any).data.baseDuration).toBe(90);
     expect((body as any).data.isActive).toBe(false);
     expect((body as any).data.categoryId).toBe(categoryUuid);
-    expect((body as any).data.depositRequired).toBe(true);
+    expect((body as any).data.depositRequired).toBe(false);
     expect((body as any).data.depositPercentage).toBe(30);
   });
 
@@ -480,6 +482,124 @@ describe("PUT /api/services/[id]", () => {
 
     expect(status).toBe(500);
     expect(body.success).toBe(false);
+    expect(body.error).toContain("Failed to update service");
+  });
+});
+
+// Zadatek wyłączony (isDepositEnabled = false): usługa nie dostaje wymogu
+// zadatku; wyłączenie i zapis bez pola przechodzą.
+describe("PUT /api/services/[id] — zadatek wyłączony", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+  });
+
+  function put(body: Record<string, unknown>, id: string = TEST_IDS.SERVICE_UUID) {
+    return updateService(
+      createMockRequest(`http://localhost:3000/api/services/${id}`, { method: "PUT", body }),
+      createRouteParams(id)
+    );
+  }
+
+  function setArg(chain: Record<string, unknown>) {
+    return (chain.set as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+  }
+
+  it("depositRequired: true → 409 DEPOSITS_DISABLED z polskim komunikatem, bez UPDATE", async () => {
+    const { status, body } = await parseResponse(await put({ depositRequired: true, depositPercentage: 30 }));
+
+    expect(status).toBe(409);
+    expect(body).toEqual({
+      success: false,
+      code: "DEPOSITS_DISABLED",
+      error: "Zadatki są obecnie wyłączone. Wizyty rezerwuje się bez zadatku.",
+    });
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("depositRequired: true razem z innymi polami → 409, żadne pole nie jest zapisane", async () => {
+    const { status } = await parseResponse(await put({ name: "Nowa nazwa", depositRequired: true }));
+
+    expect(status).toBe(409);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("depositRequired: false → 200, wyłączenie zapisane", async () => {
+    const chain = chainMock([makeService({ depositRequired: false })]);
+    mockDbUpdate.mockReturnValue(chain);
+
+    const { status, body } = await parseResponse(await put({ depositRequired: false }));
+
+    expect(status).toBe(200);
+    expect((body as any).data.depositRequired).toBe(false);
+    expect(setArg(chain)).toEqual({ depositRequired: false });
+  });
+
+  it("brak pola depositRequired → 200, pole nie trafia do UPDATE", async () => {
+    const chain = chainMock([makeService({ name: "Bez zadatku" })]);
+    mockDbUpdate.mockReturnValue(chain);
+
+    const { status } = await parseResponse(await put({ name: "Bez zadatku", depositPercentage: 20 }));
+
+    expect(status).toBe(200);
+    expect(setArg(chain)).not.toHaveProperty("depositRequired");
+  });
+
+  it("depositRequired jako napis \"true\" → 400 walidacji (nie 409), bez UPDATE", async () => {
+    const { status, body } = await parseResponse(await put({ depositRequired: "true" }));
+
+    expect(status).toBe(400);
+    expect((body as any).code).not.toBe("DEPOSITS_DISABLED");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("zły UUID z depositRequired: true → 400 (format sprawdzany pierwszy)", async () => {
+    const { status } = await parseResponse(await put({ depositRequired: true }, "bad-id"));
+
+    expect(status).toBe(400);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("konto bez salonu z depositRequired: true → 404, bez UPDATE", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+
+    const { status } = await parseResponse(await put({ depositRequired: true }));
+
+    expect(status).toBe(404);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("bez sesji z depositRequired: true → 401, bez UPDATE", async () => {
+    const { requireAuth, isAuthError } = await import("@/lib/auth-middleware");
+    const { NextResponse } = await import("next/server");
+    vi.mocked(requireAuth).mockResolvedValueOnce(
+      NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+    );
+    vi.mocked(isAuthError).mockReturnValueOnce(true);
+
+    const { status } = await parseResponse(await put({ depositRequired: true }));
+
+    expect(status).toBe(401);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("depositRequired: false dla cudzej/nieistniejącej usługi → 404", async () => {
+    mockDbUpdate.mockReturnValue(chainMock([]));
+
+    const { status } = await parseResponse(await put({ depositRequired: false }));
+
+    expect(status).toBe(404);
+  });
+
+  it("depositRequired: false i błąd bazy → 500", async () => {
+    const errorChain = chainMock([]);
+    (errorChain as Record<string, unknown>).then = (_: unknown, reject: (err: Error) => void) =>
+      reject(new Error("DB update error"));
+    mockDbUpdate.mockReturnValue(errorChain);
+
+    const { status, body } = await parseResponse(await put({ depositRequired: false }));
+
+    expect(status).toBe(500);
     expect(body.error).toContain("Failed to update service");
   });
 });

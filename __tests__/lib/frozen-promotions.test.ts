@@ -33,6 +33,12 @@ vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: m.getSession } } }));
 // Pula tylko z transakcją: deposit-calculation czyta przez forSalon (kolejka txRows).
 vi.mock("@/lib/db", () => ({ db: m.db }));
 vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: m.dbSystem }));
+// Zadatek liczony tak, jak po jego włączeniu (isDepositEnabled); reszta
+// rejestru prawdziwa — test sprawdza zamrożenie promocji w wyliczeniu.
+vi.mock("@/lib/features", async (orig) => ({
+  ...(await orig<typeof import("@/lib/features")>()),
+  isDepositEnabled: () => true,
+}));
 vi.mock("@/lib/temporary-access", () => ({ hasTemporaryAccess: m.hasTemporaryAccess }));
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: vi.fn().mockResolvedValue({ user: { id: "owner-a" } }),

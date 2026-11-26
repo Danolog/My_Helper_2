@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { verifiedClientMatchEmail } from "@/lib/client-match";
+import { isDepositEnabled } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { clients, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
@@ -79,6 +80,13 @@ export async function GET(request: Request) {
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
+    }
+
+    // Zadatek wyłączony (isDepositEnabled): flaga klienta zapisana wcześniej
+    // nie trafia do portalu, więc portal ani stare PWA nie wchodzą w ścieżkę
+    // płatności zadatku.
+    if (!isDepositEnabled()) {
+      return NextResponse.json({ success: true, data: { ...settings, requireDeposit: false } });
     }
 
     return NextResponse.json({ success: true, data: settings });

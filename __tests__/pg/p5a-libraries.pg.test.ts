@@ -99,6 +99,8 @@ vi.mock("web-push", () => ({
 vi.mock("@/lib/features", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/features")>()),
   isModuleFrozen: () => false,
+  // Odmowa przy zadatku testowana tak, jak po włączeniu zadatku.
+  isDepositEnabled: () => true,
 }));
 vi.mock("@/lib/stripe", () => ({ getStripe: () => ({ refunds: { create: vi.fn() } }) }));
 vi.mock("@/lib/logger", () => ({

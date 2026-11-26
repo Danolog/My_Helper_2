@@ -2296,7 +2296,7 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
 
   it.each([
     ["notes", { notes: "Nowa notatka" }],
-    ["depositAmount", { depositAmount: "20.00" }],
+    ["depositAmount", { depositAmount: "0.00" }], // kwota > 0 przy wyłączonych zadatkach = 409
   ])("PUT bez depositPaid (%s) → bez odczytu z blokadą i bez wpisu", async (_label, body) => {
     const updateChain = chainMock([makeAppointment()]);
     mockDbSelect

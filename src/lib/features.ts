@@ -217,6 +217,38 @@ export function isBlikDepositFlow(): boolean {
 }
 
 /**
+ * Czy salon może w ogóle wymagać zadatku (od usługi albo od klienta).
+ * Na razie zwraca false — zadatek jest wyłączony w całej aplikacji:
+ * - zapis ustawień: `PUT /api/services/[id]` z `depositRequired: true` oraz
+ *   `POST /api/clients` i `PUT /api/clients/[id]` z `requireDeposit: true`
+ *   odpowiadają 409 `DEPOSITS_DISABLED` i niczego nie zapisują; wartość
+ *   false przechodzi, żeby dało się zadatek wyłączyć;
+ * - kwota zadatku na wizycie: `PUT /api/appointments/[id]` z `depositAmount`
+ *   większym od 0 odpowiada 409 `DEPOSITS_DISABLED` i niczego nie zapisuje;
+ *   null i zero przechodzą, żeby dało się wyczyścić stare wiersze;
+ * - odczyt: `calculateExpectedDeposit` zwraca „brak zadatku” także dla
+ *   wierszy zapisanych wcześniej z flagą, więc żadna trasa rezerwacji nie
+ *   prowadzi do płatności, a `POST /api/deposits/create-session` odpowiada
+ *   400 `DEPOSIT_NOT_APPLICABLE` (portal przechodzi wtedy do zwykłej
+ *   rezerwacji; 409 portal pokazuje jako zajęty termin), zanim cokolwiek
+ *   trafi do dostawcy płatności.
+ *
+ * Odblokowanie dopiero po zatwierdzeniu ścieżki zadatku: płatność BLIK na
+ * telefon salonu (`isBlikDepositFlow()`), opublikowana polityka prywatności
+ * dla numeru BLIK (`BLIK_PRIVACY_POLICY_HREF` w `src/lib/blik-consent.ts`)
+ * i regulamin opisujący dokładnie tę ścieżkę. Wtedy zmiana na true w tym
+ * jednym miejscu, razem z testem `__tests__/lib/deposits-disabled.test.ts`.
+ */
+export function isDepositEnabled(): boolean {
+  return false;
+}
+
+/** Kod błędu i komunikat, gdy zadatek jest wyłączony (`isDepositEnabled()`). */
+export const DEPOSITS_DISABLED_CODE = "DEPOSITS_DISABLED";
+export const DEPOSITS_DISABLED_MESSAGE =
+  "Zadatki są obecnie wyłączone. Wizyty rezerwuje się bez zadatku.";
+
+/**
  * Czy salon może kupić plan. Zakup planu jest zamknięty do uruchomienia
  * płatności: dopóki funkcja zwraca false, cennik i panel subskrypcji nie
  * pokazują przycisku zakupu i mówią wprost, że zakupu jeszcze nie ma.

@@ -131,9 +131,10 @@ describe("GET /api/clients/deposit-settings — e-mail tylko z sesji (P1 IDOR)",
     const { status, body } = await parseResponse(res);
 
     expect(status).toBe(200);
+    // requireDeposit maskowane przy wyłączonym zadatku (blok niżej).
     expect(body.data).toEqual({
       found: true,
-      requireDeposit: true,
+      requireDeposit: false,
       depositType: "fixed",
       depositValue: "50.00",
     });
@@ -308,5 +309,92 @@ describe("GET /api/clients/deposit-settings — tylko zweryfikowany e-mail sesji
 
     expect(res.status).toBe(401);
     expect(mockSelect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Zadatek wyłączony (`isDepositEnabled()` = false, rejestr prawdziwy): klient
+ * z `require_deposit = true` zapisanym wcześniej dostaje `requireDeposit:
+ * false`, więc portal i stare PWA nie wołają /api/deposits/create-session.
+ */
+describe("GET /api/clients/deposit-settings — zadatek wyłączony", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectResults.length = 0;
+    loggedInAs(EMAIL_A);
+  });
+
+  it("rejestr flag jest prawdziwy: isDepositEnabled() = false", async () => {
+    const { isDepositEnabled } = await import("@/lib/features");
+    expect(isDepositEnabled()).toBe(false);
+  });
+
+  it("klient z require_deposit w bazie => 200, requireDeposit: false", async () => {
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse<{ success: boolean; data: Record<string, unknown> }>(res);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.requireDeposit).toBe(false);
+    expect(body.data.found).toBe(true);
+  });
+
+  it("maskowanie nie dokłada pól (nadal bez clientId i imienia)", async () => {
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { body } = await parseResponse<{ data: Record<string, unknown> }>(res);
+
+    expect(Object.keys(body.data).sort()).toEqual(["depositType", "depositValue", "found", "requireDeposit"]);
+    expect(JSON.stringify(body)).not.toContain("Barbara");
+    expect(JSON.stringify(body)).not.toContain(CLIENT_B_UUID);
+  });
+
+  it("klient nieznaleziony => 200, requireDeposit: false", async () => {
+    selectResults.push([{ id: SALON_UUID }], []);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse<{ data: Record<string, unknown> }>(res);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual({ found: false, requireDeposit: false, depositType: null, depositValue: null });
+  });
+
+  it("salon nie istnieje => 404 (maskowanie nie zamienia 404 na 200)", async () => {
+    selectResults.push([]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+
+    expect(res.status).toBe(404);
+  });
+
+  it("salonId niebedacy UUID => 400", async () => {
+    const res = await GET(createMockRequest(url("salonId=nie-uuid")));
+    expect(res.status).toBe(400);
+  });
+
+  it("brak sesji => 401", async () => {
+    mockRequireAuth.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+    );
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+
+    expect(res.status).toBe(401);
+  });
+
+  it("błąd bazy => 500 bez szczegółów", async () => {
+    mockSelect.mockImplementationOnce(() => {
+      throw new Error("connection terminated");
+    });
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse<{ error: string }>(res);
+
+    expect(status).toBe(500);
+    expect(body.error).toBe("Failed to fetch client deposit settings");
+    expect(JSON.stringify(body)).not.toContain("connection terminated");
   });
 });

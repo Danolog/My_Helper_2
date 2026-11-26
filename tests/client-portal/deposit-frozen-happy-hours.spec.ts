@@ -136,6 +136,10 @@ async function cancelAsOwner(browser: Browser, baseURL: string, appointmentIds: 
 
 test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
   test.use({ timezoneId: 'Europe/Warsaw' });
+  // Zadatki sa wylaczone w kodzie (isDepositEnabled w src/lib/features.ts zwraca false)
+  // do zatwierdzenia sciezki zadatku. Portal nie pokazuje wtedy zadatku, a serwer go nie liczy.
+  // Wlaczenie zadatku = usuniecie tej linii w tym samym PR.
+  test.skip(true, 'Zadatki wylaczone w kodzie do zatwierdzenia sciezki zadatku');
 
   let createdAppointmentIds: string[] = [];
   test.afterEach(async ({ browser, baseURL }) => {
