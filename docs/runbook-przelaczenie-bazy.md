@@ -850,14 +850,20 @@ zostawiłby na dysku plik z tokenem odświeżania. Blok z `sleep` wkleja się sa
 ```bash
 set +x
 mkdir -p -m 700 "$HOME/secure"
-: "${CSQL_INSTANCE:?}" && cloud-sql-proxy --gcloud-auth --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:$CSQL_INSTANCE" > "$HOME/secure/cutover-proxy.log" 2>&1 &
+case "${CSQL_INSTANCE}" in *[!a-z0-9-]*|'') echo nazwa_instancji=zla; return 1 2>/dev/null || exit 1;; esac
+echo "=== start $(date -u +%FT%TZ)" >> "$HOME/secure/cutover-proxy.log"
+cloud-sql-proxy --gcloud-auth --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:${CSQL_INSTANCE}" >> "$HOME/secure/cutover-proxy.log" 2>&1 &
 CSQL_PROXY_PID=$!
 sleep 5
 kill -0 "$CSQL_PROXY_PID" 2>/dev/null && echo proxy_running=yes || echo proxy_running=no
 ```
 
+**zsh:** dwukropek zaraz po zmiennej bez klamer to modyfikator (np. `:e`)
+i psuje nazwę połączenia. Zmienne w nazwie połączenia zawsze w klamrach.
+
 Oczekiwane: `proxy_running=yes`; potem kontrola połączenia z 1.6
-(`psql_csql_app` z `SELECT 1` = `1`). `no` = log proxy czyta właściciel
+(`psql_csql_app` z `SELECT 1` = `1`). Wiersz `Listening on` w logu czytamy
+tylko po ostatnim znaczniku `=== start`. `no` = log proxy czyta właściciel
 lokalnie, stop. Plik `cutover-proxy.log` obejmuje wzorzec usuwania z sekcji 4.
 Przywrócenie kopii instancji (2.4) restartuje instancję: proxy zostaje,
 otwarte połączenia padają, każdy następny skrypt łączy się od nowa.
