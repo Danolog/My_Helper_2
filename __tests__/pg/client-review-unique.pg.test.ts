@@ -44,6 +44,15 @@ vi.mock("@/lib/auth-middleware", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
+// Moduł opinii jest zamrożony; test sprawdza logikę na czas po odmrożeniu.
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
 
 const RUN = randomUUID().slice(0, 8);
 const OWNER = `it-t3-review-o-${RUN}`;
