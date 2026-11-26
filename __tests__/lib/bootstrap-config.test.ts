@@ -1197,7 +1197,8 @@ describe("bloki kontroli 7b i odwrócenie 9b w interaktywnej powłoce", () => {
   const bashBlocks = (s: string) => [...s.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? "");
   const s7b = RUNBOOK.slice(RUNBOOK.indexOf("**Blok kontroli 7b"), RUNBOOK.indexOf("## 9a."));
   const s9b = RUNBOOK.slice(RUNBOOK.indexOf("## 9b."), RUNBOOK.indexOf("## 9c."));
-  const [B_ENV = "", B_FILE = "", B_DOCKER = ""] = bashBlocks(s7b);
+  const BLOCKS_7B = bashBlocks(s7b);
+  const [B_ENV = "", B_FILE = "", B_DOCKER = ""] = BLOCKS_7B;
   const B_DELETE = bashBlocks(s9b.slice(s9b.indexOf("### Odwrócenie"))).at(0) ?? "";
   const PW = "Haslo7bTestowe0123456789abcdefXY";
   const ALL3 = { P: "proj-test", REGION: "europe-central2", INSTANCE: "inst-test" };
@@ -1228,8 +1229,14 @@ describe("bloki kontroli 7b i odwrócenie 9b w interaktywnej powłoce", () => {
       chmodSync(join(bin, name), 0o755);
     };
     const argv = (f: string) => `for a in "$@"; do printf '%s\\n' "$a"; done >> "$REC/${f}"\n`;
-    sh("cloud-sql-proxy", `${argv("proxy.argv")}echo $$ > "$REC/proxy.pid"\nexec /bin/sleep 30\n`);
-    sh("nc", "exit 0\n");
+    // Atrapa proxy bez odziedziczonych stdout/stderr: spawnSync wraca od razu, a o wyniku „proxy zamknięte”
+    // decyduje sama asercja, nie limit czasu testu.
+    sh(
+      "cloud-sql-proxy",
+      `${argv("proxy.argv")}echo $$ > "$REC/proxy.pid"\n[ -n "\${FAKE_PROXY_DIES-}" ] && exit 1\nexec /bin/sleep 30 </dev/null >/dev/null 2>&1\n`,
+    );
+    sh("nc", `[ -n "\${FAKE_PORT_CLOSED-}" ] && exit 1\nexit 0\n`);
+    sh("sleep", "exec /bin/sleep 0.2\n");
     sh(
       "gcloud",
       `${argv("gcloud.argv")}for f in "$TMPDIR"/tmp.*; do [ -e "$f" ] && ls -ln "$f" | cut -c1-10 >> "$REC/gcloud.modes"; done
@@ -1278,6 +1285,7 @@ if [ -n "\${PGPASSFILE-}" ]; then ls -ln "$PGPASSFILE" | cut -c1-10 > "$REC/psql
   };
 
   it("bloki znalezione: trzy bloki 7b i usunięcie sekretu; żaden bez otoczki `if`, żaden ze strażnikiem `:?`", () => {
+    expect(BLOCKS_7B, "nowy blok w tej części runbooka bez testu").toHaveLength(3);
     for (const b of [B_ENV, B_FILE, B_DOCKER]) {
       expect(b).toContain("myhelper_7b_ro");
       expect(b.split("\n")[1]).toBe('if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then');
@@ -1289,9 +1297,11 @@ if [ -n "\${PGPASSFILE-}" ]; then ls -ln "$PGPASSFILE" | cut -c1-10 > "$REC/psql
       expect(b).not.toContain(":?");
     }
     expect(B_FILE).toContain("require_auth=scram-sha-256");
+    expect(B_FILE).toContain(' >| "$PF"\n');
     // zsh: w otoczce `if` pierwszym zadaniem jest sama otoczka, proxy ma numer 2 — `%1` go nie trafia.
     for (const b of [B_ENV, B_FILE, B_DOCKER]) {
-      expect(b).toContain("\n  kill $!\n");
+      expect(b).toContain("\n  if kill -0 $! 2>/dev/null && nc -z 127.0.0.1 6543 2>/dev/null; then\n");
+      expect(b).toContain("\n  kill $! 2>/dev/null\n");
       expect(b).not.toContain("%1");
       expect(b.split("\n").filter((l) => l.endsWith(" &"))).toHaveLength(1);
     }
@@ -1352,6 +1362,7 @@ if [ -n "\${PGPASSFILE-}" ]; then ls -ln "$PGPASSFILE" | cut -c1-10 > "$REC/psql
       for (const f of ["gcloud.argv", "proxy.argv", "psql.argv"]) expect(w.read(f), f).not.toContain(PW);
       expect(r.stdout + r.stderr).not.toContain(PW);
       expect(w.read("psql.argv")).toContain("require_auth=scram-sha-256");
+      expect(w.read("proxy.argv")).toContain("proj-test:europe-central2:inst-test");
       expect(w.leftovers(), "plik haseł usunięty").toEqual([]);
       expect(await w.proxyDead(), "proxy żyje po bloku").toBe(true);
     }, 20_000);
@@ -1365,10 +1376,40 @@ if [ -n "\${PGPASSFILE-}" ]; then ls -ln "$PGPASSFILE" | cut -c1-10 > "$REC/psql
       for (const a of args) expect(a, a).not.toMatch(/^-e.+|^--env/);
       for (const a of envArgs) expect(a).not.toContain("=");
       expect(w.read("docker.pw")).toBe(PW);
+      expect(w.read("proxy.argv")).toContain("proj-test:europe-central2:inst-test");
       expect(w.read("docker.argv")).not.toContain(PW);
       expect(w.read("gcloud.argv")).not.toContain(PW);
       expect(r.stdout + r.stderr).not.toContain(PW);
       expect(await w.proxyDead(), "proxy żyje po bloku").toBe(true);
+    }, 20_000);
+
+    it.each([
+      ["zmienna", () => B_ENV, "psql.argv"],
+      ["plik haseł", () => B_FILE, "psql.argv"],
+      ["Docker", () => B_DOCKER, "docker.argv"],
+    ])("blok 7b (%s): proxy padło albo port nie wstał → stop bez psql/docker, hasło nie wychodzi, proxy zamknięte", async (_n, get, client) => {
+      for (const fault of ["FAKE_PROXY_DIES", "FAKE_PORT_CLOSED"] as const) {
+        const w = world();
+        const r = w.run(shell, get(), { ...ALL3, [fault]: "1" });
+        expect(w.read("proxy.argv"), fault).toContain("proj-test:europe-central2:inst-test");
+        expect(w.read(client), fault).toBe("");
+        expect(r.stderr, fault).toContain("stop: proxy not running or port 6543 closed - psql not run");
+        if (get() !== B_FILE) expect(w.read("gcloud.argv"), fault).toBe("");
+        expect(r.stdout + r.stderr, fault).not.toContain(PW);
+        expect(w.leftovers(), fault).toEqual([]);
+        expect(await w.proxyDead(), `${fault}: proxy żyje po bloku`).toBe(true);
+      }
+    }, 20_000);
+
+    // Dowód, dlaczego `kill $!`: w zsh `%1` w otoczce `if` nie trafia w proxy. Ten sam blok z `kill %1`
+    // musi dać czerwoną asercję „proxy zamknięte” (w bash `%1` trafia, więc przypadek tylko dla zsh).
+    it.runIf(shellName.endsWith("zsh"))("blok 7b (zmienna) z `kill %1` zamiast `kill $!`: proxy żyje po bloku (powód `kill $!`)", async () => {
+      const broken = B_ENV.replace("\n  kill $! 2>/dev/null\n", "\n  kill %1 2>/dev/null\n");
+      expect(broken).not.toBe(B_ENV);
+      const w = world();
+      w.run(shell, broken, ALL3);
+      expect(w.read("psql.pw")).toBe(PW);
+      expect(await w.proxyDead(), "`kill %1` zamknęło proxy").toBe(false);
     }, 20_000);
 
     it("odwrócenie 9b: brak P → zero gcloud i komunikat stop; z P → `secrets delete` z jawnym --project", () => {
