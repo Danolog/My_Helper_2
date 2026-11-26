@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema, isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isDepositEnabled } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 // GET (katalog, bez sesji) i PUT czytają przez forSalon(id z URL). Polityka RLS
@@ -254,6 +255,20 @@ export async function GET(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
+    }
+
+    // Zadatek wyłączony (isDepositEnabled): flaga usługi zapisana wcześniej
+    // nie trafia do portalu, więc portal ani stare PWA nie wchodzą w ścieżkę
+    // płatności zadatku. Maskowanie po odczycie z cache — przełączenie flagi
+    // działa od razu, także dla wpisów zapisanych w cache wcześniej.
+    if (!isDepositEnabled()) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          ...data,
+          services: data.services.map((service) => ({ ...service, depositRequired: false })),
+        },
+      });
     }
 
     return NextResponse.json({ success: true, data });

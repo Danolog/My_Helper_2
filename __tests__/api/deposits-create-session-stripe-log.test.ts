@@ -65,6 +65,12 @@ vi.mock("@/lib/server/frozen-guard", async (orig) => ({
   ...(await orig<typeof import("@/lib/server/frozen-guard")>()),
   frozenModuleResponse: () => null, // trasa testowana bez blokady modułu
 }));
+// Trasa testowana tak, jak zadziała po włączeniu zadatku (isDepositEnabled).
+// Dzisiejszy stan (409 DEPOSITS_DISABLED): __tests__/api/deposits-disabled.test.ts.
+vi.mock("@/lib/features", async (orig) => ({
+  ...(await orig<typeof import("@/lib/features")>()),
+  isDepositEnabled: () => true,
+}));
 
 const guestBody = {
   salonId: SALON_UUID,

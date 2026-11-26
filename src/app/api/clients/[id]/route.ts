@@ -5,6 +5,7 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
+import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } from "@/lib/features";
 import { healthDataConsentRequiredBody, normalizeAllergies } from "@/lib/health-data-consent";
 import { logger } from "@/lib/logger";
 import { isRetryableLockFailure } from "@/lib/pg-lock-failure";
@@ -119,6 +120,15 @@ export const PUT = withApiHandler(
     const validationError = validateBody(updateClientSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
+    }
+
+    // Zadatek wyłączony (isDepositEnabled): włączenie odrzucone przed jakimkolwiek
+    // zapisem, wyłączenie przechodzi.
+    if (body.requireDeposit === true && !isDepositEnabled()) {
+      return NextResponse.json(
+        { success: false, code: DEPOSITS_DISABLED_CODE, error: DEPOSITS_DISABLED_MESSAGE },
+        { status: 409 }
+      );
     }
 
     // healthDataConsentAt/By z body celowo nie są czytane — nadaje je serwer.

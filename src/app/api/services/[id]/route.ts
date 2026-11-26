@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateServiceSchema } from "@/lib/api-validation";
+import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } from "@/lib/features";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { services, serviceCategories, serviceVariants } from "@/lib/schema";
@@ -102,6 +103,14 @@ export const PUT = withApiHandler(
     const validationError = validateBody(updateServiceSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
+    }
+
+    // Zadatek wyłączony (isDepositEnabled): włączenie odrzucone, wyłączenie przechodzi.
+    if (body.depositRequired === true && !isDepositEnabled()) {
+      return NextResponse.json(
+        { success: false, code: DEPOSITS_DISABLED_CODE, error: DEPOSITS_DISABLED_MESSAGE },
+        { status: 409 }
+      );
     }
 
     const { name, description, basePrice, baseDuration, isActive, categoryId, depositRequired, depositPercentage } = body;

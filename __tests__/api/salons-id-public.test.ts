@@ -255,6 +255,69 @@ describe("GET /api/salons/[id] — publiczny katalog", () => {
   });
 });
 
+/**
+ * Zadatek wyłączony (`isDepositEnabled()` = false, rejestr prawdziwy): usługa
+ * z `deposit_required = true` zapisanym wcześniej trafia do portalu z
+ * `depositRequired: false`, więc portal i stare PWA nie wołają
+ * /api/deposits/create-session. Maskowanie po odczycie z cache.
+ */
+describe("GET /api/salons/[id] — zadatek wyłączony", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seed();
+    const svc = tables.services!.find((s) => s.id === SVC_A)!;
+    svc.depositRequired = true;
+    svc.depositPercentage = 50;
+  });
+
+  it("rejestr flag jest prawdziwy: isDepositEnabled() = false", async () => {
+    const { isDepositEnabled } = await import("@/lib/features");
+    expect(isDepositEnabled()).toBe(false);
+  });
+
+  it("200 — usługa z flagą zadatku w bazie zwracana z depositRequired: false", async () => {
+    const res = await get(SALON_A);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.services).toHaveLength(1);
+    expect(body.data.services[0].depositRequired).toBe(false);
+  });
+
+  it("poza flagą kształt odpowiedzi bez zmian", async () => {
+    const body = await (await get(SALON_A)).json();
+    expect(body.data).toEqual({
+      ...EXPECTED_A,
+      services: [{ ...EXPECTED_A.services[0], depositPercentage: 50 }],
+    });
+  });
+
+  it("trafienie w cache też maskowane", async () => {
+    await get(SALON_A);
+    const again = await (await get(SALON_A)).json();
+
+    expect(state.transactions).toBe(1);
+    expect(again.data.services[0].depositRequired).toBe(false);
+  });
+
+  it("404 — salon nie istnieje (maskowanie nie zamienia 404 na 200)", async () => {
+    const res = await get(MISSING_SALON);
+    expect(res.status).toBe(404);
+  });
+
+  it("400 — zły format id", async () => {
+    const res = await get("not-a-uuid");
+    expect(res.status).toBe(400);
+  });
+
+  it("500 — błąd bazy", async () => {
+    state.failSelect = new Error("db down");
+    const res = await get(SALON_A);
+    expect(res.status).toBe(500);
+  });
+});
+
 const VALID_BODY = {
   name: "Nowa nazwa",
   phone: "500600700",
