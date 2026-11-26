@@ -2,12 +2,14 @@
  * ReviewSection — informacja o publiczności opinii przy formularzu opinii klienta.
  *
  * Regulamin (pkt 8.3) zapowiada, że klient zobaczy tę informację przy formularzu.
- * Stan publikacji przychodzi do prawdziwej funkcji `reviewLegalNotice` jako parametr
- * (bez atrapy modułu dokumentów). Przy wartości z modułu (flaga wyłączona) nie ma
- * zdania ani odnośnika do strony, która odpowiada 404.
+ * Stan publikacji przychodzi do prawdziwej funkcji `reviewLegalNotice` jako parametr.
+ * Wartość domyślną komponentu ustawia test (atrapa `reviewLegalNotice` przekazuje
+ * jawną flagę do prawdziwej funkcji), więc wynik nie zależy od wartości flagi
+ * w module. Przy wyłączonej fladze nie ma zdania ani odnośnika do strony, która
+ * odpowiada 404.
  */
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReviewSection } from "@/app/(client)/appointments/[id]/_components/review-section";
 import { TERMS_CONTENT } from "@/lib/legal/content/terms";
 import {
@@ -16,6 +18,29 @@ import {
   reviewLegalNotice,
   type LegalDocuments,
 } from "@/lib/legal/documents";
+
+const legal = vi.hoisted(() => ({ published: false }));
+
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  const versioned: LegalDocuments = {
+    ...actual.LEGAL_DOCUMENTS,
+    privacy: { ...actual.LEGAL_DOCUMENTS.privacy, version: "2026-12-01" },
+    terms: { ...actual.LEGAL_DOCUMENTS.terms, version: "2026-12-01" },
+    dpa: { ...actual.LEGAL_DOCUMENTS.dpa, version: "2026-12-01" },
+  };
+  return {
+    ...actual,
+    reviewLegalNotice: (
+      published: boolean = legal.published,
+      documents: LegalDocuments = versioned,
+    ) => actual.reviewLegalNotice(published, documents),
+  };
+});
+
+beforeEach(() => {
+  legal.published = false;
+});
 
 afterEach(cleanup);
 
@@ -44,7 +69,7 @@ function props(showReviewForm: boolean, legalNotice?: Props["legalNotice"]): Pro
     onSetComment: () => {},
     onSubmitReview: () => {},
   };
-  // Brak klucza = wartość domyślna komponentu (stan z modułu).
+  // Brak klucza = wartość domyślna komponentu (stan ustawiony w teście).
   return legalNotice === undefined ? base : { ...base, legalNotice };
 }
 
@@ -55,7 +80,7 @@ describe("treść zdania", () => {
 });
 
 describe("flaga wyłączona", () => {
-  it("wartość z modułu: formularz bez zdania i bez odnośnika do /terms", () => {
+  it("wartość domyślna komponentu: formularz bez zdania i bez odnośnika do /terms", () => {
     const { container } = render(<ReviewSection {...props(true)} />);
 
     expect(screen.getByTestId("review-form")).toBeInTheDocument();
@@ -81,6 +106,14 @@ describe("flaga włączona", () => {
     expect(link).toHaveAttribute("href", "/terms");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("wartość domyślna komponentu: formularz ze zdaniem i odnośnikiem do /terms", () => {
+    legal.published = true;
+    render(<ReviewSection {...props(true)} />);
+
+    expect(screen.getByTestId("review-legal-notice").textContent).toContain(REVIEW_PUBLICITY_SENTENCE);
+    expect(screen.getByRole("link", { name: "regulamin" })).toHaveAttribute("href", "/terms");
   });
 
   it("zdanie tylko przy otwartym formularzu, nie przy samym przycisku", () => {

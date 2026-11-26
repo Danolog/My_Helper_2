@@ -41,6 +41,20 @@ vi.mock("@/lib/auth-client", () => ({
   sendVerificationEmail: vi.fn(),
 }));
 
+// Akceptacja regulaminu wyłączona jawnie (flaga false do prawdziwej funkcji),
+// niezależnie od wartości flagi w module; pole akceptacji sprawdza
+// ClientAccountLegalAcceptance.test.tsx.
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  return {
+    ...actual,
+    clientAccountLegalNotice: (
+      published = false,
+      documents: import("@/lib/legal/documents").LegalDocuments = actual.LEGAL_DOCUMENTS,
+    ) => actual.clientAccountLegalNotice(published, documents),
+  };
+});
+
 // Mock validations
 vi.mock("@/lib/validations", () => ({
   validatePhone: (phone: string) => {

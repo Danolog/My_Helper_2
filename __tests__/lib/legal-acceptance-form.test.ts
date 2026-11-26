@@ -4,8 +4,9 @@
  *
  * Funkcje przyjmują stan (flagę i rejestr) jako parametry z wartościami domyślnymi
  * z modułu, więc test sprawdza prawdziwą regułę przy obu wartościach flagi bez
- * atrapy modułu. Wersje w polach muszą być tymi samymi, których wymaga trasa
- * (`requiredLegalVersions`).
+ * atrapy modułu. Każdy przypadek podaje flagę jawnie, więc wynik nie zależy od
+ * wartości flagi w module. Wersje w polach muszą być tymi samymi, których wymaga
+ * trasa (`requiredLegalVersions`).
  */
 import { describe, it, expect, expectTypeOf } from "vitest";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/lib/legal/acceptance";
 import {
   LEGAL_ACCEPTANCE_REQUIRED_CODE,
+  LEGAL_DOCS_PUBLISHED,
   LEGAL_DOCUMENTS,
   bookingLegalNotice,
   isLegalAcceptanceComplete,
@@ -38,15 +40,24 @@ const VERSIONED: LegalDocuments = {
 const BOTH = { terms: true, dpa: true };
 const NONE = { terms: false, dpa: false };
 
-describe("wartości w module (flaga wyłączona)", () => {
+describe("wartości w module", () => {
+  it("wartości domyślne funkcji to flaga i rejestr z modułu", () => {
+    expect(legalAcceptanceForm()).toEqual(legalAcceptanceForm(LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS));
+    expect(bookingLegalNotice()).toEqual(bookingLegalNotice(LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS));
+  });
+});
+
+describe("flaga wyłączona przy rejestrze z modułu", () => {
+  const form = legalAcceptanceForm(false, LEGAL_DOCUMENTS);
+
   it("bez pól akceptacji i bez informacji przy rezerwacji", () => {
-    expect(legalAcceptanceForm()).toBeNull();
-    expect(bookingLegalNotice()).toBeNull();
+    expect(form).toBeNull();
+    expect(bookingLegalNotice(false, LEGAL_DOCUMENTS)).toBeNull();
   });
 
   it("formularz można wysłać bez zaznaczeń, a żądanie nie dostaje dodatkowych pól", () => {
-    expect(isLegalAcceptanceComplete(legalAcceptanceForm(), NONE)).toBe(true);
-    expect(legalAcceptanceRequestFields(legalAcceptanceForm(), NONE, "registration")).toEqual({});
+    expect(isLegalAcceptanceComplete(form, NONE)).toBe(true);
+    expect(legalAcceptanceRequestFields(form, NONE, "registration")).toEqual({});
   });
 });
 

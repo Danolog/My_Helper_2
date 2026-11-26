@@ -29,6 +29,20 @@ const recovery = vi.hoisted(() => ({
   clearSavedForm: () => {},
 }));
 
+// Pola akceptacji regulaminu i DPA domyślnie wyłączone jawnie (flaga false do
+// prawdziwej funkcji), niezależnie od wartości flagi w module. Przypadki
+// z opublikowanymi dokumentami podają formularz akceptacji w argumencie haka.
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  return {
+    ...actual,
+    legalAcceptanceForm: (
+      published = false,
+      documents: import("@/lib/legal/documents").LegalDocuments = actual.LEGAL_DOCUMENTS,
+    ) => actual.legalAcceptanceForm(published, documents),
+  };
+});
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }));

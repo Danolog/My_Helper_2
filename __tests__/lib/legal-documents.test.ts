@@ -2,8 +2,9 @@
  * Rejestr dokumentów prawnych i reguła publikacji.
  *
  * Funkcje przyjmują stan (flagę i rejestr) jako parametry z wartościami
- * domyślnymi z modułu. Dzięki temu test sprawdza prawdziwą regułę przy obu
- * wartościach flagi, a osobno — że wartość w module jest wyłączona.
+ * domyślnymi z modułu. Każdy przypadek podaje flagę jawnie, więc wynik nie
+ * zależy od wartości flagi w module; osobno test sprawdza, że wartości
+ * domyślne to flaga i rejestr z modułu, oraz realny stan rejestru i treści.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -14,6 +15,10 @@ import {
   publishedLegalLinks,
   type LegalDocuments,
 } from "@/lib/legal/documents";
+import {
+  LEGAL_DRAFT_VERSION_SUFFIX,
+  legalPublicationProblems,
+} from "@/lib/legal/publication";
 
 const VERSIONED: LegalDocuments = {
   ...LEGAL_DOCUMENTS,
@@ -22,16 +27,43 @@ const VERSIONED: LegalDocuments = {
   dpa: { ...LEGAL_DOCUMENTS.dpa, version: "2026-12-01" },
 };
 
+const UNVERSIONED: LegalDocuments = {
+  ...LEGAL_DOCUMENTS,
+  privacy: { ...LEGAL_DOCUMENTS.privacy, version: null },
+  terms: { ...LEGAL_DOCUMENTS.terms, version: null },
+  dpa: { ...LEGAL_DOCUMENTS.dpa, version: null },
+};
+
 describe("wartości w module", () => {
-  it("flaga publikacji jest wyłączona", () => {
-    expect(LEGAL_DOCS_PUBLISHED).toBe(false);
+  it("wartości domyślne funkcji to flaga i rejestr z modułu", () => {
+    expect(typeof LEGAL_DOCS_PUBLISHED).toBe("boolean");
+    for (const key of LEGAL_DOCUMENT_KEYS) {
+      expect(isLegalPagePublished(key)).toBe(
+        isLegalPagePublished(key, LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS),
+      );
+    }
+    expect(publishedLegalLinks()).toEqual(
+      publishedLegalLinks(LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS),
+    );
   });
 
-  it("żadna strona nie jest opublikowana, a stopka dostaje pustą listę", () => {
+  it("flaga wyłączona przy rejestrze z modułu: żadna strona nie jest opublikowana, a stopka dostaje pustą listę", () => {
     for (const key of LEGAL_DOCUMENT_KEYS) {
-      expect(isLegalPagePublished(key)).toBe(false);
+      expect(isLegalPagePublished(key, false, LEGAL_DOCUMENTS)).toBe(false);
     }
-    expect(publishedLegalLinks()).toEqual([]);
+    expect(publishedLegalLinks(false, LEGAL_DOCUMENTS)).toEqual([]);
+  });
+
+  it("polityka, regulamin i umowa powierzenia mają wersje ostateczne (data, bez sufiksu roboczego)", () => {
+    for (const key of ["privacy", "terms", "dpa"] as const) {
+      const { version } = LEGAL_DOCUMENTS[key];
+      expect(version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(version?.endsWith(LEGAL_DRAFT_VERSION_SUFFIX)).toBe(false);
+    }
+  });
+
+  it("rejestr i treść gotowe do publikacji: bez braków wersji, pustej treści i znaczników", () => {
+    expect(legalPublicationProblems()).toEqual([]);
   });
 
   it("rejestr ma pięć stron pod ustalonymi adresami", () => {
@@ -60,14 +92,14 @@ describe("isLegalPagePublished", () => {
   });
 
   it("flaga włączona, wersja null: polityka, regulamin i umowa nieopublikowane", () => {
-    expect(isLegalPagePublished("privacy", true, LEGAL_DOCUMENTS)).toBe(false);
-    expect(isLegalPagePublished("terms", true, LEGAL_DOCUMENTS)).toBe(false);
-    expect(isLegalPagePublished("dpa", true, LEGAL_DOCUMENTS)).toBe(false);
+    expect(isLegalPagePublished("privacy", true, UNVERSIONED)).toBe(false);
+    expect(isLegalPagePublished("terms", true, UNVERSIONED)).toBe(false);
+    expect(isLegalPagePublished("dpa", true, UNVERSIONED)).toBe(false);
   });
 
   it("flaga włączona: strony bez wersji (podprocesorzy, kontakt) opublikowane", () => {
-    expect(isLegalPagePublished("subprocessors", true, LEGAL_DOCUMENTS)).toBe(true);
-    expect(isLegalPagePublished("contact", true, LEGAL_DOCUMENTS)).toBe(true);
+    expect(isLegalPagePublished("subprocessors", true, UNVERSIONED)).toBe(true);
+    expect(isLegalPagePublished("contact", true, UNVERSIONED)).toBe(true);
   });
 
   it("flaga włączona i wersje ustawione: wszystkie opublikowane", () => {
@@ -83,7 +115,7 @@ describe("publishedLegalLinks", () => {
   });
 
   it("flaga włączona bez wersji: tylko strony, które wersji nie wymagają", () => {
-    expect(publishedLegalLinks(true, LEGAL_DOCUMENTS).map((l) => l.key)).toEqual([
+    expect(publishedLegalLinks(true, UNVERSIONED).map((l) => l.key)).toEqual([
       "subprocessors",
       "contact",
     ]);
