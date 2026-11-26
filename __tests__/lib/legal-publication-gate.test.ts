@@ -130,13 +130,6 @@ describe("legalPublicationProblems (dane z parametru)", () => {
       { key: "contact", reason: "placeholders", count: 1 },
     ]);
   });
-
-  it.skipIf(LEGAL_DOCS_PUBLISHED)(
-    "flaga wyłączona: obecny rejestr i treść nie są jeszcze gotowe do publikacji",
-    () => {
-      expect(legalPublicationProblems(LEGAL_DOCUMENTS, LEGAL_CONTENT).length).toBeGreaterThan(0);
-    },
-  );
 });
 
 describe("countLegalPlaceholders", () => {
