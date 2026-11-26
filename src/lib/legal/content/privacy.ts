@@ -4,7 +4,7 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const PRIVACY_CONTENT = `Wersja: [DO UZUPEŁNIENIA: W1 numer wersji] · obowiązuje od: [DO UZUPEŁNIENIA: W1 data]
+export const PRIVACY_CONTENT = `Wersja: [DO UZUPEŁNIENIA: data publikacji] · obowiązuje od: [DO UZUPEŁNIENIA: data publikacji]
 
 ## 1. Kto odpowiada za Twoje dane
 
@@ -17,7 +17,7 @@ MyHelper to aplikacja do rezerwacji wizyt i prowadzenia salonu usługowego. Twoj
 - dane salonu publikowane na liście salonów;
 - dane techniczne: pliki cookie, logi serwera i adres IP używany do ochrony przed nadużyciami.
 
-Administrator: [DO UZUPEŁNIENIA: F1 pełna nazwa firmy], [DO UZUPEŁNIENIA: F2 adres], NIP [DO UZUPEŁNIENIA: F3], REGON [DO UZUPEŁNIENIA: F4], e-mail: **kontakt@nordsignal.cc**.
+Administrator: AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 Nowogard, NIP 8561293713, REGON 811103360, e-mail: **kontakt@nordsignal.cc**.
 
 **b) Przetwarzamy dane w imieniu salonu.** Gdy umawiasz wizytę albo salon prowadzi Twoją kartotekę, za Twoje dane odpowiada **ten salon**. MyHelper przechowuje je i przetwarza tylko na polecenie salonu, na podstawie [umowy powierzenia przetwarzania danych](/dpa). Salon akceptuje tę umowę przy zakładaniu salonu. Dotyczy to:
 - kartoteki klienta,
@@ -112,8 +112,8 @@ Pełna, aktualna lista dostawców, którzy przetwarzają dane w naszym imieniu, 
 
 | Odbiorca | Gdzie przetwarza dane | Co dostaje | Po co |
 |---|---|---|---|
-| Google Cloud ([DO UZUPEŁNIENIA: T1 podmiot umowy]) | region europe-central2 (Warszawa, Polska) | wszystkie dane w aplikacji, w tym wgrane zdjęcia, oraz logi serwera | serwery, baza danych, przechowywanie plików, logi |
-| SMSAPI ([DO UZUPEŁNIENIA: T2 pełna nazwa spółki]) | Polska | numer telefonu odbiorcy i treść SMS-a, **w tym numer BLIK właściciela w SMS-ie z danymi wpłaty** | wysyłka SMS-ów |
+| Google Cloud (Google Cloud Poland sp. z o.o., Warszawa) | region europe-central2 (Warszawa, Polska) | wszystkie dane w aplikacji, w tym wgrane zdjęcia, oraz logi serwera | serwery, baza danych, przechowywanie plików, logi |
+| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy i treść SMS-a, **w tym numer BLIK właściciela w SMS-ie z danymi wpłaty** | wysyłka SMS-ów |
 | Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat i treść wiadomości | e-maile z aplikacji, np. potwierdzenie adresu e-mail i reset hasła |
 | Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt, Niemcy); spółka z siedzibą w USA | adres IP, numer telefonu gościa albo identyfikator salonu jako klucz licznika | ochrona przed nadużyciami |
 | **Każda osoba rezerwująca wizytę z zadatkiem w danym salonie** | — | **numer BLIK właściciela salonu** | wpłata zadatku |
@@ -140,18 +140,21 @@ Podstawą przekazania jest decyzja Komisji Europejskiej o odpowiednim stopniu oc
 
 **Dane, za które odpowiadamy:**
 - **Konto użytkownika:** do usunięcia konta. Usuwamy je na Twoją prośbę wysłaną na kontakt@nordsignal.cc, w ciągu miesiąca od jej otrzymania.
-- **Sesja logowania:** wygasa po 15 minutach bezczynności i od tej chwili nie działa. [DO UZUPEŁNIENIA: W13 zdanie o usuwaniu zapisu wygasłych sesji: wariant A albo B z listy.]
+- **Sesja logowania:** wygasa po 15 minutach bezczynności i od tej chwili nie działa. Zapis wygasłej sesji (adres IP, informacja o przeglądarce) oraz wygasłe kody i linki weryfikacyjne (z adresem e-mail) usuwamy automatycznie raz na dobę.
 - **Numer BLIK właściciela:** do usunięcia przez właściciela w ustawieniach albo do usunięcia salonu. Kopie w treści wysłanych SMS-ów należą do historii powiadomień salonu (niżej).
 - **Zapis akceptacji regulaminu i umowy powierzenia:** przez czas trwania umowy i 3 lata od końca roku, w którym umowa się zakończyła (okres przedawnienia roszczeń).
-- **Logi serwera:** [DO UZUPEŁNIENIA: T6 okres, domyślnie 30 dni], potem usuwa je automatycznie Google Cloud.
-- **Kopie zapasowe bazy:** [DO UZUPEŁNIENIA: T5 okres, domyślnie do 7 dni]. Dane usunięte z aplikacji znikają z kopii zapasowych najpóźniej po tym czasie.
-- **Dane salonu po zakończeniu umowy:** salon może zażądać kopii swoich danych przez [DO UZUPEŁNIENIA: W11 liczba dni, domyślnie 30] dni od zakończenia umowy. Potem usuwamy je w ciągu [DO UZUPEŁNIENIA: W12 liczba dni, domyślnie 30] dni.
-- **Korespondencja w sprawie reklamacji, zgłoszeń treści i żądań dotyczących danych:** [DO UZUPEŁNIENIA: W15 okres, domyślnie 3 lata od końca roku, w którym zamknęliśmy sprawę].
+- **Logi serwera:** 30 dni, potem usuwa je automatycznie Google Cloud.
+- **Kopie zapasowe bazy:** kopie automatyczne powstają codziennie i są przechowywane 7 dni, z możliwością odtworzenia stanu z dowolnej chwili w tym okresie. Kopie wykonywane przed zmianami w systemie przechowujemy najdłużej 30 dni. Dane usunięte z aplikacji znikają ze wszystkich kopii zapasowych najpóźniej po 30 dniach.
+- **Dane salonu po zakończeniu umowy:** salon może zażądać kopii swoich danych przez 30 dni od zakończenia umowy. Potem usuwamy je w ciągu 30 dni.
+- **Korespondencja w sprawie reklamacji, zgłoszeń treści i żądań dotyczących danych:** 3 lata od końca roku, w którym zamknęliśmy sprawę (okres przedawnienia roszczeń).
 
 **Dane, za które odpowiada salon.** Okresy niżej to domyślne polecenia z umowy powierzenia. Salon może je zmienić.
 - **Kartoteka klienta:** do usunięcia przez salon, najpóźniej do końca umowy z salonem. Gdy salon usuwa klienta, usuwamy też jego dane kontaktowe i wolny tekst z jego wizyt, powiadomień i opinii, a także powiązanie wizyt z kontem w portalu klienta. Zostają dane potrzebne salonowi do rozliczeń: data i godzina wizyty, usługa, pracownik, status, kwoty, a przy opinii sama ocena, bez komentarza i bez danych autora. Rezerwacji gościa bez konta, której salon nie połączył z kartoteką, ta operacja nie obejmuje.
-- [DO UZUPEŁNIENIA: W14 wizyty z danymi klienta, dane gościa bez konta, historia SMS: wariant domyślny z listy.]
+- **Wizyty z danymi klienta:** 3 lata od końca roku kalendarzowego, w którym odbyła się wizyta. Potem usuwamy dane osobowe przy wizycie. Zostają data, usługa i kwota.
+- **Rezerwacja gościa bez konta:** tak samo jak wizyty z danymi klienta.
+- **Historia powiadomień SMS:** 12 miesięcy od wysłania SMS-a, potem ją usuwamy.
 - **Lista oczekujących:** do usunięcia wpisu przez klienta albo salon, razem z kartoteką klienta albo z salonem.
+- **Opinie i odpowiedzi salonu:** do usunięcia przez salon, najpóźniej do końca umowy z salonem.
 - **Tymczasowe uprawnienia personelu:** przestają działać w ustawionym terminie.
 
 ## 7. Twoje prawa
@@ -191,7 +194,7 @@ Te dane nie są wysyłane do nas. Usuniesz je, czyszcząc dane strony w przeglą
 ## 9. Bezpieczeństwo
 
 - Całą komunikację z aplikacją szyfrujemy (HTTPS).
-- Baza danych, pliki i kopie zapasowe są szyfrowane u dostawcy infrastruktury (Google Cloud). [DO UZUPEŁNIENIA: T4 potwierdzenie]
+- Baza danych, pliki i kopie zapasowe są szyfrowane u dostawcy infrastruktury (Google Cloud), kluczami zarządzanymi przez Google.
 - Hasła przechowujemy wyłącznie jako skrót (hash).
 - Personel każdego salonu ma dostęp tylko do danych własnego salonu. Numer BLIK w ustawieniach widzi tylko właściciel salonu.
 - Numerów BLIK i numerów telefonów klientów nie zapisujemy w logach.
@@ -200,5 +203,5 @@ Te dane nie są wysyłane do nas. Usuniesz je, czyszcząc dane strony w przeglą
 
 Kontakt w sprawie danych osobowych: **kontakt@nordsignal.cc**. Nie wyznaczyliśmy inspektora ochrony danych.
 
-O zmianie polityki informujemy w aplikacji i e-mailem do właścicieli salonów co najmniej [DO UZUPEŁNIENIA: W7 liczba dni, domyślnie 14] dni przed jej wejściem w życie. Zmiana zasad pokazywania numeru BLIK wymaga ponownego potwierdzenia przez właściciela.
+O zmianie polityki informujemy w aplikacji i e-mailem do właścicieli salonów co najmniej 14 dni przed jej wejściem w życie. Zmiana zasad pokazywania numeru BLIK wymaga ponownego potwierdzenia przez właściciela.
 `;

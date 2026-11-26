@@ -4,13 +4,13 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const CONTACT_CONTENT = `**MyHelper** prowadzi [DO UZUPEŁNIENIA: F1 pełna nazwa firmy]
-[DO UZUPEŁNIENIA: F2 adres]
-NIP: [DO UZUPEŁNIENIA: F3] · REGON: [DO UZUPEŁNIENIA: F4]
+export const CONTACT_CONTENT = `**MyHelper** prowadzi AMD Dariusz Gradzik
+ul. T. Kościuszki 19, 72-200 Nowogard
+NIP: 8561293713 · REGON: 811103360
 
 **E-mail: kontakt@nordsignal.cc**
 
-Na wiadomości odpowiada człowiek, nie automat. Piszemy w języku [DO UZUPEŁNIENIA: W9 domyślnie: polskim].
+Na wiadomości odpowiada człowiek, nie automat. Piszemy w języku polskim.
 
 ## W jakiej sprawie możesz napisać
 

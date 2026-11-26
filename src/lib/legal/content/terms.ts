@@ -4,13 +4,13 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const TERMS_CONTENT = `Wersja: [DO UZUPEŁNIENIA: W1 numer wersji] · obowiązuje od: [DO UZUPEŁNIENIA: W1 data]
+export const TERMS_CONTENT = `Wersja: [DO UZUPEŁNIENIA: data publikacji] · obowiązuje od: [DO UZUPEŁNIENIA: data publikacji]
 
 ## 1. Kim jesteśmy
 
-Usługę MyHelper świadczy [DO UZUPEŁNIENIA: F1 pełna nazwa firmy], [DO UZUPEŁNIENIA: F2 adres], NIP [DO UZUPEŁNIENIA: F3], REGON [DO UZUPEŁNIENIA: F4], e-mail: **kontakt@nordsignal.cc** (dalej „my” albo „MyHelper”).
+Usługę MyHelper świadczy AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 Nowogard, NIP 8561293713, REGON 811103360, e-mail: **kontakt@nordsignal.cc** (dalej „my” albo „MyHelper”).
 
-**Punkt kontaktowy** dla użytkowników oraz dla organów państw UE, Komisji Europejskiej i Europejskiej Rady ds. Usług Cyfrowych (art. 11 i 12 aktu o usługach cyfrowych, DSA): **kontakt@nordsignal.cc**. Piszesz do człowieka, nie do automatu. Kontakt prowadzimy w języku [DO UZUPEŁNIENIA: W9 domyślnie: polskim].
+**Punkt kontaktowy** dla użytkowników oraz dla organów państw UE, Komisji Europejskiej i Europejskiej Rady ds. Usług Cyfrowych (art. 11 i 12 aktu o usługach cyfrowych, DSA): **kontakt@nordsignal.cc**. Piszesz do człowieka, nie do automatu. Kontakt prowadzimy w języku polskim.
 
 ## 2. Definicje
 
@@ -24,7 +24,7 @@ Usługę MyHelper świadczy [DO UZUPEŁNIENIA: F1 pełna nazwa firmy], [DO UZUPE
 ## 3. Co to jest MyHelper
 
 MyHelper to aplikacja internetowa:
-- **dla salonów:** kalendarz wizyt, kartoteka klientów, usługi, pracownicy, rezerwacja online, SMS z potwierdzeniem rezerwacji[DO UZUPEŁNIENIA: W24 domyślnie: nic nie dopisywać], zadatki BLIK na telefon salonu, opinie, galeria, podstawowe raporty. Salon może też włączyć w ustawieniach moduły dodatkowe: magazyn, rabaty i kody rabatowe, listę oczekujących i raporty zaawansowane;
+- **dla salonów:** kalendarz wizyt, kartoteka klientów, usługi, pracownicy, rezerwacja online, SMS z potwierdzeniem rezerwacji, zadatki BLIK na telefon salonu, opinie, galeria, podstawowe raporty. Salon może też włączyć w ustawieniach moduły dodatkowe: magazyn, rabaty i kody rabatowe, listę oczekujących i raporty zaawansowane;
 - **dla klientów salonów:** wyszukanie salonu, rezerwacja wizyty (z kontem albo jako gość), podgląd i odwołanie wizyt w portalu klienta, ulubione salony, lista oczekujących, opinie.
 
 Zakres usługi to funkcje opisane powyżej.
@@ -49,7 +49,7 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 3. **Konto salonu.** Umowę zawieramy przy zakładaniu salonu, gdy salon akceptuje regulamin i, osobnym polem, umowę powierzenia przetwarzania danych (pkt 11.1). Do zawarcia umowy nie wymagamy oświadczenia o zawodowym charakterze umowy. Umowa jest zawarta na czas nieokreślony.
 4. **Wypowiedzenie przez salon.** Salon może wypowiedzieć umowę w każdej chwili, bez kosztów, pisząc na kontakt@nordsignal.cc. Umowa kończy się z dniem otrzymania wypowiedzenia, chyba że salon wskaże późniejszy termin.
 5. **Wypowiedzenie przez nas.** Możemy wypowiedzieć umowę z ważnej przyczyny, z 30-dniowym okresem wypowiedzenia, przesyłając uzasadnienie e-mailem. Ważne przyczyny to: zakończenie świadczenia usługi MyHelper, zmiana przepisów uniemożliwiająca świadczenie usługi, uporczywe naruszanie regulaminu mimo wezwania. Przy rażącym naruszeniu regulaminu (pkt 15) możemy rozwiązać umowę ze skutkiem natychmiastowym, z uzasadnieniem (pkt 16.4).
-6. **Dane po rozwiązaniu umowy z salonem.** Przez [DO UZUPEŁNIENIA: W11 domyślnie 30] dni od zakończenia umowy salon może zażądać na kontakt@nordsignal.cc kopii swoich danych (kartoteka, wizyty, historia powiadomień) w formacie [DO UZUPEŁNIENIA: W11 domyślnie CSV]. Przekażemy ją w ciągu 14 dni od żądania. Po tym okresie usuwamy dane salonu w ciągu [DO UZUPEŁNIENIA: W12 domyślnie 30] dni, a z kopii zapasowych najpóźniej po upływie ich okresu przechowywania (Polityka prywatności, pkt 6).
+6. **Dane po rozwiązaniu umowy z salonem.** Przez 30 dni od zakończenia umowy salon może zażądać na kontakt@nordsignal.cc kopii swoich danych (kartoteka, wizyty, historia powiadomień) w formacie CSV. Przekażemy ją w ciągu 14 dni od żądania. Po tym okresie usuwamy dane salonu w ciągu 30 dni, a z kopii zapasowych najpóźniej po upływie ich okresu przechowywania (Polityka prywatności, pkt 6).
 
 ## 7. Konto
 
@@ -110,9 +110,7 @@ Salon korzysta z panelu, w którym prowadzi kalendarz, kartotekę, usługi i pra
 
 ## 12. Okres próbny i opłaty (salon)
 
-[DO UZUPEŁNIENIA: W2–W5 cały punkt 12 według wyboru z listy. Wariant domyślny poniżej.]
-
-1. Po założeniu salonu zaczyna się bezpłatny okres próbny trwający [DO UZUPEŁNIENIA: W2 domyślnie 14] dni. Po jego końcu panel salonu przechodzi w tryb tylko do odczytu.
+1. Po założeniu salonu zaczyna się bezpłatny okres próbny trwający 14 dni. Po jego końcu panel salonu przechodzi w tryb tylko do odczytu.
 2. W czasie pilotażu nie pobieramy opłat przez Aplikację. Dalsze bezpłatne korzystanie po okresie próbnym ustalamy z salonem e-mailem i wtedy przedłużamy dostęp.
 3. Płatną subskrypcję wprowadzimy tylko nową wersją regulaminu (pkt 19). Nie obciążymy salonu żadną opłatą bez jego wyraźnej zgody na cenę i warunki płatności.
 
@@ -139,7 +137,7 @@ Nie wolno:
 ## 16. Treści użytkowników i moderacja (DSA)
 
 1. **Co przechowujemy i publikujemy.** Przechowujemy i publikujemy treści użytkowników: opisy salonów i usług, zdjęcia w galerii, opinie i odpowiedzi na opinie. Nie sprawdzamy ich z góry. Wyjątkiem są opinie, które przed publikacją akceptuje salon (pkt 8.3).
-2. **Co usuwamy.** Usuwamy albo blokujemy dostęp do treści bezprawnych i naruszających pkt 15. Możemy też ograniczyć widoczność treści albo zablokować konto użytkownika, który uporczywie je publikuje. Decyzje podejmuje człowiek: [DO UZUPEŁNIENIA: W10 domyślnie: właściciel MyHelper]. Nie stosujemy automatycznej moderacji.
+2. **Co usuwamy.** Usuwamy albo blokujemy dostęp do treści bezprawnych i naruszających pkt 15. Możemy też ograniczyć widoczność treści albo zablokować konto użytkownika, który uporczywie je publikuje. Decyzje podejmuje człowiek: właściciel MyHelper. Nie stosujemy automatycznej moderacji.
 3. **Zgłoszenie treści.** Każdy może zgłosić treść, którą uważa za bezprawną, e-mailem na kontakt@nordsignal.cc. Zgłoszenie powinno zawierać: uzasadnienie, dlaczego treść jest bezprawna; dokładny adres (URL) treści; imię i nazwisko oraz e-mail zgłaszającego (nie dotyczy zgłoszeń wykorzystywania seksualnego dzieci); oświadczenie, że zgłoszenie jest zgodne z prawdą według najlepszej wiedzy zgłaszającego. Potwierdzimy otrzymanie zgłoszenia i poinformujemy o decyzji oraz o możliwości odwołania.
 4. **Uzasadnienie decyzji.** Gdy usuwamy albo ograniczamy treść, blokujemy albo zawieszamy konto, przesyłamy osobie, której to dotyczy, uzasadnienie: co zrobiliśmy i w jakim zakresie, na podstawie jakich faktów, czy decyzja wynika ze zgłoszenia, jaki przepis albo punkt regulaminu naruszono i jak się odwołać.
 5. **Odwołanie.** Od decyzji z pkt 16.3–16.4 możesz się odwołać w ciągu 6 miesięcy, pisząc na kontakt@nordsignal.cc. Odwołanie rozpatruje człowiek w ciągu 14 dni. Możesz też skorzystać z pozasądowego organu rozstrzygania sporów certyfikowanego na podstawie DSA albo z drogi sądowej.
@@ -147,7 +145,7 @@ Nie wolno:
 
 ## 17. Dostępność i odpowiedzialność
 
-1. Dbamy o to, żeby Aplikacja działała bez przerw. Planowane przerwy techniczne zapowiadamy w Aplikacji albo e-mailem co najmniej [DO UZUPEŁNIENIA: W8 domyślnie 24 godziny] wcześniej. Awarii nie da się zapowiedzieć.
+1. Dbamy o to, żeby Aplikacja działała bez przerw. Planowane przerwy techniczne zapowiadamy w Aplikacji albo e-mailem co najmniej 24 godziny wcześniej. Awarii nie da się zapowiedzieć.
 2. SMS-y wysyłamy przez zewnętrznego dostawcę. Nie odpowiadamy za opóźnienia po stronie operatorów telefonii.
 3. Nie jesteśmy stroną umów między klientem a salonem (usługa salonu, zadatek). Nie zwalnia nas to z odpowiedzialności za działanie samej Aplikacji.
 4. **Wobec konsumentów i przedsiębiorców na prawach konsumenta** odpowiadamy na zasadach ogólnych, bez ograniczeń.
@@ -162,8 +160,8 @@ Nie wolno:
 
 ## 19. Zmiany regulaminu
 
-1. Możemy zmienić regulamin tylko z ważnej przyczyny. Ważne przyczyny to: zmiana przepisów prawa albo ich wykładni przez sądy lub organy; decyzja lub zalecenie organu; konieczność zapewnienia bezpieczeństwa Aplikacji lub danych; zmiana dostawców usług, na których opiera się Aplikacja; wprowadzenie nowych funkcji albo wycofanie funkcji[DO UZUPEŁNIENIA: W6 domyślnie dopisać: „; wprowadzenie płatnej subskrypcji albo zmiana ceny z przyczyn kosztowych”].
-2. O zmianie informujemy e-mailem i w Aplikacji co najmniej **[DO UZUPEŁNIENIA: W7 domyślnie 14] dni** przed jej wejściem w życie i podajemy treść zmian.
+1. Możemy zmienić regulamin tylko z ważnej przyczyny. Ważne przyczyny to: zmiana przepisów prawa albo ich wykładni przez sądy lub organy; decyzja lub zalecenie organu; konieczność zapewnienia bezpieczeństwa Aplikacji lub danych; zmiana dostawców usług, na których opiera się Aplikacja; wprowadzenie nowych funkcji albo wycofanie funkcji; wprowadzenie płatnej subskrypcji albo zmiana jej ceny z powodu zmiany kosztów świadczenia usługi.
+2. O zmianie informujemy e-mailem i w Aplikacji co najmniej **14 dni** przed jej wejściem w życie i podajemy treść zmian.
 3. Jeśli nie akceptujesz zmian, możesz wypowiedzieć umowę przed ich wejściem w życie, bez kosztów.
 4. Zmiana nie dotyczy rezerwacji złożonych przed jej wejściem w życie.
 
@@ -180,7 +178,7 @@ Nie wolno:
 
 (formularz ten należy wypełnić i odesłać tylko w przypadku chęci odstąpienia od umowy)
 
-Adresat: [DO UZUPEŁNIENIA: F1 pełna nazwa firmy], [DO UZUPEŁNIENIA: F2 adres], e-mail: kontakt@nordsignal.cc
+Adresat: AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 Nowogard, e-mail: kontakt@nordsignal.cc
 
 Ja/My(*) niniejszym informuję/informujemy(*) o moim/naszym odstąpieniu od umowy o świadczenie następującej usługi: MyHelper, [konto salonu / konto klienta](*)
 
