@@ -15,10 +15,19 @@ import { test, expect } from '../fixtures';
  *
  * Projekt `auth` (bez storageState): test nie może startować jako seedowany
  * właściciel. Własne konto testu, bo założenie salonu zmienia stan konta.
+ *
+ * Beta na zaproszenie: salon zakłada tylko konto z listy
+ * BETA_ALLOWED_OWNER_EMAILS serwera. Test ścieżki udanej używa adresu z
+ * E2E_INVITED_OWNER_EMAIL — workflow CI ustawia ten sam adres w obu zmiennych.
+ * Bramka wymaga też potwierdzonego e-maila; bez poczty w CI konto testu ma
+ * niepotwierdzony adres, więc workflow ustawia BETA_ALLOW_UNVERIFIED_OWNER=1
+ * (przełącznik ignorowany na każdym hostingu).
+ * Test odmowy używa losowego adresu spoza listy.
  */
 const PANEL_PATHS = ['/dashboard', '/dashboard/clients'] as const;
 const LAST_PANEL_PATH = PANEL_PATHS.at(-1) ?? '/dashboard';
 const pathRegExp =(path: string) => new RegExp(`${path}$`);
+const PASSWORD = 'NoSalonPass123!';
 
 test.describe('Panel: konto bez salonu', () => {
   test(
@@ -26,18 +35,46 @@ test.describe('Panel: konto bez salonu', () => {
     { tag: '@full' },
     async ({ page, baseURL }) => {
       const origin = baseURL ?? 'http://localhost:3000';
-      const email = `no-salon-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+      const email = process.env.E2E_INVITED_OWNER_EMAIL?.trim();
+      if (!email) {
+        expect(process.env.CI, 'CI: brak E2E_INVITED_OWNER_EMAIL (adres z listy bety)').toBeFalsy();
+        test.skip(true, 'Brak E2E_INVITED_OWNER_EMAIL: adresu z listy BETA_ALLOWED_OWNER_EMAILS serwera');
+        return;
+      }
 
-      // 1. Konto bez salonu, sesja w ciasteczkach kontekstu strony.
+      // 1. Konto bez salonu, sesja w ciasteczkach kontekstu strony. Adres jest
+      //    stały (z listy bety): przy ponownej próbie konto już istnieje —
+      //    wtedy logowanie tym samym hasłem.
       const signUp = await page.request.post('/api/auth/sign-up/email', {
-        data: { name: 'Bez Salonu E2E', email, password: 'NoSalonPass123!' },
+        data: { name: 'Bez Salonu E2E', email, password: PASSWORD },
         headers: { Origin: origin },
       });
-      expect(signUp.status(), 'rejestracja konta testu').toBe(200);
+      if (signUp.status() !== 200) {
+        const signIn = await page.request.post('/api/auth/sign-in/email', {
+          data: { email, password: PASSWORD },
+          headers: { Origin: origin },
+        });
+        expect(signIn.status(), 'rejestracja albo logowanie konta testu').toBe(200);
+      }
 
       const createHeading = page.getByText('Utworz swoj salon');
       const sidebar = page.locator('aside[aria-label="Panel nawigacyjny"]');
       const clientLink = page.getByRole('link', { name: /Jestem klientem/ });
+
+      // Ponowienie (--retries=1) albo kolejny przebieg na tej samej bazie: konto
+      // ze stałego adresu mogło już założyć salon w poprzedniej próbie (porażka
+      // dopiero po kroku 3). Wtedy kroków 2–3 nie da się powtórzyć — sprawdzamy
+      // tylko stan końcowy (krok 4): panel zamiast zakładania salonu.
+      if (signUp.status() !== 200) {
+        await page.goto(LAST_PANEL_PATH, { waitUntil: 'domcontentloaded' });
+        await expect(sidebar.or(createHeading).first()).toBeVisible({ timeout: 15000 });
+        if (await sidebar.isVisible()) {
+          await expect(createHeading).toHaveCount(0);
+          await expect(clientLink).toHaveCount(0);
+          await expect(page).toHaveURL(pathRegExp(LAST_PANEL_PATH));
+          return;
+        }
+      }
 
       // 2. /dashboard i dowolna podstrona: tylko zakładanie salonu, bez przekierowania.
       for (const path of PANEL_PATHS) {
@@ -68,6 +105,39 @@ test.describe('Panel: konto bez salonu', () => {
       await expect(createHeading).toHaveCount(0);
       await expect(clientLink).toHaveCount(0);
       await expect(page).toHaveURL(pathRegExp(LAST_PANEL_PATH));
+    }
+  );
+
+  test(
+    'konto spoza listy bety -> zakladanie salonu -> 403 i komunikat o zaproszeniu',
+    { tag: '@full' },
+    async ({ page, baseURL }) => {
+      const origin = baseURL ?? 'http://localhost:3000';
+      const email = `not-invited-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+
+      const signUp = await page.request.post('/api/auth/sign-up/email', {
+        data: { name: 'Bez Zaproszenia E2E', email, password: PASSWORD },
+        headers: { Origin: origin },
+      });
+      expect(signUp.status(), 'rejestracja konta testu').toBe(200);
+
+      await page.goto('/dashboard', { waitUntil: 'domcontentloaded' });
+      await expect(page.getByText('Utworz swoj salon')).toBeVisible({ timeout: 15000 });
+
+      const createButton = page.getByRole('button', { name: /Utworz salon z/ });
+      for (const box of await page.getByRole('checkbox').all()) {
+        await box.check();
+      }
+      await expect(createButton).toBeEnabled({ timeout: 15000 });
+
+      const createResponse = page.waitForResponse(
+        (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/register-subscription'
+      );
+      await createButton.click();
+      expect((await createResponse).status(), 'zalozenie salonu poza lista bety').toBe(403);
+
+      await expect(page.getByText(/tylko na zaproszenie/)).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('aside[aria-label="Panel nawigacyjny"]')).toHaveCount(0);
     }
   );
 });

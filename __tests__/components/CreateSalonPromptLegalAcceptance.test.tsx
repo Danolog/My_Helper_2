@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateSalonPrompt } from "@/components/dashboard/create-salon-prompt";
 import { mutationFetch } from "@/lib/api-client";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
 import {
   LEGAL_ACCEPTANCE_REQUIRED_MESSAGE,
   LEGAL_DOCUMENTS,
@@ -18,6 +19,7 @@ import {
   type LegalAcceptanceForm,
   type LegalDocuments,
 } from "@/lib/legal/documents";
+import { SUPPORT_CONTACT } from "@/lib/support-contact";
 
 vi.mock("@/lib/api-client", () => ({
   mutationFetch: vi.fn(async () => ({ json: async () => ({ success: true }) })),
@@ -138,6 +140,22 @@ describe("flaga włączona", () => {
     await user.click(screen.getByRole("button", { name: CREATE_BUTTON }));
 
     expect(await screen.findByText(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE)).toBeInTheDocument();
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+});
+
+describe("beta na zaproszenie", () => {
+  it("403 BETA_INVITE_ONLY: komunikat z kontaktem widoczny, salon nie zgłoszony jako założony", async () => {
+    vi.mocked(mutationFetch).mockResolvedValueOnce({
+      json: async () => ({ success: false, code: BETA_INVITE_ONLY_CODE, error: "x" }),
+    } as unknown as Response);
+    const user = userEvent.setup();
+    const { onCreated } = renderPrompt();
+
+    await user.click(screen.getByRole("button", { name: CREATE_BUTTON }));
+
+    expect(await screen.findByText(BETA_INVITE_ONLY_MESSAGE)).toBeInTheDocument();
+    expect(BETA_INVITE_ONLY_MESSAGE).toContain(SUPPORT_CONTACT);
     expect(onCreated).not.toHaveBeenCalled();
   });
 });

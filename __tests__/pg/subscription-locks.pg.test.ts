@@ -76,12 +76,26 @@ vi.mock("@/lib/plan-catalog", async (importOriginal) => ({
   PLANS_ON_SALE: [testPlanSlug],
 }));
 const { sessionUser, sessionSalonId } = vi.hoisted(() => ({
-  sessionUser: { current: { id: "", name: "IT", email: "it@example.invalid" } },
+  sessionUser: {
+    current: { id: "", name: "IT", email: "it@example.invalid" } as {
+      id: string;
+      name: string;
+      email: string;
+      emailVerified?: boolean;
+    },
+  },
   sessionSalonId: { current: "" },
 }));
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: async () => ({ user: sessionUser.current }),
   isAuthError: () => false,
+}));
+// Bramka bety (@/lib/beta-access) zostaje prawdziwa: test rejestracji ustawia listę na
+// adres swojego konta i potwierdzony e-mail, a serwer „ma pocztę”. Test sprawdza
+// blokady i indeksy, nie bramkę. Żadna inna trasa z tego pliku nie importuje @/lib/email.
+vi.mock("@/lib/email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/email")>()),
+  isEmailConfigured: () => true,
 }));
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: async () => sessionSalonId.current || null,
@@ -597,7 +611,13 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
       const freshId = `it-t3-b-${RUN}`; // prefiks it-t3- = sprzątanie z pg-harness.ts
       await h!.db.insert(user).values({ id: freshId, name: "IT T3b", email: `${freshId}@example.invalid` });
       const previous = sessionUser.current;
-      sessionUser.current = { id: freshId, name: "IT T3b", email: `${freshId}@example.invalid` };
+      sessionUser.current = {
+        id: freshId,
+        name: "IT T3b",
+        email: `${freshId}@example.invalid`,
+        emailVerified: true,
+      };
+      vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", `${freshId}@example.invalid`);
       try {
         const [planRow] = await h!.db.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, planId));
         const register = async () => {
@@ -623,6 +643,7 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
         expect(subs.map((s) => s.status)).toEqual(["trialing"]);
       } finally {
         sessionUser.current = previous;
+        vi.unstubAllEnvs();
         await h!.db.delete(salons).where(eq(salons.ownerId, freshId));
         await h!.db.delete(user).where(eq(user.id, freshId));
       }
