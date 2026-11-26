@@ -865,8 +865,14 @@ tworzone — wracają z R3-C.
 
 ## 9. Dostęp administracyjny do bazy
 
-Wyłącznie przez `cloud-sql-proxy` z kontem sesji głównej (bez autoryzowanych
-sieci, bez publicznego dostępu hasłem):
+Wyłącznie przez `cloud-sql-proxy` z poświadczeniami gcloud osoby uruchamiającej
+dany blok (bez autoryzowanych sieci, bez publicznego dostępu hasłem).
+
+**Uruchamia wyłącznie właściciel.** Blok niżej łączy się jako `postgres`
+hasłem z `postgres-admin-password`. Sesja główna i agenci go nie uruchamiają;
+do kontroli 7b służy wyłącznie drugi blok tej sekcji (login aplikacji, sesja
+tylko do odczytu). Blok zostaje w runbooku, bo to awaryjna droga właściciela
+do bazy.
 
 ```bash
 set +x
@@ -923,11 +929,155 @@ PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secre
 **zsh:** w zapisie `$P:europe-central2` zsh czyta `:e` jako modyfikator
 (rozszerzenie pliku) i psuje nazwę instancji. Zawsze `${P}:europe-central2`.
 
+## 9a. Przedłużenie okresu próbnego salonu pilotażowego
+
+**Kiedy.** Przy przyjęciu salonu pilotażowego, gdy data końca pilotażu jest
+już ustalona e-mailem (regulamin pkt 12.2). Domyślnie wynosi +90 dni od
+przyjęcia. Zmianę robimy od razu przy przyjęciu, a nie 14. dnia, żeby salon
+nigdy nie zobaczył blokady. Każde kolejne przedłużenie idzie tą samą drogą.
+
+**Kto.** To zmiana danych produkcyjnych. Decyzję o wykonaniu podejmuje CTO.
+Każdy dostęp do bazy w tej procedurze wykonuje **wyłącznie właściciel**:
+blok połączenia z zapisem oraz kroki 2–4 (odczyt przed zmianą, zmiana,
+odczyt po zmianie) w jednej sesji `psql` i w jednej transakcji. Sesja główna
+robi tylko trzy rzeczy: kopię na żądanie (krok 1, operacja gcloud bez
+połączenia z bazą), przygotowanie parametrów dla właściciela (krok 1) oraz
+wpis w dzienniku audytu (krok 5). W ramach tej procedury sesja główna nie
+łączy się z bazą. Agenci nie wykonują żadnego z kroków.
+
+**Połączenie z zapisem — uruchamia wyłącznie właściciel.** Kontrola 7b
+(drugi blok sekcji 9) działa w sesji tylko do odczytu, więc do zapisu się nie
+nadaje. Właściciel używa tego samego bloku z loginem aplikacji, ale **bez**
+`default_transaction_read_only`, tylko na czas kroków 2–4. Sesja główna
+i agenci tego bloku nie uruchamiają. `P` ustaw jak w drugim bloku sekcji 9; brak `P`
+= stop, nie kontynuować. Hasło administratora (`postgres`) nie jest tu
+potrzebne.
+
+```bash
+set +x
+: "${P:?}"
+cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
+  PGOPTIONS='-c lock_timeout=5s -c idle_in_transaction_session_timeout=5min -c statement_timeout=30s' \
+  psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+kill %1
+```
+
+Limity czasu idą w środowisku procesu `psql`, tak jak hasło. Pierwsze zapytanie
+w sesji: `SHOW idle_in_transaction_session_timeout;` → `5min`; inna wartość =
+wyjść. Kroki 2–4 wykonuj jednym ciągiem, bez przerw; nie zostawiaj otwartej
+transakcji. Jeśli `psql` wypisze komunikat o utracie połączenia albo
+o przekroczeniu limitu bezczynności w transakcji, nie wpisuj kolejnych
+poleceń. Wyjdź z `psql`, zamknij proxy i zacznij od kroku 2 w nowej sesji.
+Zmiany nie ma, więc kopia z kroku 1 zostaje ważna. Jeśli `COMMIT;` wypisze
+`ROLLBACK`, zmiany też nie ma.
+
+**Data w UTC.** Kolumna `salon_subscriptions.trial_ends_at` nie ma strefy
+czasowej, a aplikacja zapisuje i porównuje w niej czas UTC. Datę podajemy
+więc jawnie w UTC. Koniec dnia D w Polsce to `D 22:59:59` w czasie zimowym
+albo `D 21:59:59` w czasie letnim. Salon ma pełny dostęp do tej chwili,
+wyłącznie.
+
+**Kroki.**
+
+1. **Kopia na żądanie przed zmianą i parametry** (sesja główna; zasada
+   30 dni z 3.6a obowiązuje). Brak `P` = stop, nie kontynuować:
+
+   ```bash
+   set +x
+   : "${P:?}"
+   gcloud --project="${P}" sql backups create --instance=myhelper-pg --description=pre-trial-extension
+   gcloud --project="${P}" sql backups list --instance=myhelper-pg --sort-by='~windowStartTime' --limit=1 --format='value(id,type,status,windowStartTime)'
+   ```
+
+   Oczekiwane: `ON_DEMAND`, `SUCCESSFUL`. Inny wynik = stop, bez zmiany.
+   Id kopii trafia do wpisu z kroku 5. Potem sesja główna przekazuje
+   właścicielowi parametry: id salonu i nową datę w UTC (patrz „Data w UTC”).
+
+2. **Otwarcie transakcji i odczyt przed zmianą** (właściciel, w sesji `psql`
+   z bloku połączenia z zapisem wyżej):
+
+   ```sql
+   BEGIN;
+   SELECT id, status, trial_ends_at, stripe_subscription_id IS NULL AS bez_stripe
+   FROM salon_subscriptions
+   WHERE salon_id = '<id salonu>' AND status IN ('trialing', 'active')
+   FOR UPDATE;
+   ```
+
+   Oczekiwane: dokładnie jeden wiersz, `status = trialing`, `bez_stripe = t`.
+   Zapisz starą wartość `trial_ends_at`. Inny wynik = `ROLLBACK;`, stop
+   i pytanie do CTO. Przy `active` salon już płaci i nie ma czego przedłużać.
+   Przy wierszu z subskrypcją Stripe (`bez_stripe = f`) synchronizacja ze
+   Stripe nadpisałaby datę, więc też `ROLLBACK;` i stop. `FOR UPDATE`
+   blokuje wiersz do końca transakcji, więc między sprawdzeniem warunków
+   a zmianą nikt go nie zmieni.
+
+3. **Zmiana** (właściciel, ta sama sesja i ta sama transakcja):
+
+   ```sql
+   UPDATE salon_subscriptions SET trial_ends_at = '<data UTC, np. 2027-03-01 22:59:59>'
+   WHERE salon_id = '<id salonu>' AND status = 'trialing';
+   ```
+
+   `psql` ma wypisać `UPDATE 1`. Każdy inny wynik = `ROLLBACK;` i stop.
+   Jeśli wyszło `UPDATE 0`, choć odczyt z kroku 2 pokazał ten wiersz,
+   właściciel robi `ROLLBACK;` i sprawa wraca do CTO, bo zapis zablokowało
+   coś innego niż warunek, np. polityka RLS. W migracjach RLS jest włączone
+   bez `FORCE`, więc właściciel tabel (login aplikacji) powinien ją omijać.
+
+4. **Odczyt po zmianie i zatwierdzenie** (właściciel, ta sama sesja i ta
+   sama transakcja):
+
+   ```sql
+   SELECT status, trial_ends_at FROM salon_subscriptions
+   WHERE salon_id = '<id salonu>' AND status = 'trialing';
+   ```
+
+   Oczekiwane: jeden wiersz z nową datą. Wtedy `COMMIT;`. Każda rozbieżność
+   = `ROLLBACK;` i stop. Po `COMMIT;` wyjście z `psql`, a proxy zamyka
+   `kill %1`. Właściciel przekazuje sesji głównej tylko starą datę, nową datę
+   i wynik („1 wiersz”, `COMMIT`). Pełny dostęp przy `trialing` z przyszłą
+   datą potwierdza test „przedłużenie: przesunięcie trialEndsAt
+   z przeszłości na przyszłość…” w `__tests__/lib/subscription-trial-end.test.ts`.
+
+5. **Wpis w dzienniku audytu i powiązanie z salonem** (sesja główna). Wpis
+   jak przy kopiach na żądanie (komentarz w #121) zawiera numer porządkowy
+   („przedłużenie pilotażu nr N”), starą i nową wartość `trial_ends_at`,
+   wynik „1 wiersz”, id kopii z kroku 1 oraz informację „decyzja CTO, zapis
+   wykonał właściciel”. Wpis nie zawiera id salonu ani jego skrótu, nazwy
+   salonu, adresów e-mail ani danych osobowych. Powiązanie numeru
+   porządkowego z salonem jest prywatne i trzymamy je poza repozytorium:
+   sesja główna zakłada i prowadzi zgłoszenie w prywatnym systemie zadań
+   z dostępem tylko dla zespołu.
+
+**Cotygodniowy przegląd** (sesja główna, przy cotygodniowym odczycie
+kosztów). Sesja główna czyta wpisy z kroku 5 w dzienniku audytu, bez
+łączenia się z bazą, i wypisuje przedłużenia, którym do końca zostało mniej
+niż 7 dni albo termin już minął. Każdy wpis
+zawiera nową datę końca pilotażu, więc najnowszy wpis dla danego numeru
+porządkowego wyznacza obowiązujący termin. Każdy salon pilotażowy z tej
+listy dostaje pytanie o przedłużenie. Po zgodzie salonu przedłużenie idzie
+krokami 1–5. Gdy potrzebne jest zapytanie do bazy (np. przy podejrzeniu
+rozbieżności z dziennikiem), uruchamia je wyłącznie właściciel:
+
+```sql
+SELECT salon_id, trial_ends_at FROM salon_subscriptions
+WHERE status = 'trialing' AND trial_ends_at < (now() AT TIME ZONE 'UTC') + interval '7 days'
+ORDER BY trial_ends_at;
+```
+
+**Próg na przycisk w kodzie.** Ręczna procedura obowiązuje, dopóki nie
+nastąpi pierwsze z dwóch zdarzeń: salonów pilotażowych jest więcej niż 3 albo
+startuje płatny plan. Wtedy przedłużenie przechodzi do funkcji w panelu
+(pełny proces z CTO, bo dotyczy subskrypcji).
+
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
 Obowiązujący wariant (decyzja COO z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.
 Na produkcji były tylko konta testowe. Neona nie kasujemy, nie kopiujemy i nie zmieniamy do 0.13. Bramka bazy (j'): plan, wiersz 0.5 (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, etap 0).
 Z `docs/runbook-przelaczenie-bazy.md` obowiązują tylko kontrola ról (1.0 pkt 2) i próba odtworzenia; kopia w przód i wstecz (sekcje 2–3) nie obowiązuje, odchudzenie w osobnym PR.
+Kontrola ról 1.0 pkt 2 idzie przez `psql_csql_admin` (hasło administratora), więc uruchamia ją właściciel, dopóki nie powstanie osobna rola tylko do odczytu.
 
 ## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)
 
