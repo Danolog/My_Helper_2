@@ -76,12 +76,30 @@ function unverifiedOwnerAllowed(env: BetaEnv): boolean {
  * hostingiem — serwer E2E w CI i lokalny dev bez poczty.
  */
 export function canCreateSalon(
-  user: { email?: string | null | undefined; emailVerified?: boolean | null | undefined },
+  user: BetaOwner,
   emailConfigured: boolean,
   env: BetaEnv = process.env
 ): boolean {
-  if (!isBetaOwnerAllowed(user.email, env.BETA_ALLOWED_OWNER_EMAILS)) return false;
-  if (unverifiedOwnerAllowed(env)) return true;
-  if (!emailConfigured) return false;
-  return user.emailVerified === true;
+  return salonGateDenial(user, emailConfigured, env) === null;
+}
+
+type BetaOwner = { email?: string | null | undefined; emailVerified?: boolean | null | undefined };
+
+/**
+ * Powód odmowy bramki do logu (bez danych osobowych): `list` — adresu nie ma na
+ * liście (albo lista pusta), `mail` — serwer bez poczty, `verified` — e-mail
+ * niepotwierdzony. `null` = bramka otwarta. Kolejność i warunki jak w
+ * `canCreateSalon`. Odpowiedź HTTP jest dla wszystkich powodów ta sama.
+ */
+export type SalonGateDenial = "list" | "mail" | "verified";
+
+export function salonGateDenial(
+  user: BetaOwner,
+  emailConfigured: boolean,
+  env: BetaEnv = process.env
+): SalonGateDenial | null {
+  if (!isBetaOwnerAllowed(user.email, env.BETA_ALLOWED_OWNER_EMAILS)) return "list";
+  if (unverifiedOwnerAllowed(env)) return null;
+  if (!emailConfigured) return "mail";
+  return user.emailVerified === true ? null : "verified";
 }

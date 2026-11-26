@@ -385,6 +385,25 @@ describe("POST /api/register-subscription — beta na zaproszenie", () => {
     expect(logged).not.toContain("tajny-wpis");
     expect(logged).not.toContain(OTHER.email);
   });
+
+  it.each([
+    ["adres spoza listy", "list", { ...USER_A, email: "xawery@example.com" }, true],
+    ["serwer bez poczty", "mail", USER_A, false],
+    ["e-mail niepotwierdzony", "verified", { ...USER_A, emailVerified: false }, true],
+  ])("log odmowy: %s → reason %s, tylko userId i powód", async (_n, reason, account, mail) => {
+    emailState.configured = mail;
+    mockRequireAuth.mockResolvedValue({ session: { user: account }, user: account });
+    const { logger } = await import("@/lib/logger");
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(vi.mocked(logger.info)).toHaveBeenCalledWith(expect.stringContaining("Beta gate denied"), {
+      userId: account.id,
+      reason,
+    });
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain(account.email);
+  });
 });
 
 describe("POST /api/register-subscription — konto tylko z sesji", () => {

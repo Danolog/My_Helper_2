@@ -4,6 +4,7 @@ import {
   betaAllowedOwnerEmails,
   canCreateSalon,
   isBetaOwnerAllowed,
+  salonGateDenial,
 } from "@/lib/beta-access";
 import { SUPPORT_CONTACT } from "@/lib/support-contact";
 
@@ -111,6 +112,9 @@ describe("canCreateSalon — lista, poczta na serwerze i potwierdzony e-mail", (
   ])("przełącznik na hostingu %s ignorowany → false (bez poczty i z pocztą, niepotwierdzony)", (_n, hosting) => {
     expect(canCreateSalon(UNVERIFIED, NO_MAIL, { ...SWITCH, ...hosting })).toBe(false);
     expect(canCreateSalon(UNVERIFIED, MAIL, { ...SWITCH, ...hosting })).toBe(false);
+    // Potwierdzony zaproszony: przełącznik nie psuje ścieżki z pocztą, nie otwiera jej bez poczty.
+    expect(canCreateSalon(VERIFIED, MAIL, { ...SWITCH, ...hosting })).toBe(true);
+    expect(canCreateSalon(VERIFIED, NO_MAIL, { ...SWITCH, ...hosting })).toBe(false);
   });
 
   it("nie zależy od NODE_ENV (development bez przełącznika i bez poczty → false)", () => {
@@ -119,6 +123,25 @@ describe("canCreateSalon — lista, poczta na serwerze i potwierdzony e-mail", (
 
   it("przełącznik nie omija listy", () => {
     expect(canCreateSalon({ email: "intruz@example.com", emailVerified: false }, NO_MAIL, SWITCH)).toBe(false);
+  });
+});
+
+describe("salonGateDenial — powód odmowy do logu", () => {
+  const LIST = { BETA_ALLOWED_OWNER_EMAILS: "owner-a@example.com" };
+  const VERIFIED = { email: "owner-a@example.com", emailVerified: true };
+
+  it.each([
+    ["otwarta", VERIFIED, true, LIST, null],
+    ["spoza listy", { email: "intruz@example.com", emailVerified: true }, true, LIST, "list"],
+    ["pusta lista (przed pocztą)", VERIFIED, false, {}, "list"],
+    ["bez poczty", VERIFIED, false, LIST, "mail"],
+    ["bez poczty i niepotwierdzony (najpierw poczta)", { ...VERIFIED, emailVerified: false }, false, LIST, "mail"],
+    ["niepotwierdzony", { ...VERIFIED, emailVerified: false }, true, LIST, "verified"],
+    ["emailVerified null", { ...VERIFIED, emailVerified: null }, true, LIST, "verified"],
+    ["przełącznik poza hostingiem", { ...VERIFIED, emailVerified: false }, false, { ...LIST, BETA_ALLOW_UNVERIFIED_OWNER: "1" }, null],
+  ])("%s → %j", (_n, user, mail, env, expected) => {
+    expect(salonGateDenial(user, mail, env)).toBe(expected);
+    expect(canCreateSalon(user, mail, env)).toBe(expected === null);
   });
 });
 

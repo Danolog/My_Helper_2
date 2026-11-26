@@ -10,8 +10,9 @@
  * - CHECK-i (23514) także dla roli migracji;
  * - wpisy przeżywają usunięcie salonu (bez FK — dowód akceptacji zostaje).
  *
- * Atrapami są sesja (auth-middleware), logger, lista PLANS_ON_SALE (slug planu testowego)
- * i stan publikacji dokumentów (flaga + wersje); trasa i baza są prawdziwe.
+ * Atrapami są sesja (auth-middleware), logger, lista PLANS_ON_SALE (slug planu testowego),
+ * stan publikacji dokumentów (flaga + wersje) i `isEmailConfigured`; trasa, bramka bety
+ * i baza są prawdziwe (lista bety ustawiana w teście na adres konta).
  * Dane: konta `it-t3-la-…`, plan `it-t3-la-…`; salony i wpisy sprzątane w `afterAll`.
  *
  *   pnpm test:pg (adres bazy jak w vitest.pg.config.ts)
@@ -42,11 +43,19 @@ vi.mock("@/lib/plan-catalog", async (importOriginal) => ({
 }));
 
 const { sessionUser } = vi.hoisted(() => ({
-  sessionUser: { current: { id: "", name: "IT", email: "it@example.invalid" } },
+  sessionUser: { current: { id: "", name: "IT", email: "it@example.invalid", emailVerified: true } },
 }));
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: async () => ({ user: sessionUser.current }),
   isAuthError: () => false,
+}));
+
+// Bramka bety (@/lib/beta-access) zostaje prawdziwa: konto testu jest na liście
+// (`register` ustawia BETA_ALLOWED_OWNER_EMAILS na jego adres), ma potwierdzony
+// e-mail, a serwer „ma pocztę”. Test sprawdza akceptację dokumentów, nie bramkę.
+vi.mock("@/lib/email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/email")>()),
+  isEmailConfigured: () => true,
 }));
 
 // Dokumenty opublikowane z ustalonymi wersjami (w module flaga jest dziś wyłączona).
@@ -81,11 +90,15 @@ async function newAccount(label: string) {
   const id = `${PREFIX}-${label}`;
   await h!.db.insert(user).values({ id, name: "IT T3 la", email: `${id}@example.invalid` });
   createdUsers.push(id);
-  return { id, name: "IT T3 la", email: `${id}@example.invalid` };
+  return { id, name: "IT T3 la", email: `${id}@example.invalid`, emailVerified: true };
 }
 
-async function register(account: { id: string; name: string; email: string }, body: Record<string, unknown>) {
+async function register(
+  account: { id: string; name: string; email: string; emailVerified: boolean },
+  body: Record<string, unknown>
+) {
   sessionUser.current = account;
+  vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", account.email);
   const res = await registerSubscription(
     new Request("http://localhost/api/register-subscription", {
       method: "POST",
@@ -155,6 +168,7 @@ suite("legal_acceptances — prawdziwy Postgres (migracja 0015)", () => {
   });
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     if (!h) return;
     try {
       // Wpisy bez FK nie znikają z salonem: usuwane wprost rolą migracji (omija REVOKE roli aplikacji).

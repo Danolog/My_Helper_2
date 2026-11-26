@@ -183,8 +183,6 @@ jobs:
           AI_MONTHLY_BUDGET_USD: ${{ vars.AI_MONTHLY_BUDGET_USD }}
           AI_MONTHLY_IMAGE_LIMIT: ${{ vars.AI_MONTHLY_IMAGE_LIMIT }}
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
-          # Beta na zaproszenie; brak zmiennej repo = nikt nie założy salonu.
-          BETA_ALLOWED_OWNER_EMAILS: ${{ vars.BETA_ALLOWED_OWNER_EMAILS }}
           TRUSTED_PROXIES: ${{ vars.TRUSTED_PROXIES }}
           AUTH_RATE_LIMIT_STORE: ${{ vars.AUTH_RATE_LIMIT_STORE }}
         run: |
