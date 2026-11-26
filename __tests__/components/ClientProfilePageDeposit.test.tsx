@@ -141,14 +141,37 @@ describe("ClientProfilePage — pola zadatku przy zapisie", () => {
     });
   });
 
-  it("409 DEPOSITS_DISABLED: komunikat z API zamiast ogólnego błędu", async () => {
+  it("409 DEPOSITS_DISABLED: komunikat mówi wprost, że trzeba odznaczyć zadatek", async () => {
     flags.deposit = true;
     mutationFetch.mockResolvedValue(
       response(409, { success: false, code: "DEPOSITS_DISABLED", error: DEPOSITS_DISABLED_MESSAGE })
     );
     await renderAndSave();
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DEPOSITS_DISABLED_MESSAGE));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    const message = String(toast.error.mock.calls[0]![0]);
+    expect(message).toMatch(/zadatki są obecnie wyłączone/i);
+    expect(message).toMatch(/odznacz zadatek/i);
+    expect(message).toContain("„Wymagaj zadatku” na „Nie”");
+    expect(toast.error).not.toHaveBeenCalledWith(DEPOSITS_DISABLED_MESSAGE);
     expect(toast.error).not.toHaveBeenCalledWith("Nie udalo sie zapisac danych klienta");
+  });
+
+  it("409 DEPOSITS_DISABLED bez tekstu w odpowiedzi: ten sam komunikat o odznaczeniu", async () => {
+    flags.deposit = true;
+    mutationFetch.mockResolvedValue(response(409, { success: false, code: "DEPOSITS_DISABLED" }));
+    await renderAndSave();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(String(toast.error.mock.calls[0]![0])).toMatch(/odznacz zadatek/i);
+  });
+
+  it("inne 409: komunikat z API, bez polecenia odznaczenia zadatku", async () => {
+    flags.deposit = true;
+    mutationFetch.mockResolvedValue(response(409, { success: false, code: "CONFLICT", error: "Konflikt danych" }));
+    await renderAndSave();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Konflikt danych"));
+    expect(String(toast.error.mock.calls[0]![0])).not.toMatch(/odznacz zadatek/i);
   });
 });

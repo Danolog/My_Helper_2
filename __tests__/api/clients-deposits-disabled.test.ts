@@ -4,7 +4,8 @@
  * - `PUT /api/clients/[id]` z `requireDeposit: true` → 409, bez UPDATE;
  * - `requireDeposit: false` i brak pola przechodzą (zadatek da się wyłączyć).
  * Kolejność bramek: sesja (401), salon (404), rola i salon z body (403),
- * format id i walidacja (400) — przed bramką zadatku.
+ * format id i walidacja (400) — przed bramką zadatku. Po niej: zgoda na dane
+ * o zdrowiu (400) i brak klienta (404) — przy `requireDeposit: true` wygrywa 409.
  *
  * Atrapy jak w clients.test.ts: dane salonu przez forSalon (db.transaction → tx),
  * surowy `db` poza transakcją rzuca.
@@ -314,6 +315,71 @@ describe("Zadatek wyłączony — PUT /api/clients/[id]", () => {
 
     expect(status).toBe(404);
     expect(h.update).not.toHaveBeenCalled();
+  });
+
+  // Kolejność kodów: bramka zadatku stoi przed odczytem klienta i przed bramką
+  // zgody na dane o zdrowiu. Przy requireDeposit: true brak klienta i klient
+  // innego salonu dają 409, nie 404; brak zgody daje 409, nie 400.
+  // 409 jest celowo taki sam dla klienta własnego i obcego: odpowiedź nie
+  // zdradza, czy klient o tym id istnieje w innym salonie.
+  it.each([
+    ["nieistniejący klient", "99999999-9999-4999-8999-999999999999"],
+    ["klient innego salonu", TEST_IDS.CLIENT_UUID],
+  ])("requireDeposit: true, %s → 409 DEPOSITS_DISABLED (nie 404), bez UPDATE", async (_label, id) => {
+    // Gdyby trasa doszła do zapisu, UPDATE w obrębie salonu nie znalazłby wiersza (404).
+    h.update.mockReturnValue(chainMock([]));
+
+    const { status, body } = await parseResponse(await put({ requireDeposit: true }, id));
+
+    expect(status).toBe(409);
+    expect(body).toEqual(DEPOSITS_DISABLED_BODY);
+    expect(h.update).not.toHaveBeenCalled();
+    expect(h.select).not.toHaveBeenCalled();
+  });
+
+  it("requireDeposit: true — ta sama odpowiedź 409 dla klienta własnego i obcego", async () => {
+    h.update.mockReturnValue(chainMock([makeClient()]));
+    const own = await parseResponse(await put({ requireDeposit: true }));
+
+    h.update.mockReturnValue(chainMock([]));
+    const foreign = await parseResponse(await put({ requireDeposit: true }));
+
+    expect(own.status).toBe(409);
+    expect(foreign.status).toBe(409);
+    expect(foreign.body).toEqual(own.body);
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("kontrola: alergie z cofnięciem zgody, bez requireDeposit → 400 zgody", async () => {
+    const { status, body } = await parseResponse(await put({ allergies: "orzechy", healthDataConsent: false }));
+
+    expect(status).toBe(400);
+    expect((body as { code?: string }).code).not.toBe("DEPOSITS_DISABLED");
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("requireDeposit: true, alergie z cofnięciem zgody → 409 DEPOSITS_DISABLED (nie 400), bez UPDATE", async () => {
+    const { status, body } = await parseResponse(
+      await put({ allergies: "orzechy", healthDataConsent: false, requireDeposit: true })
+    );
+
+    expect(status).toBe(409);
+    expect(body).toEqual(DEPOSITS_DISABLED_BODY);
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("requireDeposit: true, alergie bez zgody zapisanej w karcie → 409 DEPOSITS_DISABLED (nie 400), bez UPDATE", async () => {
+    // Bez bramki zadatku: UPDATE z warunkiem zgody nie trafia (0 wierszy),
+    // odczyt znajduje klienta → 400 zgody.
+    h.update.mockReturnValue(chainMock([]));
+    h.select.mockReturnValue(chainMock([{ id: TEST_IDS.CLIENT_UUID }]));
+
+    const { status, body } = await parseResponse(await put({ allergies: "orzechy", requireDeposit: true }));
+
+    expect(status).toBe(409);
+    expect(body).toEqual(DEPOSITS_DISABLED_BODY);
+    expect(h.update).not.toHaveBeenCalled();
+    expect(h.select).not.toHaveBeenCalled();
   });
 
   it("requireDeposit: false dla cudzego/nieistniejącego klienta → 404", async () => {
