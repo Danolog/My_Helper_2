@@ -335,7 +335,7 @@ export function DashboardMobileHeader() {
             <SheetTitle className="text-sidebar-foreground">Menu</SheetTitle>
           </SheetHeader>
           <Separator className="bg-sidebar-border" />
-          <div className="p-4 overflow-y-auto h-[calc(100%-65px)]">
+          <div className="p-4 overflow-y-auto flex-1 min-h-0">
             <SidebarNav pathname={pathname} onClick={() => setOpen(false)} />
           </div>
         </SheetContent>
