@@ -61,20 +61,27 @@ function unverifiedOwnerAllowed(env: BetaEnv): boolean {
 }
 
 /**
- * Jedyna bramka zakładania salonu w becie. Oba warunki naraz:
+ * Jedyna bramka zakładania salonu w becie. Wszystkie warunki naraz:
  *  1. e-mail konta z sesji jest na liście BETA_ALLOWED_OWNER_EMAILS,
- *  2. e-mail jest potwierdzony (`emailVerified === true`).
+ *  2. na serwerze działa poczta (`emailConfigured` = `isEmailConfigured()`
+ *     z @/lib/email; przekazywane z trasy, bo ten moduł czyta też UI),
+ *  3. e-mail jest potwierdzony (`emailVerified === true`).
  *
- * Warunek 2 chroni zaproszenie: bez niego, gdy potwierdzanie e-maila jest
- * wyłączone (brak dostawcy poczty), ktoś mógłby zarejestrować się na cudzy
- * adres z listy przed zaproszoną osobą. Brak poczty na serwerze = nikt nie
- * potwierdzi adresu = nikt nie założy salonu (domyślnie zamknięte).
+ * Warunki 2 i 3 chronią zaproszenie: bez poczty Better Auth nie wymaga
+ * potwierdzenia e-maila i ktoś mógłby zarejestrować się na cudzy adres z listy
+ * przed zaproszoną osobą. Bramka nie polega na tym, że ktoś pamiętał o
+ * RESEND_API_KEY: brak poczty = odmowa (domyślnie zamknięte).
+ *
+ * Jedyny wyjątek od 2 i 3 (nigdy od 1): BETA_ALLOW_UNVERIFIED_OWNER=1 poza
+ * hostingiem — serwer E2E w CI i lokalny dev bez poczty.
  */
 export function canCreateSalon(
   user: { email?: string | null | undefined; emailVerified?: boolean | null | undefined },
+  emailConfigured: boolean,
   env: BetaEnv = process.env
 ): boolean {
   if (!isBetaOwnerAllowed(user.email, env.BETA_ALLOWED_OWNER_EMAILS)) return false;
-  if (user.emailVerified === true) return true;
-  return unverifiedOwnerAllowed(env);
+  if (unverifiedOwnerAllowed(env)) return true;
+  if (!emailConfigured) return false;
+  return user.emailVerified === true;
 }

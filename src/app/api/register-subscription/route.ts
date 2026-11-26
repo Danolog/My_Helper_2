@@ -6,6 +6,7 @@ import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE, canCreateSalon } from 
 import { TRIAL_DAYS } from "@/lib/constants";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
 import { db } from "@/lib/db";
+import { isEmailConfigured } from "@/lib/email";
 import {
   checkLegalAcceptance,
   recordLegalAcceptances,
@@ -64,8 +65,9 @@ function alreadySubscribed() {
  *
  * Beta na zaproszenie (@/lib/beta-access, `canCreateSalon`): tylko konto, którego
  * e-mail z sesji jest na liście BETA_ALLOWED_OWNER_EMAILS i jest potwierdzony
- * (`emailVerified`); inaczej 403 BETA_INVITE_ONLY bez zapytań do bazy. Pusta
- * lista = nikt; brak poczty na serwerze = nikt. To jedyna produkcyjna ścieżka
+ * (`emailVerified`), a serwer ma pocztę (`isEmailConfigured()`); inaczej 403
+ * BETA_INVITE_ONLY bez zapytań do bazy. Pusta lista = nikt; brak poczty = nikt
+ * (wyjątek: BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem, CI i dev). To jedyna produkcyjna ścieżka
  * zakładania salonu (poza seedem).
  *
  * Akceptacja regulaminu i umowy powierzenia (@/lib/legal/acceptance): po
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest) {
     // Beta na zaproszenie: e-mail konta z sesji musi być na liście i potwierdzony,
     // zanim trasa przeczyta treść żądania i dotknie bazy. Ta sama odpowiedź dla
     // obu powodów odmowy; lista nie trafia do logu.
-    if (!canCreateSalon(authResult.user)) {
+    if (!canCreateSalon(authResult.user, isEmailConfigured())) {
       logger.info("[Register Subscription] Owner not on beta allowlist — 403", {
         userId: authResult.user.id,
       });

@@ -32,7 +32,7 @@
     },
     "BETA_ALLOW_UNVERIFIED_OWNER": {
       "class": "ci-only",
-      "note": "Tylko serwer E2E w CI i lokalny dev bez poczty: konto z listy bety bez potwierdzonego e-maila może założyć salon. Nigdy na hostingu (bramka lib/hosting ignoruje ją na Vercelu i Cloud Run)."
+      "note": "Tylko serwer E2E w CI i lokalny dev bez poczty: konto z listy bety może założyć salon bez poczty na serwerze i bez potwierdzonego e-maila. Nigdy na hostingu (bramka lib/hosting ignoruje ją na Vercelu i Cloud Run)."
     },
     "BETTER_AUTH_SECRET": {
       "class": "secret",

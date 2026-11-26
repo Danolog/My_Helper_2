@@ -191,6 +191,13 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+// Poczta na serwerze (isEmailConfigured): domyślnie skonfigurowana; testy bramki
+// bety sprawdzają też serwer bez poczty.
+const emailState = vi.hoisted(() => ({ configured: true }));
+vi.mock("@/lib/email", () => ({
+  isEmailConfigured: () => emailState.configured,
+}));
+
 import { POST } from "@/app/api/register-subscription/route";
 
 function post(body: unknown) {
@@ -210,8 +217,11 @@ beforeEach(() => {
   legalState.terms = null;
   legalState.dpa = null;
   mockRequireAuth.mockResolvedValue({ session: { user: USER_A }, user: USER_A });
-  // Beta na zaproszenie: konto A jest na liście (osobne testy bramki niżej).
+  // Beta na zaproszenie: konto A jest na liście, poczta skonfigurowana, bez
+  // przełącznika testowego (osobne testy bramki niżej).
   vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", USER_A.email);
+  vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", undefined);
+  emailState.configured = true;
 });
 
 afterEach(() => {
@@ -278,7 +288,25 @@ describe("POST /api/register-subscription — beta na zaproszenie", () => {
     expect(mockInsert).not.toHaveBeenCalled();
   });
 
-  it("niepotwierdzony e-mail z listy + przełącznik BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem (E2E/dev) → 200", async () => {
+  it.each([
+    ["niepotwierdzony", false],
+    ["potwierdzony", true],
+  ])("adres na liście, poczta nieskonfigurowana, brak przełącznika, %s → 403, bez zapytań", async (_n, verified) => {
+    emailState.configured = false;
+    const user = { ...USER_A, emailVerified: verified };
+    mockRequireAuth.mockResolvedValue({ session: { user }, user });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("niepotwierdzony e-mail z listy + przełącznik BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem, bez poczty (E2E/dev) → 200", async () => {
+    emailState.configured = false;
     vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
     vi.stubEnv("VERCEL", undefined);
     vi.stubEnv("K_SERVICE", undefined);
@@ -294,6 +322,7 @@ describe("POST /api/register-subscription — beta na zaproszenie", () => {
     ["Cloud Run", "K_SERVICE", "myhelper"],
     ["Vercel", "VERCEL", "1"],
   ])("przełącznik na hostingu (%s) jest ignorowany → 403", async (_n, key, value) => {
+    emailState.configured = false;
     vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
     vi.stubEnv(key, value);
     const unverified = { ...USER_A, emailVerified: false };
