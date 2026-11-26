@@ -24,7 +24,7 @@ Usługę MyHelper świadczy AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 N
 ## 3. Co to jest MyHelper
 
 MyHelper to aplikacja internetowa:
-- **dla salonów:** kalendarz wizyt, kartoteka klientów, usługi, pracownicy, rezerwacja online, SMS z potwierdzeniem rezerwacji, zadatki BLIK na telefon salonu, opinie, galeria, podstawowe raporty. Salon może też włączyć w ustawieniach moduły dodatkowe: magazyn, rabaty i kody rabatowe, listę oczekujących i raporty zaawansowane;
+- **dla salonów:** kalendarz wizyt, kartoteka klientów, usługi, pracownicy, rezerwacja online, SMS z potwierdzeniem rezerwacji, zadatki BLIK na telefon salonu (obecnie niedostępne, pkt 8.2), opinie, galeria, podstawowe raporty. Salon może też włączyć w ustawieniach moduły dodatkowe: magazyn, rabaty i kody rabatowe, listę oczekujących i raporty zaawansowane;
 - **dla klientów salonów:** wyszukanie salonu, rezerwacja wizyty (z kontem albo jako gość), podgląd i odwołanie wizyt w portalu klienta, ulubione salony, lista oczekujących, opinie.
 
 Zakres usługi to funkcje opisane powyżej.
@@ -70,6 +70,8 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 5. Zapis na listę oczekujących zakłada Twoją kartotekę w tym salonie (Polityka prywatności, pkt 2). Powiadomienia SMS z listy oczekujących nie wychodzą między 21:00 a 8:00.
 
 ### 8.2. Zadatek BLIK na telefon salonu
+Zadatki są obecnie niedostępne: Aplikacja nie wymaga ani nie pobiera zadatku przy żadnej rezerwacji, a postanowienia tego punktu zaczną obowiązywać dopiero po włączeniu zadatków, o którym poinformujemy zgodnie z pkt 19.
+
 1. Salon może wymagać zadatku za wizytę. Kwotę wylicza Aplikacja według ustawień salonu.
 2. Zasady zadatku i odwołania wizyty ustala salon i powinien Ci je przekazać przed rezerwacją. Jeśli salon ich nie określił, zadatek działa według art. 394 Kodeksu cywilnego. Gdy nie przyjdziesz na wizytę z przyczyn, za które odpowiadasz, salon może zatrzymać zadatek. Gdy wizyta nie dojdzie do skutku z przyczyn, za które odpowiada salon, możesz żądać zwrotu dwukrotności zadatku. Gdy umowa zostanie rozwiązana albo wizyta nie dojdzie do skutku z przyczyn, za które nikt nie odpowiada lub odpowiadają obie strony, zadatek wraca do Ciebie.
 3. Zadatek wpłacasz **przelewem BLIK na numer telefonu podany przez salon**. Numer, kwotę i tytuł przelewu zobaczysz na ekranie po rezerwacji i w SMS-ie.
