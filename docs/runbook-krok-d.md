@@ -531,7 +531,7 @@ odmawia startu z nazwą brakującej zmiennej.
 wersji. Od K-1: `required` w manifeście (wymagane: `postgres-url`,
 `better-auth-secret`); `run-deploy.sh` mapuje wyłącznie sekrety, których
 najnowsza wersja ma stan `ENABLED` (od K-1b odczyt `secrets versions list
-NAZWA --sort-by=~createTime --limit=1`: pusty wynik = brak wersji, bez
+NAZWA --sort-by='~createTime' --limit=1`: pusty wynik = brak wersji, bez
 rozpoznawania błędu po tekście); sekret wymagany bez wersji przerywa
 wdrożenie **przed** `gcloud run deploy` z nazwą sekretu; każdy błąd odczytu
 (np. uprawnienia, brak samego kontenera sekretu) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
@@ -648,6 +648,12 @@ SELECT rolname, rolcanlogin, rolbypassrls, rolsuper,
 
 Oczekiwane: `myhelper_app | f | f | f | f`, `myhelper_svc | t | f | f | f`.
 
+Ta kontrola już przeszła i zostaje jako historia. Gdyby trzeba ją było
+powtórzyć (np. nowa instancja), `pg_roles` i `pg_has_role` są czytelne dla
+każdej roli, więc po zielonym D z sekcji 9b idzie blokiem kontroli 7b
+z sekcji 9 (rola `myhelper_7b_ro`). Do zielonego D kontrolę wykonuje
+właściciel.
+
 **Migracje produkcyjne** idą wyłącznie przez workflow z `run_migrations=true`
 (kopia na żądanie przed migracją w `run-migrate.sh`) albo przez sesję główną.
 Nigdy ręcznie z shella agenta.
@@ -691,6 +697,12 @@ schemacie bez tych tabel i kolumn. `/api/health` sprawdza tylko połączenie
 z bazą, więc tego nie wykryje: rewizja dostanie cały ruch, a zapytania do
 `clients` będą padać.
 
+**Kolejne wdrożenia z migracjami.** Liczby i obiekty w tej sekcji (15 przed,
+18 po, tabele i kolumny z 0015–0017) dotyczą tego jednego wdrożenia. Przy
+kolejnym wdrożeniu z migracjami liczby i obiekty bierzemy z dziennika
+migracji dla tego wdrożenia; wpisane tu wartości dałyby fałszywie czerwony
+wynik.
+
 **Przed wdrożeniem** (baza produkcyjna, tylko odczyt):
 
 Kontrola a i kontrole po wdrożeniu idą przez rolę tylko do odczytu
@@ -727,7 +739,11 @@ SELECT appointment_id, count(*) FROM reviews WHERE appointment_id IS NOT NULL GR
 ```
 
 c) (zamknięte) zapytanie kontrolne 0017 musi dać `alergie_niepuste=0`; inna wartość =
-stop, bo 0017 zeruje wypełnione `allergies` bez możliwości odtworzenia.
+stop, bo 0017 zeruje wypełnione `allergies`. Wyzerowane dane odtwarza
+wyłącznie kopia sprzed joba (trzymana 30 dni). Wynik 0 po migracji niczego
+nie dowodzi, bo kolumna jest już wtedy wyzerowana; liczy się wynik sprzed
+joba. Wynik różny od 0: wdrożenie wstrzymane, ustalenie, czy to dane
+testowe, i decyzja właściciela przed jakimkolwiek dalszym krokiem.
 Zapytanie i wynik trafiają do dziennika migracji (oczekiwana wartość: 0):
 
 ```sql
@@ -770,7 +786,10 @@ błąd 55P03).
   `workflow_dispatch` z `run_migrations=true`, nie ręczne uruchomienie joba
   (`gcloud run jobs execute`): tylko przebieg przez workflow robi kopię na
   żądanie i ustawia job na obraz migratora z tego samego commitu
-  (`infra/gcp/run-migrate.sh`).
+  (`infra/gcp/run-migrate.sh`). Ponowny `workflow_dispatch` buduje bieżący
+  czubek `main`, więc przed ponowieniem czubek `main` = commit z dziennika
+  migracji. Inny czubek: przed ponowieniem nowy wpis w dzienniku z tym
+  commitem i ponownie policzonymi sha256 plików migracji.
 - Obie kopie trzymane maksymalnie 30 dni od migracji; usunięcie z wpisem
   w dzienniku. Starej bazy (Neon) nie usuwać przed zamknięciem okna powrotu
   przełączenia.
@@ -931,20 +950,46 @@ kodem 1 i `psql` nie ma z czym się połączyć.
 **Blok kontroli 7b — rola `myhelper_7b_ro`.** Jedyna droga sesji głównej do
 bazy. Wbudowana rola `postgres` nie ma praw do schematu `drizzle`, a login
 aplikacji (`myhelper_svc`) ma zapis, więc kontrola 7b idzie rolą tylko do
-odczytu z sekcji 9b. Warunek: rola utworzona i test akceptacyjny z 9b
-zapisany w dzienniku migracji. Zmienne: `P` (identyfikator projektu),
+odczytu z sekcji 9b. Warunek (dla sesji głównej; w D blok uruchamia
+właściciel): rola utworzona i test akceptacyjny z 9b zapisany w dzienniku
+migracji. Zmienne: `P` (identyfikator projektu),
 `REGION`, `INSTANCE` (instancja Cloud SQL); brak którejkolwiek = stop, nie
 kontynuować. Hasło idzie z sekretu prosto do zmiennej środowiskowej procesu
-`psql` — nie trafia na ekran, do argumentów, historii ani pliku:
+`psql` — nie trafia na ekran, do argumentów, historii ani pliku. Pętla po
+starcie proxy czeka do 30 s, aż port przyjmie połączenie. `psql -w` nie pyta
+o hasło: pusty sekret kończy się głośnym błędem logowania, a nie promptem.
+`application_name=runbook-7b` oznacza sesję w `pg_stat_activity`, więc przed
+jobem migracji widać, czy kontrola nie została otwarta:
 
 ```bash
 set +x
 : "${P:?}" "${REGION:?}" "${INSTANCE:?}"
 cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
   PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
-  psql "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable"
+  psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
 kill %1
+```
+
+**Stacja współdzielona z innymi użytkownikami** — hasło nie idzie przez
+`PGPASSWORD`, tylko przez plik haseł `psql` z prawami 0600, usuwany na końcu
+bloku. Hasło roli ma wyłącznie litery i cyfry (9b część C), więc nie wymaga
+znaków ucieczki w pliku:
+
+```bash
+set +x
+: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
+PF="$(mktemp)"
+chmod 600 "$PF"
+printf '127.0.0.1:6543:myhelper:myhelper_7b_ro:%s\n' "$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" > "$PF"
+cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
+PGPASSFILE="$PF" PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+  psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
+kill %1
+rm -f "$PF"
+unset PF
 ```
 
 Pierwsze zapytanie w sesji (oczekiwane `myhelper_7b_ro|on`; inny wynik =
@@ -955,22 +1000,30 @@ SELECT current_user, current_setting('default_transaction_read_only');
 ```
 
 Potem wyłącznie zapytania z sekcji 7b: `count(*)`, `migrations_sha256`
-i kontrola obiektów w katalogu. `row_security=off` zamienia odczyt tabeli
+i kontrola obiektów w katalogu, a gdy trzeba ją powtórzyć, kontrola ról
+z sekcji 7. `row_security=off` zamienia odczyt tabeli
 z RLS w głośny błąd 42501 zamiast cichego pustego wyniku. Rola ma
 `CONNECTION LIMIT 1`: druga sesja (np. niezamknięty test z 9b) daje odmowę
 logowania, a nie zawieszenie — wtedy zamknąć tamtą sesję i powtórzyć.
 
-**Bez `psql` na stacji** — ten sam blok, w miejsce linii z `psql` klient
-z obrazu Postgresa. Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
+**Bez `psql` na stacji** — pełny blok z klientem z obrazu Postgresa w miejsce
+`psql` na stacji (strażnik zmiennych, proxy, czekanie na port i `kill %1` jak
+wyżej). Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
 wartość z otoczenia procesu `docker`), nigdy `-e NAZWA=wartość`; hasło
-wyłącznie przez zmienną środowiskową:
+wyłącznie przez zmienną środowiskową. `host.docker.internal` działa tylko
+w Docker Desktop (macOS, Windows); na Linuksie bez Docker Desktop zamiast
+niego `--network host` i `host=127.0.0.1`:
 
 ```bash
 set +x
+: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
+cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
   PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
   docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
-  psql "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable"
+  psql -w "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
+kill %1
 ```
 
 **zsh:** w zapisie `$P:europe-central2` zsh czyta `:e` jako modyfikator
@@ -1007,7 +1060,7 @@ set +x
 cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
   PGOPTIONS='-c lock_timeout=5s -c idle_in_transaction_session_timeout=5min -c statement_timeout=30s' \
-  psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+  psql "host=127.0.0.1 port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
 kill %1
 ```
 
@@ -1335,6 +1388,7 @@ Na końcu sekret i wpis w dzienniku migracji:
 
 ```bash
 set +x
+: "${P:?}"
 gcloud --project="${P}" secrets delete postgres-7b-ro-password
 ```
 
