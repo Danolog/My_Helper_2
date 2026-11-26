@@ -28,7 +28,7 @@ zespołu.
 
 ## 0. Każde połączenie z bazą produkcyjną
 
-Dotyczy wszystkich odczytów w tej procedurze (1a, 2a, 3, 4b, 7) i bloku
+Dotyczy wszystkich odczytów w tej procedurze (1a, 1e, 2a, 3, 4b, 7) i bloku
 z sekcji 5.
 
 1. **Krok kontrolny przed blokiem połączenia.** Właściciel wpisuje najpierw:
@@ -48,8 +48,11 @@ z sekcji 5.
    połączenia dopisujemy `-c default_transaction_read_only=on` (jak
    w kontrolach po wdrożeniu w tym samym runbooku), a każde zapytanie
    i tak stoi między `BEGIN READ ONLY;` a `ROLLBACK;`. Pomyłka przy wklejaniu
-   poza transakcją też niczego nie zapisze. Wyjątek: blok zmiany z sekcji 5
-   idzie bez tej opcji, dokładnie według runbooka.
+   poza transakcją też niczego nie zapisze. Opcję dopisujemy wewnątrz
+   istniejącego cudzysłowu `PGOPTIONS`. Pierwsze zapytanie w sesji to
+   `SHOW default_transaction_read_only;` i ma zwrócić `on`. Inny wynik =
+   wyjście z `psql`. Wyjątek: blok zmiany z sekcji 5 idzie bez tej opcji,
+   dokładnie według runbooka, i ten sam `SHOW` ma tam zwrócić `off`.
 4. **Bez historii.** `psql` uruchamiamy z `-n` (bez edycji linii, więc bez
    pliku historii). Wariant z klientem w kontenerze uruchamiamy z `--rm`.
    Adres zaproszonego nie może zostać w pliku historii na stacji.
@@ -60,7 +63,7 @@ z sekcji 5.
 
 ## 1. Warunki twarde przed PIERWSZYM zaproszeniem
 
-Wszystkie cztery muszą być spełnione i zapisane (data, wynik) w prywatnym
+Wszystkich pięć musi być spełnionych i zapisanych (data, wynik) w prywatnym
 systemie zadań. Brak któregokolwiek = **pierwszego zaproszenia nie wysyłamy.**
 
 ### 1a. Dane testowe usunięte
@@ -137,6 +140,28 @@ w rewizji, która obsługuje 100% ruchu.
 Dowód w prywatnym systemie zadań: identyfikator wdrożonej rewizji (commit)
 i potwierdzenie, że w tym commicie moduł opinii ma `hardOff: true`. Brak
 zamrożenia na wdrożonej wersji = stop.
+
+### 1e. Zadatki zablokowane w kodzie na wdrożonej wersji
+
+Dziś salon może włączyć zadatek (u klienta w panelu, w usłudze przez API),
+a klient z wymaganym zadatkiem trafiłby do płatności kartą. Regulamin mówi,
+że płatność kartą jest wyłączona. Przed pierwszym zaproszeniem rewizja, która
+obsługuje 100% ruchu, musi zawierać blokadę zadatków w kodzie: włączenie
+zadatku i rozpoczęcie płatności zadatku kończą się odmową.
+
+Dowód w prywatnym systemie zadań: identyfikator wdrożonej rewizji (commit)
+z blokadą oraz odczyt właściciela (połączenie jak w sekcji 0):
+
+```sql
+BEGIN READ ONLY;
+SELECT
+  (SELECT count(*) FROM services WHERE deposit_required) AS uslugi_z_zadatkiem,
+  (SELECT count(*) FROM clients WHERE require_deposit)   AS klienci_z_zadatkiem;
+ROLLBACK;
+```
+
+Oczekiwane: `0` i `0`. Brak blokady na wdrożonej wersji albo wynik różny od
+zera = stop.
 
 ---
 
@@ -226,9 +251,8 @@ Szablon jest w sekcji 6. W treści muszą być:
 Dopóki ścieżka zadatku nie zostanie zatwierdzona, salon pilotażowy **nie
 włącza zadatku**: ani w usłudze („wymagaj zadatku”), ani u klienta.
 
-To kontrola miękka: opiera się na prośbie do salonu i na wykrywaniu. Aplikacja
-technicznie nie blokuje włączenia zadatku. Blokada w kodzie zależy od osobnej
-decyzji.
+Pierwszą warstwą jest blokada w kodzie (warunek 1e): włączenie zadatku kończy
+się odmową. Prośba do salonu i wykrywanie są drugą warstwą.
 
 - Właściciel mówi to wprost w zaproszeniu (sekcja 6).
 - Jeśli salon zgłosi, że włączył zadatek, prosimy o wyłączenie tego samego
