@@ -4,7 +4,9 @@
  * (SignInButton na logowaniu klienta).
  *
  * Stan publikacji trafia do prawdziwej funkcji `clientAccountLegalNotice` jako
- * parametr (bez atrapy modułu dokumentów). Atrapy: router i klient logowania.
+ * parametr. Wartość domyślną formularza ustawia test (atrapa
+ * `clientAccountLegalNotice` przekazuje jawną flagę do prawdziwej funkcji), więc
+ * wynik nie zależy od wartości flagi w module. Atrapy: router i klient logowania.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -18,6 +20,25 @@ import {
   isClientAccountAcceptanceComplete,
   type LegalDocuments,
 } from "@/lib/legal/documents";
+
+const legal = vi.hoisted(() => ({ published: false }));
+
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  const versioned: LegalDocuments = {
+    ...actual.LEGAL_DOCUMENTS,
+    privacy: { ...actual.LEGAL_DOCUMENTS.privacy, version: "2026-12-01" },
+    terms: { ...actual.LEGAL_DOCUMENTS.terms, version: "2026-12-01" },
+    dpa: { ...actual.LEGAL_DOCUMENTS.dpa, version: "2026-12-01" },
+  };
+  return {
+    ...actual,
+    clientAccountLegalNotice: (
+      published: boolean = legal.published,
+      documents: LegalDocuments = versioned,
+    ) => actual.clientAccountLegalNotice(published, documents),
+  };
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -42,6 +63,7 @@ const SUBMIT = "Utworz konto";
 const CHECKBOX = /Akceptuję regulamin i politykę prywatności/;
 
 beforeEach(() => {
+  legal.published = false;
   vi.mocked(signUp.email).mockClear();
 });
 
@@ -56,7 +78,7 @@ async function fillSignUp(user: ReturnType<typeof userEvent.setup>) {
 
 describe("pomocniki", () => {
   it("flaga wyłączona: brak akceptacji, rejestracja niezablokowana", () => {
-    expect(clientAccountLegalNotice()).toBeNull();
+    expect(clientAccountLegalNotice(false, LEGAL_DOCUMENTS)).toBeNull();
     expect(clientAccountLegalNotice(false, PUBLISHED)).toBeNull();
     expect(isClientAccountAcceptanceComplete(null, false)).toBe(true);
   });
@@ -79,7 +101,7 @@ describe("pomocniki", () => {
 });
 
 describe("formularz e-mailowy konta klienta: flaga wyłączona", () => {
-  it("wartość z modułu: bez pola wyboru i odnośników, rejestracja działa", async () => {
+  it("wartość domyślna formularza: bez pola wyboru i odnośników, rejestracja działa", async () => {
     const user = userEvent.setup();
     const { container } = render(<SignUpForm showPhone redirectTo="/salons" />);
 
@@ -161,9 +183,9 @@ describe("formularz e-mailowy konta klienta: flaga włączona", () => {
 });
 
 describe("przycisk Google na logowaniu klienta", () => {
-  it("flaga wyłączona (wartość z modułu): bez zdania i odnośników", () => {
+  it("flaga wyłączona: bez zdania i odnośników", () => {
     const { container } = render(
-      <SignInButton googleEnabled googleLegalNotice={clientAccountLegalNotice()} />,
+      <SignInButton googleEnabled googleLegalNotice={clientAccountLegalNotice(false, LEGAL_DOCUMENTS)} />,
     );
 
     expect(screen.getByRole("button", { name: /Zaloguj sie przez Google/ })).toBeEnabled();

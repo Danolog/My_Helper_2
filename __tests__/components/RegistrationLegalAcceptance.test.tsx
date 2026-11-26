@@ -2,9 +2,11 @@
  * Formularz rejestracji właściciela (RegistrationFlow) a akceptacja regulaminu i DPA
  * oraz widoczność błędów trasy zakładającej salon.
  *
- * Stan publikacji trafia do prawdziwej funkcji `legalAcceptanceForm` jako parametr
- * (bez atrapy modułu dokumentów). Atrapy: router, zapis szkicu formularza,
- * `signUp`, `mutationFetch` i `fetch` listy planów.
+ * Stan publikacji trafia do prawdziwej funkcji `legalAcceptanceForm` jako parametr.
+ * Wartość domyślną formularza ustawia test (atrapa `legalAcceptanceForm` przekazuje
+ * jawną flagę do prawdziwej funkcji), więc wynik nie zależy od wartości flagi
+ * w module. Atrapy: router, zapis szkicu formularza, `signUp`, `mutationFetch`
+ * i `fetch` listy planów.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -19,6 +21,25 @@ import {
   type LegalAcceptanceForm,
   type LegalDocuments,
 } from "@/lib/legal/documents";
+
+const legal = vi.hoisted(() => ({ published: false }));
+
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  const versioned: LegalDocuments = {
+    ...actual.LEGAL_DOCUMENTS,
+    privacy: { ...actual.LEGAL_DOCUMENTS.privacy, version: "2026-12-03" },
+    terms: { ...actual.LEGAL_DOCUMENTS.terms, version: "2026-12-01" },
+    dpa: { ...actual.LEGAL_DOCUMENTS.dpa, version: "2026-12-02" },
+  };
+  return {
+    ...actual,
+    legalAcceptanceForm: (
+      published: boolean = legal.published,
+      documents: LegalDocuments = versioned,
+    ) => actual.legalAcceptanceForm(published, documents),
+  };
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -59,6 +80,7 @@ const DPA_BOX = /Akceptuję umowę powierzenia/;
 const CONFIRMATION = "Konto zostalo utworzone pomyslnie!";
 
 beforeEach(() => {
+  legal.published = false;
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response(JSON.stringify({ success: true, data: [] }), { status: 200 }))
@@ -90,7 +112,7 @@ function sentBody(): Record<string, unknown> {
   return JSON.parse(String(calls[0]?.[1]?.body)) as Record<string, unknown>;
 }
 
-describe("flaga wyłączona (wartość z modułu)", () => {
+describe("flaga wyłączona (wartość domyślna formularza)", () => {
   it("bez pól wyboru; rejestracja przechodzi bez zaznaczeń, żądanie bez pól akceptacji", async () => {
     const user = userEvent.setup();
     renderFlow();
@@ -184,6 +206,28 @@ describe("flaga włączona", () => {
     await user.click(screen.getByLabelText(TERMS_BOX));
     await user.click(screen.getByLabelText(DPA_BOX));
     await user.click(screen.getByRole("button", { name: SUBMIT }));
+
+    expect(await screen.findByText(CONFIRMATION)).toBeInTheDocument();
+    expect(sentBody()).toEqual({
+      planSlug: "basic",
+      email: "anna@example.com",
+      termsVersion: TERMS_V,
+      dpaVersion: DPA_V,
+      acceptanceSource: "registration",
+    });
+  });
+
+  it("wartość domyślna formularza przy włączonej fladze: pola widoczne, po zaznaczeniu obu żądanie z wersjami", async () => {
+    legal.published = true;
+    const user = userEvent.setup();
+    renderFlow();
+    await fillAccount(user);
+
+    const submit = screen.getByRole("button", { name: SUBMIT });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByLabelText(TERMS_BOX));
+    await user.click(screen.getByLabelText(DPA_BOX));
+    await user.click(submit);
 
     expect(await screen.findByText(CONFIRMATION)).toBeInTheDocument();
     expect(sentBody()).toEqual({

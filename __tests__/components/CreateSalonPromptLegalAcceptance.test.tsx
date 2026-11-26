@@ -3,12 +3,13 @@
  *
  * Tu powstaje salon po potwierdzeniu e-maila i po logowaniu Google, więc to główne
  * miejsce akceptacji. Stan publikacji trafia do prawdziwej funkcji
- * `legalAcceptanceForm` jako parametr (bez atrapy modułu dokumentów); atrapą jest
- * tylko `mutationFetch`.
+ * `legalAcceptanceForm` jako parametr. Wartość domyślną komponentu ustawia test
+ * (atrapa `legalAcceptanceForm` przekazuje jawną flagę do prawdziwej funkcji), więc
+ * wynik nie zależy od wartości flagi w module. Poza tym atrapą jest `mutationFetch`.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateSalonPrompt } from "@/components/dashboard/create-salon-prompt";
 import { mutationFetch } from "@/lib/api-client";
 import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
@@ -21,12 +22,34 @@ import {
 } from "@/lib/legal/documents";
 import { SUPPORT_CONTACT } from "@/lib/support-contact";
 
+const legal = vi.hoisted(() => ({ published: false }));
+
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  const versioned: LegalDocuments = {
+    ...actual.LEGAL_DOCUMENTS,
+    privacy: { ...actual.LEGAL_DOCUMENTS.privacy, version: "2026-12-03" },
+    terms: { ...actual.LEGAL_DOCUMENTS.terms, version: "2026-12-01" },
+    dpa: { ...actual.LEGAL_DOCUMENTS.dpa, version: "2026-12-02" },
+  };
+  return {
+    ...actual,
+    legalAcceptanceForm: (
+      published: boolean = legal.published,
+      documents: LegalDocuments = versioned,
+    ) => actual.legalAcceptanceForm(published, documents),
+  };
+});
 vi.mock("@/lib/api-client", () => ({
   mutationFetch: vi.fn(async () => ({ json: async () => ({ success: true }) })),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }));
+
+beforeEach(() => {
+  legal.published = false;
+});
 
 afterEach(() => {
   cleanup();
@@ -64,7 +87,7 @@ function sentBody(): Record<string, unknown> {
   return JSON.parse(String(options?.body)) as Record<string, unknown>;
 }
 
-describe("flaga wyłączona (wartość z modułu)", () => {
+describe("flaga wyłączona (wartość domyślna komponentu)", () => {
   it("bez pól wyboru i bez odnośników; przycisk aktywny; żądanie bez pól akceptacji", async () => {
     const user = userEvent.setup();
     const { onCreated } = renderPrompt();

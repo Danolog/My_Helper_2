@@ -1,17 +1,18 @@
 /**
  * Stopka strony a dokumenty prawne (`publishedLegalLinks()`).
  *
- * Przy wartości z prawdziwego modułu (flaga wyłączona) stopka nie linkuje do
- * żadnej strony prawnej — każda odpowiada 404. Przy włączonej fladze (stan
- * podany do prawdziwej funkcji, z wersjami dokumentów) odnośniki pojawiają
- * się w wersji desktopowej i mobilnej. Opis marki nie obiecuje AI.
+ * Stan publikacji ustawia test (atrapa `publishedLegalLinks` przekazuje jawną
+ * flagę i rejestr z wersjami do prawdziwej funkcji), więc wynik nie zależy od
+ * wartości flagi w module. Przy wyłączonej fladze stopka nie linkuje do żadnej
+ * strony prawnej — każda odpowiada 404. Przy włączonej fladze odnośniki
+ * pojawiają się w wersji desktopowej i mobilnej. Opis marki nie obiecuje AI.
  */
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SiteFooter } from "@/components/site-footer";
 import type { LegalDocuments } from "@/lib/legal/documents";
 
-const state = vi.hoisted(() => ({ useRealModule: true }));
+const state = vi.hoisted(() => ({ published: false }));
 
 vi.mock("@/lib/legal/documents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
@@ -23,10 +24,10 @@ vi.mock("@/lib/legal/documents", async (importOriginal) => {
   };
   return {
     ...actual,
-    publishedLegalLinks: () =>
-      state.useRealModule
-        ? actual.publishedLegalLinks()
-        : actual.publishedLegalLinks(true, versioned),
+    publishedLegalLinks: (
+      published: boolean = state.published,
+      documents: LegalDocuments = versioned,
+    ) => actual.publishedLegalLinks(published, documents),
   };
 });
 
@@ -52,9 +53,9 @@ function hrefs(): string[] {
   return screen.getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
 }
 
-describe("SiteFooter — dokumenty prawne nieopublikowane (wartość z modułu)", () => {
+describe("SiteFooter — dokumenty prawne nieopublikowane (flaga wyłączona)", () => {
   beforeEach(() => {
-    state.useRealModule = true;
+    state.published = false;
   });
 
   it("brak odnośników do stron prawnych i nagłówka „Informacje”", () => {
@@ -85,9 +86,9 @@ describe("SiteFooter — dokumenty prawne nieopublikowane (wartość z modułu)"
   });
 });
 
-describe("SiteFooter — dokumenty prawne opublikowane (stan podany do funkcji)", () => {
+describe("SiteFooter — dokumenty prawne opublikowane (flaga włączona)", () => {
   beforeEach(() => {
-    state.useRealModule = false;
+    state.published = true;
   });
 
   it("każda strona prawna w obu wersjach stopki, z tytułem dokumentu", () => {

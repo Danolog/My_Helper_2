@@ -10,8 +10,12 @@
  * Moduł @/lib/plan-catalog jest prawdziwy: pierwsza grupa biegnie na liście
  * PLANS_ON_SALE z modułu, druga na czas swoich przypadków dopisuje "pro" do
  * tablicy PLANS_ON_SALE modułu (lista ["basic", "pro"]) i po nich ją
- * przywraca. Test NIE sprawdza trasy /api/register-subscription, odpowiedzi
- * z błędem ani stron panelu, które pokazują ten komponent.
+ * przywraca. Pola akceptacji dokumentów prawnych są wyłączone jawnie (atrapa
+ * `legalAcceptanceForm` przekazuje flagę `false` do prawdziwej funkcji), więc
+ * wynik nie zależy od wartości flagi w module; akceptację sprawdza
+ * CreateSalonPromptLegalAcceptance.test.tsx. Test NIE sprawdza trasy
+ * /api/register-subscription, odpowiedzi z błędem ani stron panelu, które
+ * pokazują ten komponent.
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -22,6 +26,16 @@ import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 import { planHighlights } from "@/lib/plan-features";
 
+vi.mock("@/lib/legal/documents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/legal/documents")>();
+  return {
+    ...actual,
+    legalAcceptanceForm: (
+      published = false,
+      documents: import("@/lib/legal/documents").LegalDocuments = actual.LEGAL_DOCUMENTS,
+    ) => actual.legalAcceptanceForm(published, documents),
+  };
+});
 vi.mock("@/lib/api-client", () => ({
   mutationFetch: vi.fn(async () => ({ json: async () => ({ success: true }) })),
 }));

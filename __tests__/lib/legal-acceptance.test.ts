@@ -12,7 +12,7 @@ import {
   recordLegalAcceptances,
   requiredLegalVersions,
 } from "@/lib/legal/acceptance";
-import { LEGAL_DOCUMENTS, type LegalDocuments } from "@/lib/legal/documents";
+import { LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS, type LegalDocuments } from "@/lib/legal/documents";
 import { legalAcceptances } from "@/lib/schema";
 import type { DbTx } from "@/lib/server/repository";
 
@@ -26,8 +26,12 @@ const VERSIONED: LegalDocuments = {
 const REQUIRED = { terms: TERMS_V, dpa: DPA_V };
 
 describe("requiredLegalVersions", () => {
-  it("wartości w module (dokumenty nieopublikowane) → akceptacja nie obowiązuje", () => {
-    expect(requiredLegalVersions()).toBeNull();
+  it("wartości domyślne to flaga i rejestr z modułu", () => {
+    expect(requiredLegalVersions()).toEqual(requiredLegalVersions(LEGAL_DOCS_PUBLISHED, LEGAL_DOCUMENTS));
+  });
+
+  it("flaga wyłączona przy rejestrze z modułu (dokumenty nieopublikowane) → akceptacja nie obowiązuje", () => {
+    expect(requiredLegalVersions(false, LEGAL_DOCUMENTS)).toBeNull();
   });
 
   it("flaga wyłączona → null także przy ustalonych wersjach", () => {

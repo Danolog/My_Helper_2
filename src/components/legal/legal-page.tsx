@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation";
+import { LegalContent } from "@/components/legal/legal-content";
+import { LEGAL_CONTENT } from "@/lib/legal/content";
 import {
   LEGAL_DOCUMENTS,
   isLegalPagePublished,
   type LegalDocumentKey,
 } from "@/lib/legal/documents";
+import { parseLegalMarkdown } from "@/lib/legal/markdown";
 import type { Metadata } from "next";
 
 /**
@@ -31,6 +34,7 @@ export function renderLegalPage(key: LegalDocumentKey) {
       <h1 className="font-[family-name:var(--font-playfair)] text-3xl font-bold tracking-tight md:text-4xl">
         {LEGAL_DOCUMENTS[key].title}
       </h1>
+      <LegalContent blocks={parseLegalMarkdown(LEGAL_CONTENT[key])} />
     </div>
   );
 }

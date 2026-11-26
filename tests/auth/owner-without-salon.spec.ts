@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures';
+import { acceptLegalDocuments } from '../legal-acceptance';
 
 /**
  * Konto bez salonu w panelu: zakładanie salonu zamiast przekierowania.
@@ -88,10 +89,7 @@ test.describe('Panel: konto bez salonu', () => {
       // 3. Założenie salonu. Pola akceptacji regulaminu i DPA są tylko po
       //    publikacji dokumentów — zaznaczamy wszystkie, które są.
       const createButton = page.getByRole('button', { name: /Utworz salon z/ });
-      const checkboxes = page.getByRole('checkbox');
-      for (const box of await checkboxes.all()) {
-        await box.check();
-      }
+      await acceptLegalDocuments(page);
       await expect(createButton).toBeEnabled({ timeout: 15000 });
 
       const createResponse = page.waitForResponse(
@@ -125,9 +123,7 @@ test.describe('Panel: konto bez salonu', () => {
       await expect(page.getByText('Utworz swoj salon')).toBeVisible({ timeout: 15000 });
 
       const createButton = page.getByRole('button', { name: /Utworz salon z/ });
-      for (const box of await page.getByRole('checkbox').all()) {
-        await box.check();
-      }
+      await acceptLegalDocuments(page);
       await expect(createButton).toBeEnabled({ timeout: 15000 });
 
       const createResponse = page.waitForResponse(

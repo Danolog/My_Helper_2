@@ -37,9 +37,18 @@ import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as cancelSubscription } from "@/app/api/subscriptions/cancel/route";
 import { POST as checkoutSubscription } from "@/app/api/subscriptions/checkout/route";
 import { DELETE as cancelDowngrade, POST as downgrade } from "@/app/api/subscriptions/downgrade/route";
+import { requiredLegalVersions } from "@/lib/legal/acceptance";
+import { legalAcceptanceForm, legalAcceptanceRequestFields } from "@/lib/legal/documents";
 import { logger } from "@/lib/logger";
 import { strictRateLimit } from "@/lib/rate-limit";
-import { salonSubscriptions, salons, subscriptionPayments, subscriptionPlans, user } from "@/lib/schema";
+import {
+  legalAcceptances,
+  salonSubscriptions,
+  salons,
+  subscriptionPayments,
+  subscriptionPlans,
+  user,
+} from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { getCurrentPlan, getSalonAccess } from "@/lib/subscription";
 import {
@@ -620,12 +629,19 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
       vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", `${freshId}@example.invalid`);
       try {
         const [planRow] = await h!.db.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, planId));
+        // Treść jak z formularza rejestracji: plan i akceptacja regulaminu i DPA
+        // w wersjach z rejestru dokumentów (przed publikacją bez pól akceptacji).
+        const legalFields = legalAcceptanceRequestFields(
+          legalAcceptanceForm(),
+          { terms: true, dpa: true },
+          "registration"
+        );
         const register = async () => {
           const res = await registerSubscription(
             new Request("http://localhost/api/register-subscription", {
               method: "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ planSlug: planRow!.slug }),
+              body: JSON.stringify({ planSlug: planRow!.slug, ...legalFields }),
             }) as never
           );
           return res.status;
@@ -641,6 +657,20 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
           .from(salonSubscriptions)
           .where(eq(salonSubscriptions.salonId, owned[0]!.id));
         expect(subs.map((s) => s.status)).toEqual(["trialing"]);
+        // Akceptacja zapisana raz (tylko przez rejestrację, która wygrała), dla salonu
+        // z tej transakcji; przed publikacją dokumentów bez wpisów.
+        const required = requiredLegalVersions();
+        const accepted = await h!.db.select().from(legalAcceptances).where(eq(legalAcceptances.userId, freshId));
+        expect(
+          accepted.map((a) => [a.document, a.version, a.source, a.salonId]).sort()
+        ).toEqual(
+          required === null
+            ? []
+            : [
+                ["dpa", required.dpa, "registration", owned[0]!.id],
+                ["terms", required.terms, "registration", owned[0]!.id],
+              ]
+        );
       } finally {
         sessionUser.current = previous;
         vi.unstubAllEnvs();

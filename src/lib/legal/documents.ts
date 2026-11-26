@@ -14,7 +14,7 @@
  * wymaga recenzji bezpieczeństwa i zgody właściciela produktu na treść
  * wszystkich dokumentów.
  */
-export const LEGAL_DOCS_PUBLISHED: boolean = false;
+export const LEGAL_DOCS_PUBLISHED: boolean = true;
 
 export type LegalDocumentKey =
   | "privacy"
@@ -44,19 +44,19 @@ export const LEGAL_DOCUMENTS: LegalDocuments = {
     href: "/privacy",
     title: "Polityka prywatności",
     requiresVersion: true,
-    version: null,
+    version: "2026-11-26",
   },
   terms: {
     href: "/terms",
     title: "Regulamin",
     requiresVersion: true,
-    version: null,
+    version: "2026-11-26",
   },
   dpa: {
     href: "/dpa",
     title: "Umowa powierzenia przetwarzania danych",
     requiresVersion: true,
-    version: null,
+    version: "2026-11-26",
   },
   subprocessors: {
     href: "/podprocesorzy",
@@ -223,6 +223,37 @@ export function bookingLegalNotice(
   documents: LegalDocuments = LEGAL_DOCUMENTS,
 ): BookingLegalNotice | null {
   return termsAndPrivacyLinks(published, documents);
+}
+
+// ---------------------------------------------------------------------------
+// Informacja przy formularzu opinii klienta (UI)
+// ---------------------------------------------------------------------------
+
+/** Zdanie przy formularzu opinii, dosłownie z regulaminu (pkt 8.3). */
+export const REVIEW_PUBLICITY_SENTENCE =
+  "Opinia jest publiczna z imieniem i pierwszą literą nazwiska autora.";
+
+/** Informacja przy formularzu opinii: zdanie i odnośnik do regulaminu. */
+export type ReviewLegalNotice = {
+  readonly sentence: string;
+  readonly terms: LegalLink;
+};
+
+/**
+ * Informacja przy formularzu opinii klienta. Regulamin zapowiada, że klient
+ * zobaczy ją przy formularzu, więc pojawia się razem z regulaminem.
+ * `null`, dopóki strona regulaminu nie jest opublikowana: bez zdania
+ * i bez odnośnika do strony 404.
+ */
+export function reviewLegalNotice(
+  published: boolean = LEGAL_DOCS_PUBLISHED,
+  documents: LegalDocuments = LEGAL_DOCUMENTS,
+): ReviewLegalNotice | null {
+  if (!isLegalPagePublished("terms", published, documents)) return null;
+  return {
+    sentence: REVIEW_PUBLICITY_SENTENCE,
+    terms: { key: "terms", href: documents.terms.href, title: documents.terms.title },
+  };
 }
 
 // ---------------------------------------------------------------------------
