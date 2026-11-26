@@ -850,15 +850,32 @@ zostawiłby na dysku plik z tokenem odświeżania. Blok z `sleep` wkleja się sa
 ```bash
 set +x
 mkdir -p -m 700 "$HOME/secure"
-: "${CSQL_INSTANCE:?}" && cloud-sql-proxy --gcloud-auth --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:$CSQL_INSTANCE" > "$HOME/secure/cutover-proxy.log" 2>&1 &
-CSQL_PROXY_PID=$!
+unset CSQL_PROXY_PID
+case "${CSQL_INSTANCE}" in *[^a-z0-9-]*|'') CSQL_NAME_OK=no;; *) CSQL_NAME_OK=yes;; esac; echo "nazwa_instancji_ok=${CSQL_NAME_OK}"
+[[ "${CSQL_NAME_OK}" == yes ]] && echo "=== start $(date -u +%FT%TZ)" >> "$HOME/secure/cutover-proxy.log" && { cloud-sql-proxy --gcloud-auth --address 127.0.0.1 --port '<port tunelu>' "<projekt GCP>:europe-central2:${CSQL_INSTANCE}" >> "$HOME/secure/cutover-proxy.log" 2>&1 & CSQL_PROXY_PID=$!; }
 sleep 5
-kill -0 "$CSQL_PROXY_PID" 2>/dev/null && echo proxy_running=yes || echo proxy_running=no
+kill -0 "${CSQL_PROXY_PID}" 2>/dev/null && echo proxy_running=yes || echo proxy_running=no
+[[ "${CSQL_NAME_OK}" == yes ]] && awk '/^=== start/{f=0} /Listening on/{f=1} END{print "listening=" (f ? "yes" : "no")}' "$HOME/secure/cutover-proxy.log"
 ```
 
-Oczekiwane: `proxy_running=yes`; potem kontrola połączenia z 1.6
-(`psql_csql_app` z `SELECT 1` = `1`). `no` = log proxy czyta właściciel
-lokalnie, stop. Plik `cutover-proxy.log` obejmuje wzorzec usuwania z sekcji 4.
+**zsh:** dwukropek zaraz po zmiennej bez klamer to modyfikator (np. `:e`)
+i psuje nazwę połączenia. Zmienne w nazwie połączenia zawsze w klamrach.
+
+Oczekiwane: `nazwa_instancji_ok=yes`, `proxy_running=yes`, `listening=yes`;
+potem kontrola połączenia z 1.6 (`psql_csql_app` z `SELECT 1` = `1`).
+`nazwa_instancji_ok=no` = zmienna `CSQL_INSTANCE` pusta albo z niedozwolonym
+znakiem (dozwolone: małe litery, cyfry, `-`). Proxy wtedy nie startuje i nie
+trzeba go zatrzymywać. Poprawić zmienną i wkleić blok ponownie. `listening`
+liczy tylko wiersze po ostatnim znaczniku `=== start`, więc wpis z poprzedniego
+startu nie daje fałszywego `yes`. Ekran pokazuje tylko `yes`/`no`, bez nazwy
+połączenia. `proxy_running=no` albo `listening=no` = log proxy czytany lokalnie,
+stop. Plik `cutover-proxy.log` obejmuje wzorzec usuwania z sekcji 4. Log jest
+dopisywany (`>>`), więc log z próby (z nazwą połączenia instancji próbnej)
+zostaje w tym samym pliku: po próbie usunąć `cutover-*` wzorcem z sekcji 4
+przed pierwszym startem tunelu w oknie.
+W bloku nie używać `return` ani `exit` (interaktywny bash zamknąłby terminal
+razem ze zmiennymi okna), a we wzorcach nawiasowych pisać `[^…]`, nie `[!…]`
+(w zsh `!` uruchamia rozwinięcie historii).
 Przywrócenie kopii instancji (2.4) restartuje instancję: proxy zostaje,
 otwarte połączenia padają, każdy następny skrypt łączy się od nowa.
 
