@@ -6,6 +6,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { appointments, reviews } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { isUniqueViolation } from "@/lib/subscription-predicates";
 
 /** One review per appointment: same 409 for the SELECT fast path and the unique-index race. */
@@ -19,14 +20,18 @@ function reviewAlreadyExists() {
 // GET /api/client/appointments/[id]/review - Check if a review exists for this appointment
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
     const userId = authResult.user.id;
-    const { id } = await params;
+    const { id } = await context.params;
 
     // Verify the appointment belongs to this user
     const appointmentResult = await db
@@ -72,14 +77,18 @@ export async function GET(
 // POST /api/client/appointments/[id]/review - Submit a new review for a completed appointment
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
     const userId = authResult.user.id;
-    const { id } = await params;
+    const { id } = await context.params;
 
     // Parse and validate request body
     const body = await request.json();

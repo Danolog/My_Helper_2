@@ -25,6 +25,21 @@ const URL = "http://localhost:3000/api/ai/content/generate-review-response";
 // Mocks
 // -------------------------------------------------------
 
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Logikę
+ * trasy testujemy z flagą podmienioną na włączoną; osobny test sprawdza
+ * zamrożenie.
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
+
 const mockRequireProAI = vi.fn();
 const mockIsProAIError = vi.fn();
 const mockGetSalonContext = vi.fn();
@@ -221,11 +236,28 @@ async function callAndGetRequest(row: unknown) {
 describe("POST /api/ai/content/generate-review-response", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    frozenState.unfreezeReviews = true;
     mockDbSelect.mockReset();
     mockGenerateText.mockReset();
   });
   afterEach(() => {
     mockDbSelect.mockReset();
+  });
+
+  it("moduł opinii zamrożony: 404 MODULE_DISABLED przed planem, bazą i modelem", async () => {
+    frozenState.unfreezeReviews = false;
+
+    const { status, body } = await parseResponse(await POST(makeRequest()));
+
+    expect(status).toBe(404);
+    expect(body).toEqual({
+      success: false,
+      code: "MODULE_DISABLED",
+      error: "Ta funkcja jest obecnie niedostępna.",
+    });
+    expect(mockRequireProAI).not.toHaveBeenCalled();
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("should return 401 when not authenticated", async () => {

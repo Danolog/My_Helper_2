@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, avg, count, desc } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
+import { isModuleFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import {
   employees,
@@ -85,42 +86,49 @@ export async function GET(
           )
         );
 
+      // Moduł opinii zamrożony — bez ocen i opinii na profilu (bez zapytań).
+      const reviewsFrozen = isModuleFrozen("reviews");
+
       // Get rating stats
-      const [ratingStats] = await tx
-        .select({
-          avgRating: avg(reviews.rating),
-          reviewCount: count(reviews.id),
-        })
-        .from(reviews)
-        .where(
-          and(
-            eq(reviews.employeeId, employeeId),
-            eq(reviews.salonId, salonId),
-            eq(reviews.status, "approved")
-          )
-        );
+      const [ratingStats] = reviewsFrozen
+        ? []
+        : await tx
+            .select({
+              avgRating: avg(reviews.rating),
+              reviewCount: count(reviews.id),
+            })
+            .from(reviews)
+            .where(
+              and(
+                eq(reviews.employeeId, employeeId),
+                eq(reviews.salonId, salonId),
+                eq(reviews.status, "approved")
+              )
+            );
 
       // Get recent reviews with client names
-      const recentReviews = await tx
-        .select({
-          id: reviews.id,
-          rating: reviews.rating,
-          comment: reviews.comment,
-          createdAt: reviews.createdAt,
-          clientFirstName: clients.firstName,
-          clientLastName: clients.lastName,
-        })
-        .from(reviews)
-        .leftJoin(clients, eq(reviews.clientId, clients.id))
-        .where(
-          and(
-            eq(reviews.employeeId, employeeId),
-            eq(reviews.salonId, salonId),
-            eq(reviews.status, "approved")
-          )
-        )
-        .orderBy(desc(reviews.createdAt))
-        .limit(5);
+      const recentReviews = reviewsFrozen
+        ? []
+        : await tx
+            .select({
+              id: reviews.id,
+              rating: reviews.rating,
+              comment: reviews.comment,
+              createdAt: reviews.createdAt,
+              clientFirstName: clients.firstName,
+              clientLastName: clients.lastName,
+            })
+            .from(reviews)
+            .leftJoin(clients, eq(reviews.clientId, clients.id))
+            .where(
+              and(
+                eq(reviews.employeeId, employeeId),
+                eq(reviews.salonId, salonId),
+                eq(reviews.status, "approved")
+              )
+            )
+            .orderBy(desc(reviews.createdAt))
+            .limit(5);
 
       // Get gallery photos for this employee
       const photos = await tx

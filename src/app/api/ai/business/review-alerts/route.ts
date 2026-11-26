@@ -6,6 +6,7 @@ import { firstNameForReply, reviewCommentForModel } from "@/lib/ai/client-contex
 import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 /**
  * Severity classification for negative reviews.
@@ -115,6 +116,10 @@ async function generateResponseSuggestion(
 }
 
 export async function GET(_request: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+
   const gate = await requireProAI({ op: "text" });
   if (isProAIError(gate)) return gate;
   const { salonId } = gate;

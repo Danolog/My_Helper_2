@@ -6,9 +6,10 @@ import { auth } from "@/lib/auth";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { reviews } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 // PATCH /api/reviews/[id]/moderate - Approve or reject a review
-export const PATCH = withApiHandler(
+const moderateReview = withApiHandler(
   {
     auth: "user",
     logLabel: "[Reviews Moderation API] PATCH",
@@ -87,3 +88,13 @@ export const PATCH = withApiHandler(
     });
   }
 );
+
+/**
+ * Druga linia obrony zamrożenia (pierwsza: src/proxy.ts). Bramka stoi przed
+ * sesją, więc jest poza withApiHandler, który sprawdza sesję jako pierwszy.
+ */
+export async function PATCH(...args: Parameters<typeof moderateReview>) {
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+  return moderateReview(...args);
+}

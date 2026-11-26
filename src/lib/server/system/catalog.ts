@@ -13,7 +13,9 @@
  * - `salons`: id, name, phone, email, address, industry_type — tylko salony
  *   z niepustym adresem, telefonem i branżą (odsiewa salony testowe/niepełne);
  * - `services`: liczba aktywnych usług na salon;
- * - `reviews`: średnia ocena i liczba opinii `approved` na salon.
+ * - `reviews`: średnia ocena i liczba opinii `approved` na salon — tylko gdy
+ *   moduł opinii nie jest zamrożony; zamrożony = bez zapytania, ocena null
+ *   i liczba opinii 0.
  *
  * Czego NIE czyta: `settings_json`, `owner_id` ani żadnej innej kolumny
  * salonu spoza DTO; żadnych danych pracowników, klientów ani wizyt.
@@ -21,6 +23,7 @@
  * Błąd bazy propaguje do wołającego.
  */
 import { and, avg, count, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { isModuleFrozen } from "@/lib/features";
 import { reviews, salons, services } from "@/lib/schema";
 import { dbSystem } from "./db-system";
 
@@ -77,15 +80,17 @@ export async function listPublicSalonCatalog(): Promise<PublicSalonCatalogEntry[
     .where(and(inArray(services.salonId, salonIds), eq(services.isActive, true)))
     .groupBy(services.salonId);
 
-  const reviewStats = await dbSystem
-    .select({
-      salonId: reviews.salonId,
-      averageRating: avg(reviews.rating),
-      reviewCount: count(reviews.id),
-    })
-    .from(reviews)
-    .where(and(inArray(reviews.salonId, salonIds), eq(reviews.status, "approved")))
-    .groupBy(reviews.salonId);
+  const reviewStats = isModuleFrozen("reviews")
+    ? []
+    : await dbSystem
+        .select({
+          salonId: reviews.salonId,
+          averageRating: avg(reviews.rating),
+          reviewCount: count(reviews.id),
+        })
+        .from(reviews)
+        .where(and(inArray(reviews.salonId, salonIds), eq(reviews.status, "approved")))
+        .groupBy(reviews.salonId);
 
   const serviceCountMap = new Map(serviceCounts.map((sc) => [sc.salonId, Number(sc.serviceCount)]));
   const reviewStatsMap = new Map(

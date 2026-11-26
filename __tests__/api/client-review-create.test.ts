@@ -6,8 +6,24 @@
  * Przed poprawką schemat miał `comment: z.string().optional()`, więc ocena
  * bez komentarza (UI wysyła null) kończyła się 400 (req-5a).
  */
+import { NextResponse } from "next/server";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRequest, parseResponse } from "./helpers";
+
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Logikę
+ * opinii testujemy z flagą podmienioną na włączoną; osobny blok niżej
+ * sprawdza zamrożenie zapisu i odczytu (404 przed sesją i bazą).
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
 
 const mockSelect = vi.fn();
 const mockInsertValues = vi.fn();
@@ -64,7 +80,8 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { POST } from "@/app/api/client/appointments/[id]/review/route";
+import { GET, POST } from "@/app/api/client/appointments/[id]/review/route";
+import { isAuthError, requireAuth } from "@/lib/auth-middleware";
 
 const APPOINTMENT_ID = crypto.randomUUID();
 const completedAppointment = {
@@ -85,9 +102,61 @@ async function post(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  frozenState.unfreezeReviews = true;
   // 1) wizyta klienta (zakończona), 2) brak istniejącej opinii
   selectQueue = [[completedAppointment], []];
   insertResult = () => [{ id: "review-1" }];
+});
+
+describe("/api/client/appointments/[id]/review — moduł opinii zamrożony", () => {
+  const DISABLED = {
+    success: false,
+    code: "MODULE_DISABLED",
+    error: "Ta funkcja jest obecnie niedostępna.",
+  };
+
+  it("POST → 404 MODULE_DISABLED przed sesją i bazą, bez zapisu", async () => {
+    frozenState.unfreezeReviews = false;
+
+    const { status, body } = await post({ rating: 5, comment: null });
+
+    expect(status).toBe(404);
+    expect(body).toEqual(DISABLED);
+    expect(requireAuth).not.toHaveBeenCalled();
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("GET → 404 MODULE_DISABLED przed sesją i bazą", async () => {
+    frozenState.unfreezeReviews = false;
+
+    const req = createMockRequest(
+      `http://localhost:3000/api/client/appointments/${APPOINTMENT_ID}/review`
+    );
+    const { status, body } = await parseResponse(
+      await GET(req, { params: Promise.resolve({ id: APPOINTMENT_ID }) })
+    );
+
+    expect(status).toBe(404);
+    expect(body).toEqual(DISABLED);
+    expect(requireAuth).not.toHaveBeenCalled();
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/client/appointments/[id]/review — autoryzacja (flaga włączona)", () => {
+  it("401 bez sesji, bez odczytu i zapisu", async () => {
+    vi.mocked(requireAuth).mockResolvedValueOnce(
+      NextResponse.json({ success: false, error: "Brak autoryzacji" }, { status: 401 }) as never
+    );
+    vi.mocked(isAuthError).mockReturnValueOnce(true);
+
+    const { status } = await post({ rating: 5, comment: null });
+
+    expect(status).toBe(401);
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/client/appointments/[id]/review — kontrakt z UI", () => {

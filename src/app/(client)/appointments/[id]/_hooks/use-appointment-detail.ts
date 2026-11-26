@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { isModuleFrozen } from "@/lib/features";
 import type { AppointmentDetail, CancelInfo, ReviewInfo } from "../_types";
 
 export function useAppointmentDetail() {
@@ -205,8 +206,9 @@ export function useAppointmentDetail() {
   }, [session, isPending, router, fetchAppointment]);
 
   // Fetch review once appointment is loaded and is completed
+  // (moduł opinii zamrożony — bez zapytania, sekcji opinii też nie ma)
   useEffect(() => {
-    if (appointment?.status === "completed") {
+    if (appointment?.status === "completed" && !isModuleFrozen("reviews")) {
       fetchReview();
     }
   }, [appointment?.status, fetchReview]);

@@ -78,6 +78,10 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   complexPromotions: /^\/api\/promotions\/check|\/book-package(\/|$)/,
   // Generowanie obrazów — każda trasa pod /api/ai/image poza enhance (galeria).
   imageGen: /^\/api\/ai\/image\/(?!enhance(\/|$))/,
+  // Opinie: każda trasa z „review” w ścieżce — panel, portal klienta, AI
+  // opinii. Publiczny katalog (`/api/salons/[id]`, profil pracownika) nie ma
+  // „review” w ścieżce i zostaje; sam nie zwraca ocen (test niżej).
+  reviews: /review/,
 };
 
 const FROZEN_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
@@ -94,6 +98,7 @@ describe("rejestr modułów zamrożonych", () => {
       "loyalty",
       "newsletters",
       "pushNotifications",
+      "reviews",
       "socialPosts",
       "videoGen",
       "voiceAi",
@@ -168,6 +173,13 @@ describe("frozenModuleForApiPath", () => {
     ["/api/ai/image/generate", "imageGen"],
     ["/api/ai/image/banner", "imageGen"],
     ["/api/ai/image/service-illustration", "imageGen"],
+    ["/api/reviews", "reviews"],
+    ["/api/reviews/abc/moderate", "reviews"],
+    ["/api/reviews/abc/respond", "reviews"],
+    ["/api/client/reviews", "reviews"],
+    ["/api/client/appointments/abc/review", "reviews"],
+    ["/api/ai/content/generate-review-response", "reviews"],
+    ["/api/ai/business/review-alerts", "reviews"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
   });
@@ -199,8 +211,13 @@ describe("frozenModuleForApiPath", () => {
     "/api/cron/push-reminders-48h",
     "/api/pushx",
     "/api/ai/content/generate-description",
-    "/api/ai/content/generate-review-response",
     "/api/ai/videos",
+    "/api/reviewsx",
+    "/api/client/appointments/abc",
+    "/api/client/appointments/abc/cancel",
+    "/api/client/appointments/abc/reviewx",
+    "/api/salons/abc/employees/def",
+    "/api/ai/business/alerts",
     "/api/cron/sms-reminders",
     "/api/salons/abc/notification-type-settings",
     "/api/appointments/abc",
@@ -296,6 +313,8 @@ describe("frozenModuleForPage", () => {
     ["/dashboard/content-generator/testimonials", "videoGen"],
     // B5: strona usunięta — otwarta karta dostaje przekierowanie, nie 404.
     ["/dashboard/settings/fiscal", "fiscal"],
+    ["/dashboard/reviews", "reviews"],
+    ["/dashboard/reviews/", "reviews"],
     ["/Dashboard/Invoices", "invoices"],
     ["/dashboard//invoices", "invoices"],
     ["/dashboard/%69nvoices", "invoices"],

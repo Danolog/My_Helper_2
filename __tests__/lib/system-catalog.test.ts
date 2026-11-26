@@ -69,6 +69,21 @@ vi.mock("@/lib/server/system/db-system", () => ({
   },
 }));
 
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Oceny
+ * w katalogu testujemy z flagą podmienioną na włączoną; blok „moduł opinii
+ * zamrożony” sprawdza listę bez ocen.
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
+
 import { listPublicSalonCatalog } from "@/lib/server/system/catalog";
 
 const node = (type: string, ...args: unknown[]) => ({ type, args });
@@ -84,6 +99,21 @@ const salon = (id: string, name: string) => ({
 beforeEach(() => {
   queries.length = 0;
   results.length = 0;
+  frozenState.unfreezeReviews = true;
+});
+
+describe("listPublicSalonCatalog — moduł opinii zamrożony", () => {
+  it("bez zapytania o opinie; ocena null i liczba opinii 0", async () => {
+    frozenState.unfreezeReviews = false;
+    results.push([salon(SALON_A, "A")], [{ salonId: SALON_A, serviceCount: 2 }]);
+
+    const list = await listPublicSalonCatalog();
+
+    expect(queries.map((q) => q.table)).toEqual(["salons", "services"]);
+    expect(list).toEqual([
+      { ...salon(SALON_A, "A"), serviceCount: 2, averageRating: null, reviewCount: 0 },
+    ]);
+  });
 });
 
 describe("listPublicSalonCatalog", () => {

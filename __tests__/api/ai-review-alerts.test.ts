@@ -28,6 +28,21 @@ const REVIEW_ID = "c1d2e3f4-a5b6-4789-abcd-ef1234567890";
 // Mocks
 // -------------------------------------------------------
 
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Logikę
+ * trasy testujemy z flagą podmienioną na włączoną; blok „moduł opinii
+ * zamrożony” sprawdza zamrożenie.
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
+
 const mockRequireProAI = vi.fn();
 const mockIsProAIError = vi.fn();
 const mockTrackAIUsage = vi.fn();
@@ -195,6 +210,7 @@ describe("GET /api/ai/business/review-alerts", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    frozenState.unfreezeReviews = true;
     mockDbSelect.mockReset();
     mockGenerateText.mockReset();
     process.env.OPENROUTER_API_KEY = "test-key";
@@ -203,6 +219,22 @@ describe("GET /api/ai/business/review-alerts", () => {
     mockDbSelect.mockReset();
     if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = originalKey;
+  });
+
+  it("moduł opinii zamrożony: 404 MODULE_DISABLED przed planem, bazą i modelem", async () => {
+    frozenState.unfreezeReviews = false;
+
+    const { status, body } = await parseResponse(await GET(makeRequest()));
+
+    expect(status).toBe(404);
+    expect(body).toEqual({
+      success: false,
+      code: "MODULE_DISABLED",
+      error: "Ta funkcja jest obecnie niedostępna.",
+    });
+    expect(mockRequireProAI).not.toHaveBeenCalled();
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("should return 401 when not authenticated", async () => {

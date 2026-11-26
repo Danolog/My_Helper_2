@@ -4,9 +4,10 @@ import { withApiHandler } from "@/lib/api-handler";
 import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
-export const GET = withApiHandler(
+const listReviews = withApiHandler(
   {
     auth: "user",
     logLabel: "[Reviews Moderation API] GET",
@@ -81,3 +82,13 @@ export const GET = withApiHandler(
     });
   }
 );
+
+/**
+ * Druga linia obrony zamrożenia (pierwsza: src/proxy.ts). Bramka stoi przed
+ * sesją, więc jest poza withApiHandler, który sprawdza sesję jako pierwszy.
+ */
+export async function GET(...args: Parameters<typeof listReviews>) {
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+  return listReviews(...args);
+}

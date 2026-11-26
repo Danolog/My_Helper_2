@@ -2,8 +2,9 @@
  * Feature flags per salon (Faza 2 planu wydania — „chudy UI domyślnie").
  *
  * Rdzeń produktu (kalendarz, rezerwacje, klienci, usługi, pracownicy,
- * zadatki, przypomnienia SMS, opinie, galeria, 3 podstawowe raporty)
- * jest ZAWSZE włączony i nie występuje w tym rejestrze.
+ * zadatki, przypomnienia SMS, galeria, 3 podstawowe raporty)
+ * jest ZAWSZE włączony i nie występuje w tym rejestrze. Opinie należały do
+ * rdzenia, ale są zamrożone jako moduł `reviews` (wpis niżej).
  *
  * Moduły opcjonalne są domyślnie WYŁĄCZONE — właściciel salonu włącza je
  * w Ustawienia → Moduły. Stan zapisujemy w `salons.settingsJson.modules`
@@ -24,7 +25,12 @@
  *   obrony, gdyby proxy zostało ominięte) — `src/lib/server/frozen-guard.ts`;
  * - promocje — typy z `FROZEN_PROMOTION_TYPES` nie są tworzone, zwracane ani
  *   naliczane (`/api/promotions`, `promo-discount.ts`, `deposit-calculation.ts`);
- * - interfejs — `useModuleEnabled()` / `<ModuleGate>` / `moduleForRoute()`.
+ * - opinie — trasy publiczne katalogu (`/api/salons/[id]`, profil
+ *   pracownika, lista salonów w `catalog.ts`) nie liczą ocen i nie zwracają
+ *   opinii, gdy `isModuleFrozen("reviews")`;
+ * - interfejs — `useModuleEnabled()` / `<ModuleGate>` / `moduleForRoute()`;
+ *   portal klienta (poza panelem, bez stanu modułów salonu) pyta
+ *   `isModuleFrozen()` wprost.
  * Pilnuje tego `__tests__/lib/frozen-modules.test.ts`.
  */
 
@@ -46,7 +52,8 @@ export type ModuleKey =
   | "aiNotifications"
   | "pushNotifications"
   | "complexPromotions"
-  | "imageGen";
+  | "imageGen"
+  | "reviews";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -187,6 +194,22 @@ export const MODULES: readonly ModuleDef[] = [
     key: "imageGen",
     label: "Generowanie grafik (AI)",
     description: "Banery promocji, grafiki do postów i ilustracje usług generowane przez AI.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    // Opinie klientów: wystawienie opinii w portalu, moderacja (akceptacja,
+    // odrzucenie) i odpowiedź salonu w panelu, odpowiedź i alerty opinii
+    // pisane przez AI, oceny i opinie na publicznym profilu salonu
+    // i pracownika. Wiersze w bazie zostają.
+    // Zdjęcie `hardOff` dopiero po spełnieniu wszystkich trzech warunków:
+    // 1. zaakceptowana opinia nie znika, usunięcie kartoteki klienta odłącza
+    //    autora od opinii, a podpis autora jest zapisany w samej opinii;
+    // 2. na profilu salonu jest informacja, że opinie akceptuje salon;
+    // 3. jest odpowiedź na otwartą sprawę prawną dotyczącą opinii.
+    key: "reviews",
+    label: "Opinie",
+    description: "Opinie klientów o wizytach, moderacja i odpowiedzi salonu.",
     defaultEnabled: false,
     hardOff: true,
   },
@@ -363,6 +386,7 @@ export const ROUTE_MODULE_MAP: ReadonlyArray<{ prefix: string; module: ModuleKey
   // B4: strona szablonów usunięta razem z social — otwarta karta wraca na pulpit.
   { prefix: "/dashboard/content-generator/templates", module: "socialPosts" },
   { prefix: "/dashboard/ai-assistant/voice", module: "voiceAi" },
+  { prefix: "/dashboard/reviews", module: "reviews" },
 ];
 
 /** Moduł wymagany dla ścieżki (null = rdzeń, zawsze dostępny). */
@@ -418,6 +442,15 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
+  // Opinie: lista i moderacja w panelu, odpowiedź salonu, opinie klienta
+  // w portalu, odpowiedź i alerty opinii pisane przez AI. Trasy publiczne
+  // katalogu (`/api/salons/[id]`, profil pracownika) zostają — same nie
+  // zwracają ocen ani opinii, gdy moduł jest zamrożony.
+  { pattern: /^\/api\/reviews(\/|$)/, module: "reviews" },
+  { pattern: /^\/api\/client\/reviews(\/|$)/, module: "reviews" },
+  { pattern: /^\/api\/client\/appointments\/[^/]+\/review(\/|$)/, module: "reviews" },
+  { pattern: /^\/api\/ai\/content\/generate-review-response(\/|$)/, module: "reviews" },
+  { pattern: /^\/api\/ai\/business\/review-alerts(\/|$)/, module: "reviews" },
   // Moduły zamrożone wcześniej i usunięte w B3–B5: głos (voiceAi, B3), wideo
   // (videoGen) i publikacja postów (socialPosts, B4), fiskalizacja (fiscal,
   // B5) — tras nie ma, wzorców też (strażnik: removed-features).

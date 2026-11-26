@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema, isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { isDepositEnabled } from "@/lib/features";
+import { isDepositEnabled, isModuleFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 // GET (katalog, bez sesji) i PUT czytają przez forSalon(id z URL). Polityka RLS
@@ -139,9 +139,10 @@ async function loadSalonDetail(id: string) {
       }
     }
 
-    // Get employee ratings
+    // Get employee ratings. Moduł opinii zamrożony — bez ocen w katalogu.
+    const reviewsFrozen = isModuleFrozen("reviews");
     const employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
-    if (employeeIds.length > 0) {
+    if (!reviewsFrozen && employeeIds.length > 0) {
       const empRatings = await tx
         .select({
           employeeId: reviews.employeeId,
@@ -207,11 +208,13 @@ async function loadSalonDetail(id: string) {
       galleryCount: employeeGalleryCountMap[emp.id] || 0,
     }));
 
-    // Get average rating
-    const [ratingResult] = await tx
-      .select({ avgRating: avg(reviews.rating) })
-      .from(reviews)
-      .where(and(eq(reviews.salonId, id), eq(reviews.status, "approved")));
+    // Get average rating (moduł opinii zamrożony — bez zapytania, null)
+    const [ratingResult] = reviewsFrozen
+      ? []
+      : await tx
+          .select({ avgRating: avg(reviews.rating) })
+          .from(reviews)
+          .where(and(eq(reviews.salonId, id), eq(reviews.status, "approved")));
 
     return {
       ...salon,

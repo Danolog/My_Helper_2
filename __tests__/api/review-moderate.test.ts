@@ -9,6 +9,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createMockRequest, parseResponse } from "./helpers";
 
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Logikę
+ * moderacji testujemy z flagą podmienioną na włączoną; osobny blok niżej
+ * sprawdza zamrożenie (404 przed sesją i bazą).
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
+
 const REVIEW_ID = "c1d2e3f4-a5b6-4789-abcd-ef1234567890";
 const SALON_ID = "a1b2c3d4-e5f6-4789-abcd-ef1234567890";
 
@@ -65,6 +80,7 @@ async function patch(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  frozenState.unfreezeReviews = true;
   const session = { user: { id: "owner-user" } };
   mockRequireAuth.mockResolvedValue({ session, user: session.user });
   mockIsAuthError.mockReturnValue(false);
@@ -75,6 +91,25 @@ beforeEach(() => {
   mockUpdateOwned.mockImplementation(
     async (_table: unknown, _id: unknown, values: { status: string }) => makeReview(values.status),
   );
+});
+
+describe("PATCH /api/reviews/[id]/moderate — moduł opinii zamrożony", () => {
+  it("404 MODULE_DISABLED przed sesją i bazą, bez zapisu", async () => {
+    frozenState.unfreezeReviews = false;
+
+    const { status, body } = await patch({ action: "approve" });
+
+    expect(status).toBe(404);
+    expect(body).toEqual({
+      success: false,
+      code: "MODULE_DISABLED",
+      error: "Ta funkcja jest obecnie niedostępna.",
+    });
+    expect(mockRequireAuth).not.toHaveBeenCalled();
+    expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockFindOne).not.toHaveBeenCalled();
+    expect(mockUpdateOwned).not.toHaveBeenCalled();
+  });
 });
 
 describe("PATCH /api/reviews/[id]/moderate", () => {

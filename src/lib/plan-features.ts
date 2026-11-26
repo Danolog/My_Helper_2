@@ -23,7 +23,7 @@
  * Zasada (plan wejścia na rynek, B9): na liście jest tylko to, co produkt
  * faktycznie robi. Moduły zamrożone (`hardOff` w `src/lib/features.ts` —
  * m.in. lojalność, newslettery, faktury, asystent głosowy, wideo,
- * fiskalizacja, posty social) i płatność zadatków online (decyzja D1) nie
+ * fiskalizacja, posty social, opinie) i płatność zadatków online (decyzja D1) nie
  * mogą tu wrócić — pilnuje tego `__tests__/lib/marketing-truth.test.ts`,
  * który listę modułów zamrożonych bierze z rejestru.
  */
@@ -37,7 +37,6 @@ export const PLAN_FEATURES = {
     "Powiadomienia SMS i e-mail",
     "Zarządzanie usługami i wariantami",
     "Magazyn produktów",
-    "System opinii i ocen",
     "Raporty podstawowe",
     "Zadatki za wizyty (ustalane przez salon)",
     "Galeria zdjęć salonu",
@@ -50,7 +49,6 @@ export const PLAN_FEATURES = {
     "Rekomendacje AI na dashboardzie",
     "Analiza trendów i konkurencji",
     "Generowanie opisów usług",
-    "Generowanie odpowiedzi na opinie",
     "Proaktywne sugestie biznesowe",
     "Priorytetowe wsparcie techniczne",
   ],

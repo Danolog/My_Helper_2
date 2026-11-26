@@ -25,6 +25,20 @@ vi.mock("@/lib/server/repository", async (orig) => {
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Oceny
+ * i opinie na profilu testujemy z flagą podmienioną na włączoną; blok
+ * „moduł opinii zamrożony” sprawdza profil bez opinii.
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
 
 const SALON_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_SALON_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -48,6 +62,7 @@ const EMPLOYEE_ROW = {
 };
 
 function seed() {
+  frozenState.unfreezeReviews = true;
   resetFixture({
     salons: [
       { id: SALON_ID, name: "Salon Testowy" },
@@ -97,6 +112,34 @@ function call(salonId = SALON_ID, employeeId = EMPLOYEE_ID) {
     { params: Promise.resolve({ id: salonId, employeeId }) }
   );
 }
+
+describe("GET /api/salons/[id]/employees/[employeeId] — moduł opinii zamrożony", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seed();
+    frozenState.unfreezeReviews = false;
+  });
+
+  it("200 — profil bez ocen i bez opinii, bez zapytań do opinii", async () => {
+    const res = await call();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.averageRating).toBeNull();
+    expect(body.data.reviewCount).toBe(0);
+    expect(body.data.recentReviews).toEqual([]);
+    // Reszta profilu bez zmian.
+    expect(body.data.specialties).toHaveLength(1);
+    expect(body.data.galleryCount).toBe(1);
+    expect(selectCalls.filter((c) => c.table === "reviews")).toEqual([]);
+  });
+
+  it("404 — pracownik nie istnieje w tym salonie (bez zmian)", async () => {
+    const res = await call(SALON_ID, MISSING_EMPLOYEE_ID);
+    expect(res.status).toBe(404);
+  });
+});
 
 describe("GET /api/salons/[id]/employees/[employeeId] — publiczny profil", () => {
   beforeEach(() => {

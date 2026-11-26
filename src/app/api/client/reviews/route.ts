@@ -5,8 +5,13 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { reviews, appointments, employees, services, salons } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 // GET /api/client/reviews - List all reviews by the authenticated user
 export async function GET() {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
