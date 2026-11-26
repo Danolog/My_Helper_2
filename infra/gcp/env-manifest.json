@@ -25,6 +25,11 @@
       "required": false,
       "note": "Brak zmiennej = memory. Dozwolone wyłącznie memory albo database; inna wartość (także pusta) zatrzymuje start."
     },
+    "BETA_ALLOWED_OWNER_EMAILS": {
+      "class": "var",
+      "required": false,
+      "note": "Beta na zaproszenie: e-maile właścicieli, którzy mogą założyć salon (po przecinku). Brak albo pusta = nikt nie założy salonu."
+    },
     "BETTER_AUTH_SECRET": {
       "class": "secret",
       "secretName": "better-auth-secret",

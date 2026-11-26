@@ -12,8 +12,10 @@
  * istniejącej subskrypcji ta trasa nie zmienia (zmiana planu tylko przez
  * Stripe) — 409, bez zapisu.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextResponse } from "next/server";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
+import { SUPPORT_CONTACT } from "@/lib/support-contact";
 import { createMockRequest, parseResponse } from "./helpers";
 
 const USER_A = { id: "user-a", name: "Anna", email: "anna@example.com", emailVerified: true };
@@ -208,6 +210,104 @@ beforeEach(() => {
   legalState.terms = null;
   legalState.dpa = null;
   mockRequireAuth.mockResolvedValue({ session: { user: USER_A }, user: USER_A });
+  // Beta na zaproszenie: konto A jest na liście (osobne testy bramki niżej).
+  vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", USER_A.email);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("POST /api/register-subscription — beta na zaproszenie", () => {
+  const OTHER = { id: "user-x", name: "Xawery", email: "xawery@example.com", emailVerified: true };
+
+  it("e-mail z sesji na liście → 200, salon i trial", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    const { status, body } = await post({ planSlug: "basic" });
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(mockInsert).toHaveBeenCalledWith("salons");
+  });
+
+  it("e-mail spoza listy → 403 BETA_INVITE_ONLY z kontaktem, bez zapytań i bez zapisu", async () => {
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(body.error).toBe(BETA_INVITE_ONLY_MESSAGE);
+    expect(body.error).toContain(SUPPORT_CONTACT);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("e-mail z treści żądania nie otwiera bramki (liczy się konto z sesji)", async () => {
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { status } = await post({ planSlug: "basic", email: USER_A.email });
+    expect(status).toBe(403);
+    expect(opLog).toEqual([]);
+  });
+
+  it("wielkość liter i spacje w liście i w e-mailu konta → 200", async () => {
+    vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", ` inny@example.com ,  ${USER_A.email.toUpperCase()}  `);
+    mockRequireAuth.mockResolvedValue({
+      session: { user: { ...USER_A, email: " Anna@Example.COM " } },
+      user: { ...USER_A, email: " Anna@Example.COM " },
+    });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(200);
+  });
+
+  it.each([
+    ["pusta", ""],
+    ["nieustawiona", undefined],
+  ])("lista %s → 403 dla każdego konta, bez zapytań", async (_n, value) => {
+    vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", value);
+    const { status, body } = await post({ planSlug: "basic" });
+    expect(status).toBe(403);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(opLog).toEqual([]);
+  });
+
+  it("brak sesji → 401 przed bramką (nie 403)", async () => {
+    mockRequireAuth.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+    );
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(401);
+    expect(opLog).toEqual([]);
+  });
+
+  it("e-mail na liście, niepoprawne body → 400", async () => {
+    const { status } = await post({ planSlug: 123 });
+    expect(status).toBe(400);
+    expect(opLog).toEqual([]);
+  });
+
+  it("e-mail spoza listy i niepoprawne body → 403 (bramka przed walidacją)", async () => {
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { status } = await post({ planSlug: 123 });
+    expect(status).toBe(403);
+  });
+
+  it("odpowiedź 403 i log nie zawierają listy dozwolonych adresów", async () => {
+    vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", "tajny-wpis@example.com");
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { logger } = await import("@/lib/logger");
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(JSON.stringify(body)).not.toContain("tajny-wpis");
+    const logged = JSON.stringify(vi.mocked(logger.info).mock.calls);
+    expect(logged).not.toContain("tajny-wpis");
+    expect(logged).not.toContain(OTHER.email);
+  });
 });
 
 describe("POST /api/register-subscription — konto tylko z sesji", () => {

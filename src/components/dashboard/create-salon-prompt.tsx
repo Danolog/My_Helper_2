@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 import {
   LEGAL_ACCEPTANCE_REQUIRED_CODE,
@@ -94,6 +95,9 @@ export function CreateSalonPrompt({
         else router.refresh();
       } else if (data.code === LEGAL_ACCEPTANCE_REQUIRED_CODE) {
         setError(LEGAL_ACCEPTANCE_REQUIRED_MESSAGE);
+      } else if (data.code === BETA_INVITE_ONLY_CODE) {
+        // Beta na zaproszenie: e-mail konta spoza listy, komunikat z kontaktem.
+        setError(BETA_INVITE_ONLY_MESSAGE);
       } else {
         setError(data.error || "Nie udalo sie utworzyc salonu");
       }

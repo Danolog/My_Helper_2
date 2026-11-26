@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } 
 import { useRegistration } from "@/components/auth/_hooks/use-registration";
 import { mutationFetch } from "@/lib/api-client";
 import { signUp } from "@/lib/auth-client";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
 import { LEGAL_DOCUMENTS, legalAcceptanceForm } from "@/lib/legal/documents";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 
@@ -336,6 +337,20 @@ describe("useRegistration — sesja po rejestracji", () => {
     expect(result.current.salonSetupError).toBe(
       "Nie udało się założyć salonu. Po zalogowaniu załóż go w panelu."
     );
+    expect(result.current.error).toBe("");
+  });
+
+  it("token obecny, 403 BETA_INVITE_ONLY: ekran potwierdzenia z komunikatem o becie na zaproszenie", async () => {
+    vi.mocked(mutationFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: false, code: BETA_INVITE_ONLY_CODE, error: "x" }), {
+        status: 403,
+      })
+    );
+    const { result } = await renderLoaded(null);
+    await fillAndSubmit(result);
+    expect(mutationFetch).toHaveBeenCalledTimes(1);
+    expect(result.current.showVerificationMessage).toBe(true);
+    expect(result.current.salonSetupError).toBe(BETA_INVITE_ONLY_MESSAGE);
     expect(result.current.error).toBe("");
   });
 

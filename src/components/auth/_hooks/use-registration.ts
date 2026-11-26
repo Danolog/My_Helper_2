@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { mutationFetch } from "@/lib/api-client";
 import { signUp } from "@/lib/auth-client";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
 import { sanitizeAuthError } from "@/lib/error-messages";
 import {
   LEGAL_ACCEPTANCE_REQUIRED_CODE,
@@ -44,18 +45,17 @@ const SALON_SETUP_FALLBACK_ERROR =
  * - 2xx: salon założony;
  * - 401: konto czeka na potwierdzenie e-maila, salon powstanie w panelu;
  * - 409: konto ma już salon z subskrypcją.
- * Każdy inny wynik (w tym 400 przy braku akceptacji dokumentów) jest widoczny.
+ * Każdy inny wynik (w tym 400 przy braku akceptacji dokumentów i 403 dla e-maila
+ * spoza listy bety) jest widoczny.
  */
 async function salonSetupErrorMessage(res: Response): Promise<string | null> {
   if (res.ok || res.status === 401 || res.status === 409) return null;
   const body: unknown = await res.json().catch(() => null);
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    (body as { code?: unknown }).code === LEGAL_ACCEPTANCE_REQUIRED_CODE
-  ) {
-    return LEGAL_ACCEPTANCE_REQUIRED_MESSAGE;
-  }
+  const code =
+    typeof body === "object" && body !== null ? (body as { code?: unknown }).code : undefined;
+  if (code === LEGAL_ACCEPTANCE_REQUIRED_CODE) return LEGAL_ACCEPTANCE_REQUIRED_MESSAGE;
+  // Beta na zaproszenie: konto powstało, salonu nie (e-mail spoza listy).
+  if (code === BETA_INVITE_ONLY_CODE) return BETA_INVITE_ONLY_MESSAGE;
   return SALON_SETUP_FALLBACK_ERROR;
 }
 
