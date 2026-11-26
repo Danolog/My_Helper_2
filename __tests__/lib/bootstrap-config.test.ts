@@ -1218,7 +1218,7 @@ describe("bloki kontroli 7b i odwrócenie 9b w interaktywnej powłoce", () => {
   };
 
   const world = () => {
-    const root = join(DIR, `g3-${n++}`);
+    const root = join(DIR, `blk7b-${n++}`);
     const bin = join(root, "bin");
     const rec = join(root, "rec");
     const tmp = join(root, "tmp");
