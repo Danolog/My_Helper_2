@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { Star, MessageSquare, RefreshCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { reviewLegalNotice, type ReviewLegalNotice } from "@/lib/legal/documents";
 import type { ReviewInfo } from "../_types";
 
 interface ReviewSectionProps {
@@ -21,6 +23,11 @@ interface ReviewSectionProps {
   onSetHoverRating: (rating: number) => void;
   onSetComment: (comment: string) => void;
   onSubmitReview: () => void;
+  /**
+   * Informacja o publiczności opinii przy formularzu; domyślnie stan z rejestru
+   * dokumentów (przed publikacją `null`: bez zdania i bez odnośnika do strony 404).
+   */
+  legalNotice?: ReviewLegalNotice | null;
 }
 
 export function ReviewSection({
@@ -37,6 +44,7 @@ export function ReviewSection({
   onSetHoverRating,
   onSetComment,
   onSubmitReview,
+  legalNotice = reviewLegalNotice(),
 }: ReviewSectionProps) {
   return (
     <Card className="mb-4" data-testid="review-section-card">
@@ -83,6 +91,7 @@ export function ReviewSection({
             onSetComment={onSetComment}
             onSubmit={onSubmitReview}
             onCancel={onResetReviewForm}
+            legalNotice={legalNotice}
           />
         )}
       </CardContent>
@@ -158,6 +167,7 @@ interface ReviewFormProps {
   onSetComment: (comment: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
+  legalNotice: ReviewLegalNotice | null;
 }
 
 function ReviewForm({
@@ -170,6 +180,7 @@ function ReviewForm({
   onSetComment,
   onSubmit,
   onCancel,
+  legalNotice,
 }: ReviewFormProps) {
   return (
     <div className="space-y-4" data-testid="review-form">
@@ -221,6 +232,21 @@ function ReviewForm({
           data-testid="review-comment-input"
         />
       </div>
+
+      {legalNotice && (
+        <p className="text-xs text-muted-foreground" data-testid="review-legal-notice">
+          {legalNotice.sentence} Zasady opinii:{" "}
+          <Link
+            href={legalNotice.terms.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            regulamin
+          </Link>
+          , pkt 8.3.
+        </p>
+      )}
 
       {/* Submit buttons */}
       <div className="flex gap-2 justify-end">

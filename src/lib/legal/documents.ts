@@ -226,6 +226,37 @@ export function bookingLegalNotice(
 }
 
 // ---------------------------------------------------------------------------
+// Informacja przy formularzu opinii klienta (UI)
+// ---------------------------------------------------------------------------
+
+/** Zdanie przy formularzu opinii, dosłownie z regulaminu (pkt 8.3). */
+export const REVIEW_PUBLICITY_SENTENCE =
+  "Opinia jest publiczna z imieniem i pierwszą literą nazwiska autora.";
+
+/** Informacja przy formularzu opinii: zdanie i odnośnik do regulaminu. */
+export type ReviewLegalNotice = {
+  readonly sentence: string;
+  readonly terms: LegalLink;
+};
+
+/**
+ * Informacja przy formularzu opinii klienta. Regulamin zapowiada, że klient
+ * zobaczy ją przy formularzu, więc pojawia się razem z regulaminem.
+ * `null`, dopóki strona regulaminu nie jest opublikowana: bez zdania
+ * i bez odnośnika do strony 404.
+ */
+export function reviewLegalNotice(
+  published: boolean = LEGAL_DOCS_PUBLISHED,
+  documents: LegalDocuments = LEGAL_DOCUMENTS,
+): ReviewLegalNotice | null {
+  if (!isLegalPagePublished("terms", published, documents)) return null;
+  return {
+    sentence: REVIEW_PUBLICITY_SENTENCE,
+    terms: { key: "terms", href: documents.terms.href, title: documents.terms.title },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Akceptacja przy zakładaniu konta klienta (UI, bez zapisu w bazie)
 // ---------------------------------------------------------------------------
 
