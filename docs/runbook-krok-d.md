@@ -699,6 +699,13 @@ uprawnienia roli: `SELECT` wyłącznie na `drizzle.__drizzle_migrations`
 i domyślny odczyt katalogu. `default_transaction_read_only` w `PGOPTIONS` to
 dodatkowe zabezpieczenie przed pomyłką (zapis kończy się błędem 25006).
 
+**Do zielonego D z sekcji 9b** (rola `myhelper_7b_ro` jeszcze nie istnieje albo
+test akceptacyjny nie jest zapisany) sesja główna nie łączy się z bazą wcale.
+Wdrożenie z migracjami czeka albo kontrolę a i kontrole po wdrożeniu wykonuje
+właściciel we własnym terminalu, blokiem połączenia z sekcji 9a, z
+`-c default_transaction_read_only=on` dopisanym do `PGOPTIONS` i z wpisem
+w rejestrze (sekcja 9c).
+
 a) liczba wpisów w `drizzle.__drizzle_migrations` równa 15; inna wartość = stop:
 
 ```sql
@@ -891,6 +898,13 @@ login aplikacji `myhelper_svc`. Z bazą łączy się wyłącznie rolą
 odczytać każdy sekret, więc to reguła procedury, a nie granica techniczna.
 Dowodem jest ślad Data Access Secret Managera (10b pkt 3) zestawiony
 z rejestrem odczytów właściciela (sekcja 9c).
+
+**Okres przejściowy.** Od scalenia tej wersji runbooka do zielonego D
+z sekcji 9b sesja główna nie łączy się z bazą wcale, także rolą
+`myhelper_7b_ro`. Wdrożenie z migracjami w tym czasie czeka albo kontrole
+z sekcji 7b wykonuje właściciel we własnym terminalu, blokiem połączenia
+z sekcji 9a, z `-c default_transaction_read_only=on` dopisanym do `PGOPTIONS`
+i z wpisem w rejestrze (sekcja 9c).
 
 **Uruchamia wyłącznie właściciel, we własnym terminalu.** Blok niżej łączy
 się jako `postgres` hasłem z `postgres-admin-password`. Sesja główna i agenci
@@ -1133,12 +1147,14 @@ właściciel i konto sesji głównej (rola owner na projekcie).
 
 ```bash
 set +x
-: "${P:?}" "${REGION:?}"
-CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets create postgres-7b-ro-password --replication-policy=user-managed --locations="${REGION}"
+: "${P:?}"
+CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets create postgres-7b-ro-password --replication-policy=user-managed --locations=europe-central2
 gcloud --project="${P}" secrets get-iam-policy postgres-7b-ro-password
 ```
 
-Oczekiwane: polityka sekretu bez `bindings`. Inny wynik = stop.
+Oczekiwane: polityka sekretu bez `bindings`. Inny wynik = stop. Lokalizacja
+replikacji jest stała (`europe-central2`, sekcja 0), a nie brana ze zmiennej
+`REGION`: strażnik zmiennej sprawdza tylko, czy nie jest pusta.
 
 ### A. Jako `postgres` (blok `postgres` z sekcji 9)
 
@@ -1198,22 +1214,34 @@ powtórzyć.
 
 **Gdy `set-password` padnie po zapisie do sekretu** (brak `pw=set`, a nowa
 wersja sekretu jest): nowa wersja nie pasuje do hasła roli, więc ją
-wyłączamy, zanim ktokolwiek jej użyje:
+wyłączamy, zanim ktokolwiek jej użyje. `NUMER` w drugiej linii to miejsce
+na numer wersji z pierwszej linii; wklejone bez zmiany kończy się błędem i niczego
+nie wyłącza:
 
 ```bash
 set +x
-gcloud --project="${P}" secrets versions list postgres-7b-ro-password --limit=1 --format='value(name,state)'
+: "${P:?}"
+gcloud --project="${P}" secrets versions list postgres-7b-ro-password --sort-by='~createTime' --limit=1 --format='value(name,state)'
 gcloud --project="${P}" secrets versions disable NUMER --secret=postgres-7b-ro-password
 ```
 
-**Hasło nie może trafić do logu audytu.** Po części C jeden odczyt wpisu
-Admin Activity zmiany użytkownika:
+**Hasło nie może trafić do logu audytu.** Po części C trzy odczyty wpisu
+Admin Activity zmiany użytkownika, każdy z odpowiedzią tak/nie i bez treści
+żądania na ekranie:
 
 ```bash
-gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='json(timestamp,protoPayload.request)'
+set +x
+: "${P:?}"
+gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(timestamp)'
+gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(protoPayload.request.body.name)'
+gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update" AND protoPayload.request.body.password:*' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(timestamp)'
 ```
 
-Oczekiwane: wpis jest, a w `request` nie ma pola z hasłem. Jest = hasło
+Oczekiwane: pierwszy odczyt daje znacznik czasu (wpis jest), drugi
+`myhelper_7b_ro` (ścieżka `protoPayload.request.body` jest właściwa), trzeci
+pusty wynik (w żądaniu nie ma pola z hasłem). Pusty wynik trzeciego odczytu
+dowodzi czegoś tylko razem z wynikiem drugiego: inny wynik drugiego = ścieżka
+pola jest inna, stop i analiza. Wynik trzeciego niepusty = hasło
 unieważnione (wyłączona wersja sekretu i `\password myhelper_7b_ro` z nową
 wartością) i dalej tylko wariant zapasowy niżej. Wyniku nie przepisujemy do
 repo ani komentarzy.
@@ -1313,7 +1341,8 @@ gcloud --project="${P}" secrets delete postgres-7b-ro-password
 ## 9c. Rejestr odczytów sekretów bazy przez właściciela
 
 **Zasada.** Każdy odczyt wartości `postgres-url` albo
-`postgres-admin-password` wykonuje wyłącznie właściciel i każdy ma wpis
+`postgres-admin-password` poza kontem usługi (niżej) wykonuje wyłącznie
+właściciel i każdy ma wpis
 w rejestrze, w dzienniku migracji, **przed** zamknięciem sesji, w której
 nastąpił. **Odczyt sekretu bez wpisu = incydent P0**, niezależnie od tego,
 kto go wykonał. Sesja główna tych sekretów nie czyta (sekcja 9), więc każdy
@@ -1336,26 +1365,43 @@ salonów):
 **Dowód.** Data Access `DATA_READ` dla `secretmanager.googleapis.com` jest
 włączone (10b pkt 3), więc każdy odczyt ma wpis audytu w `myhelper-audit`.
 Rejestr zestawia sesja główna: przy cotygodniowym odczycie kosztów i po
-każdej procedurze z sekcji 9, 9a i 9b. Odczyt zwraca wyłącznie czas i nazwę
-zasobu, bez adresów kont:
+każdej procedurze z sekcji 9, 9a i 9b.
+
+**Odczyty konta usługi są poza rejestrem.** Usługa i job `myhelper-migrate`
+działają jako `myhelper-runtime` (sekcja 3.6) i czytają `postgres-url` przy
+każdym starcie instancji i każdym przebiegu joba. To normalna praca usługi
+i joba, więc zestawienie je pomija, a rejestr ich nie obejmuje. Rejestr
+obejmuje odczyty wszystkich innych tożsamości.
+
+**Przed pierwszym zestawieniem** odczyt `auditConfigs` (ostatnie polecenie
+z podsekcji „Sprawdzenie” w 10b): oczekiwane `DATA_READ` dla
+`secretmanager.googleapis.com`. Bez tego pusty wynik zestawienia niczego
+nie dowodzi, więc brak `DATA_READ` = stop, zestawienia nie robimy.
+
+Odczyt zwraca wyłącznie czas i nazwę zasobu, bez adresów kont:
 
 ```bash
 set +x
-gcloud --project="${P}" logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND (protoPayload.resourceName:"/secrets/postgres-url/" OR protoPayload.resourceName:"/secrets/postgres-admin-password/")' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp,protoPayload.resourceName)'
+: "${P:?}"
+gcloud --project="${P}" logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND (protoPayload.resourceName:"/secrets/postgres-url/" OR protoPayload.resourceName:"/secrets/postgres-admin-password/") AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp,protoPayload.resourceName)'
 ```
 
 Każdy znacznik czasu ma odpowiadający mu wpis w rejestrze (ten sam sekret,
 czas w obrębie tej samej sesji). Znacznik bez wpisu = incydent P0: zgłoszenie
-do CTO i CRCO tego samego dnia, a do wyjaśnienia żadnych kolejnych odczytów
+od razu do właściciela (tylko on może powiedzieć, czy to jego pominięty wpis)
+i tego samego dnia do CTO i CRCO, a do wyjaśnienia żadnych kolejnych odczytów
 tych sekretów. Wynik zestawienia w dzienniku migracji: liczba odczytów
-i „wszystkie z wpisem” albo lista czasów bez wpisu.
+i „wszystkie z wpisem” albo lista czasów bez wpisu. Zestawienie robi sesja
+główna, czyli strona, której odczyty są sprawdzane, więc do czasu osobnego
+konta do zestawień ten sam wynik (liczba odczytów i „wszystkie z wpisem” albo
+lista czasów) trafia także do właściciela.
 
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
 Obowiązujący wariant (decyzja COO z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.
 Na produkcji były tylko konta testowe. Neona nie kasujemy, nie kopiujemy i nie zmieniamy do 0.13. Bramka bazy (j'): plan, wiersz 0.5 (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, etap 0).
 Z `docs/runbook-przelaczenie-bazy.md` obowiązują tylko kontrola ról (1.0 pkt 2) i próba odtworzenia; kopia w przód i wstecz (sekcje 2–3) nie obowiązuje, odchudzenie w osobnym PR.
-Kontrola ról 1.0 pkt 2 idzie przez `psql_csql_admin` (hasło administratora), więc uruchamia ją wyłącznie właściciel (odczyt sekretu = wpis w rejestrze, sekcja 9c). Rola `myhelper_7b_ro` (sekcja 9b) jej nie zastępuje: krok 1 sprawdza `current_user = myhelper_svc`, a nowa rola nie zmienia żadnego oczekiwanego wyniku tej kontroli.
+Kontrola ról 1.0 pkt 2 czyta dwa sekrety: `postgres-admin-password` (przez `psql_csql_admin`) i `postgres-url` (krok 1, przez `psql_csql_app`), więc uruchamia ją wyłącznie właściciel (odczyt każdego z dwóch sekretów = osobny wpis w rejestrze, sekcja 9c). Rola `myhelper_7b_ro` (sekcja 9b) jej nie zastępuje: krok 1 sprawdza `current_user = myhelper_svc`, a nowa rola nie zmienia żadnego oczekiwanego wyniku tej kontroli.
 
 ## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)
 
