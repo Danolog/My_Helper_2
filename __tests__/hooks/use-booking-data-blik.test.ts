@@ -17,10 +17,14 @@ const BLIK_PHONE = TEST_PHONE_NUMBERS[4]!;
 const SALON_CONTACT_PHONE = TEST_PHONE_NUMBERS[3]!;
 const GUEST_PHONE = TEST_PHONE;
 
+// Zadatek włączony (isDepositEnabled) — ten plik testuje ścieżkę zadatku,
+// która działa dopiero po jego włączeniu; stan wyłączony:
+// use-booking-data-deposits-disabled.test.ts.
 const flags = vi.hoisted(() => ({ blik: true }));
 vi.mock("@/lib/features", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/features")>()),
   isBlikDepositFlow: () => flags.blik,
+  isDepositEnabled: () => true,
 }));
 
 const sessionState = vi.hoisted(() => ({

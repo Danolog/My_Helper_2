@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
+import { isDepositEnabled } from "@/lib/features";
 import { ClientConsentsCard } from "./client-consents-card";
 import { ClientContactCard } from "./client-contact-card";
 import { ClientDepositCard } from "./client-deposit-card";
@@ -112,14 +113,17 @@ export function ClientProfileTab({
         onFavoriteEmployeeChange={onFavoriteEmployeeChange}
       />
 
-      <ClientDepositCard
-        formRequireDeposit={formRequireDeposit}
-        formDepositType={formDepositType}
-        formDepositValue={formDepositValue}
-        onRequireDepositChange={onRequireDepositChange}
-        onDepositTypeChange={onDepositTypeChange}
-        onDepositValueChange={onDepositValueChange}
-      />
+      {/* Zadatek wyłączony (isDepositEnabled): ustawienia zadatku nie istnieją. */}
+      {isDepositEnabled() && (
+        <ClientDepositCard
+          formRequireDeposit={formRequireDeposit}
+          formDepositType={formDepositType}
+          formDepositValue={formDepositValue}
+          onRequireDepositChange={onRequireDepositChange}
+          onDepositTypeChange={onDepositTypeChange}
+          onDepositValueChange={onDepositValueChange}
+        />
+      )}
 
       <ClientHealthPreferencesCard
         allergiesList={allergiesList}

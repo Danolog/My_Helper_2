@@ -583,6 +583,37 @@ describe("PUT /api/services/[id] — zadatek wyłączony", () => {
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
+  // Kolejność kodów: bramka zadatku stoi przed odczytem usługi, więc przy
+  // depositRequired: true brak usługi i usługa innego salonu dają 409, nie 404.
+  // 409 jest celowo taki sam dla usługi własnej i obcej: odpowiedź nie zdradza,
+  // czy usługa o tym id istnieje w innym salonie.
+  it.each([
+    ["nieistniejąca usługa", "99999999-9999-4999-8999-999999999999"],
+    ["usługa innego salonu", TEST_IDS.SERVICE_UUID],
+  ])("depositRequired: true, %s → 409 DEPOSITS_DISABLED (nie 404), bez UPDATE", async (_label, id) => {
+    // Gdyby trasa doszła do zapisu, UPDATE w obrębie salonu nie znalazłby wiersza (404).
+    mockDbUpdate.mockReturnValue(chainMock([]));
+
+    const { status, body } = await parseResponse(await put({ depositRequired: true }, id));
+
+    expect(status).toBe(409);
+    expect((body as any).code).toBe("DEPOSITS_DISABLED");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("depositRequired: true — ta sama odpowiedź 409 dla usługi własnej i obcej", async () => {
+    mockDbUpdate.mockReturnValue(chainMock([makeService()]));
+    const own = await parseResponse(await put({ depositRequired: true }));
+
+    mockDbUpdate.mockReturnValue(chainMock([]));
+    const foreign = await parseResponse(await put({ depositRequired: true }));
+
+    expect(own.status).toBe(409);
+    expect(foreign.status).toBe(409);
+    expect(foreign.body).toEqual(own.body);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
   it("depositRequired: false dla cudzej/nieistniejącej usługi → 404", async () => {
     mockDbUpdate.mockReturnValue(chainMock([]));
 

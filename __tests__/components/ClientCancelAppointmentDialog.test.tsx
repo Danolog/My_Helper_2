@@ -107,3 +107,33 @@ describe("CancelAppointmentDialog (portal klienta) — zadatek", () => {
     expect(document.body.textContent).not.toContain("Zadatek rozliczany przez salon");
   });
 });
+
+// Odpowiedź GET .../cancel: wizyta bez zadatku ma amount 0, action "none",
+// settledBySalon false — polityka 24 h i teksty o zadatku nie dotyczą jej.
+describe("CancelAppointmentDialog (portal klienta) — polityka 24 h a kwota zadatku", () => {
+  const DEPOSIT_TEXT = /zadat/i;
+
+  it("wizyta bez zadatku, <24 h: brak ramki polityki i tekstu o zadatku", () => {
+    const info = cancelInfo({ action: "none", settledBySalon: false }, "+48 600 100 200", 5);
+    renderDialog({ ...info, deposit: { ...info.deposit, amount: 0, paid: false } });
+    expect(screen.queryByTestId("cancellation-policy")).toBeNull();
+    expect(screen.queryByTestId("deposit-info")).toBeNull();
+    expect(document.body.textContent).not.toMatch(DEPOSIT_TEXT);
+    expect(document.body.textContent).toContain("Czy na pewno chcesz anulowac te wizyte?");
+  });
+
+  it("wizyta z zadatkiem > 0, <24 h: ramka polityki z tekstem o utracie zadatku", () => {
+    renderDialog(cancelInfo({ action: "forfeit", settledBySalon: false }, "+48 600 100 200", 5));
+    expect(screen.getByTestId("cancellation-policy-title").textContent).toBe("Anulacja z utrata zadatku");
+    expect(document.body.textContent).toContain(
+      "Uwaga: Anulacja mniej niz 24h przed wizyta oznacza utrate zadatku.",
+    );
+  });
+
+  it("zadatek rozliczany przez salon, <24 h: neutralna ramka salonu jak dotąd", () => {
+    renderDialog(cancelInfo({ action: "salon", settledBySalon: true }, "+48 600 100 200", 5));
+    expect(screen.getByTestId("cancellation-policy-title").textContent).toBe("Zadatek rozliczany przez salon");
+    expect(screen.getByTestId("deposit-info")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/utrate zadatku|utrata zadatku|bez kosztow/);
+  });
+});

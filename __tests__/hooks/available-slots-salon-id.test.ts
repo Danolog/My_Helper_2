@@ -31,8 +31,10 @@ vi.mock("@/lib/api-client", () => ({
 
 // Pakiety sa zamrozone (FROZEN_PROMOTION_TYPES); tu odmrazamy je, zeby dojsc do zapytania
 // o terminy w hooku pakietow.
+// Hook rezerwacji portalu czyta też flagę zadatku — tu bez znaczenia, wyłączona.
 vi.mock("@/lib/features", () => ({
   isPromotionTypeFrozen: () => false,
+  isDepositEnabled: () => false,
 }));
 
 const service = {

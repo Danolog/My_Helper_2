@@ -9,6 +9,13 @@ const USER_EMAIL = "klient.zalogowany@example.com";
 
 const mockSession: { data: unknown } = { data: null };
 
+// Zadatek włączony (isDepositEnabled) — przy wyłączonym hook o ustawienia
+// zadatku nie pyta wcale (use-booking-data-deposits-disabled.test.ts).
+vi.mock("@/lib/features", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/features")>()),
+  isDepositEnabled: () => true,
+}));
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: SALON_ID }),
 }));

@@ -31,8 +31,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { clientDepositPatch, depositsDisabledMessage } from "@/lib/deposit-ui";
 import { HEALTH_DATA_CONSENT_REQUIRED } from "@/lib/health-data-consent";
 import { validatePhone } from "@/lib/validations";
+
+// 409 DEPOSITS_DISABLED przy edycji karty: serwer odrzucił wymóg zadatku,
+// więc komunikat mówi wprost, co zmienić w formularzu, żeby zapis przeszedł.
+const CLIENT_DEPOSITS_DISABLED_MESSAGE =
+  "Zadatki są obecnie wyłączone. Odznacz zadatek: ustaw „Wymagaj zadatku” na „Nie” i zapisz ponownie.";
 
 export default function ClientProfilePage() {
   const params = useParams();
@@ -213,13 +219,19 @@ export default function ClientProfilePage() {
           ...healthDataPatch,
           favoriteEmployeeId: selectedFavoriteEmployeeId || null,
           birthday: formBirthday || null,
-          requireDeposit: formRequireDeposit,
-          depositType: formDepositType,
-          depositValue: formRequireDeposit && formDepositValue ? formDepositValue : null,
+          // Bez pól zadatku, gdy zadatek jest wyłączony (isDepositEnabled).
+          ...clientDepositPatch({
+            requireDeposit: formRequireDeposit,
+            depositType: formDepositType,
+            depositValue: formDepositValue,
+          }),
         }),
       });
 
       const data = await res.json();
+      // 409 DEPOSITS_DISABLED: komunikat z poleceniem odznaczenia zadatku
+      // zamiast ogólnego błędu (tekst API mówi tylko, że zadatki są wyłączone).
+      const isDepositsDisabled = depositsDisabledMessage(data) !== null;
 
       if (data.success) {
         const updatedClient = data.data as ClientData;
@@ -236,6 +248,8 @@ export default function ClientProfilePage() {
         setFormDepositType(updatedClient.depositType || "percentage");
         setFormDepositValue(updatedClient.depositValue || "");
         toast.success("Dane klienta zostaly zapisane");
+      } else if (isDepositsDisabled) {
+        toast.error(CLIENT_DEPOSITS_DISABLED_MESSAGE);
       } else if (data.code === HEALTH_DATA_CONSENT_REQUIRED) {
         // Np. zgodę cofnięto w innej karcie: komunikat przy polu alergii.
         const message = `${data.error} Jeśli zgodę zmieniono w innym oknie, odśwież stronę.`;

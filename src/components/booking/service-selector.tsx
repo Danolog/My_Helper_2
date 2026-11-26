@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
+import { isDepositEnabled } from "@/lib/features";
 import { formatDuration } from "./types";
 import type { ServiceItem, ServiceCategory, ServiceVariant } from "./types";
 
@@ -131,7 +132,7 @@ export function ServiceSelector({
                   {formatDuration(service.baseDuration)}
                 </span>
               </div>
-              {service.depositRequired && (
+              {isDepositEnabled() && service.depositRequired && (
                 <div className="flex items-center gap-1">
                   <CreditCard className="w-3 h-3 text-amber-500" />
                   <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
-import { isBlikDepositFlow, isPromotionTypeFrozen } from "@/lib/features";
+import { isBlikDepositFlow, isDepositEnabled, isPromotionTypeFrozen } from "@/lib/features";
 import { buildDepositBody, isDepositNotApplicable } from "../_lib/deposit-body";
 import type {
   SalonDetail,
@@ -162,13 +162,18 @@ export function useBookingData(): UseBookingDataReturn {
     ? selectedService.baseDuration + (selectedVariant?.durationModifier ?? 0)
     : 0;
 
+  // Zadatek wyłączony (isDepositEnabled): portal nie liczy zadatku i nie
+  // pokazuje kroku zadatku, nawet gdy dane salonu niosą stare flagi.
+  // Flagę czytamy przy każdym renderze, bez kopii.
+  const depositsEnabled = isDepositEnabled();
+
   // Deposit calculation - client-level settings override service-level
-  const serviceDepositRequired = selectedService?.depositRequired ?? false;
+  const serviceDepositRequired = depositsEnabled && (selectedService?.depositRequired ?? false);
   const serviceDepositPercentage =
     selectedService?.depositPercentage ?? DEFAULT_DEPOSIT_PERCENTAGE;
 
   // Client deposit settings take priority over service settings
-  const clientRequiresDeposit = clientDepositSettings?.requireDeposit ?? false;
+  const clientRequiresDeposit = depositsEnabled && (clientDepositSettings?.requireDeposit ?? false);
   const clientDepositType = clientDepositSettings?.depositType ?? "percentage";
   const clientDepositValue = clientDepositSettings?.depositValue
     ? parseFloat(clientDepositSettings.depositValue)
@@ -260,8 +265,9 @@ export function useBookingData(): UseBookingDataReturn {
   }, []);
 
   // Fetch client-specific deposit settings when session and salon are available
+  // (bez zapytania, gdy zadatek jest wyłączony — wynik i tak nie jest używany)
   useEffect(() => {
-    if (!session?.user?.email || !salonId) return;
+    if (!depositsEnabled || !session?.user?.email || !salonId) return;
 
     const abortController = new AbortController();
 
@@ -282,7 +288,7 @@ export function useBookingData(): UseBookingDataReturn {
     fetchClientDepositSettings();
 
     return () => abortController.abort();
-  }, [session?.user?.email, salonId]);
+  }, [depositsEnabled, session?.user?.email, salonId]);
 
   const fetchAssignedEmployees = useCallback(
     async (serviceId: string, signal?: AbortSignal) => {
