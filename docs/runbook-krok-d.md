@@ -958,9 +958,19 @@ set +x
 : "${P:?}"
 cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
+  PGOPTIONS='-c lock_timeout=5s -c idle_in_transaction_session_timeout=5min -c statement_timeout=30s' \
   psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
 kill %1
 ```
+
+Limity czasu idą w środowisku procesu `psql`, tak jak hasło. Pierwsze zapytanie
+w sesji: `SHOW idle_in_transaction_session_timeout;` → `5min`; inna wartość =
+wyjść. Kroki 2–4 wykonuj jednym ciągiem, bez przerw; nie zostawiaj otwartej
+transakcji. Jeśli `psql` wypisze komunikat o utracie połączenia albo
+o przekroczeniu limitu bezczynności w transakcji, nie wpisuj kolejnych
+poleceń. Wyjdź z `psql`, zamknij proxy i zacznij od kroku 2 w nowej sesji.
+Zmiany nie ma, więc kopia z kroku 1 zostaje ważna. Jeśli `COMMIT;` wypisze
+`ROLLBACK`, zmiany też nie ma.
 
 **Data w UTC.** Kolumna `salon_subscriptions.trial_ends_at` nie ma strefy
 czasowej, a aplikacja zapisuje i porównuje w niej czas UTC. Datę podajemy
