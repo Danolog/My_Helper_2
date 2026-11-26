@@ -254,7 +254,11 @@ export function isBlikDepositFlow(): boolean {
  *   prowadzi do płatności, a `POST /api/deposits/create-session` odpowiada
  *   400 `DEPOSIT_NOT_APPLICABLE` (portal przechodzi wtedy do zwykłej
  *   rezerwacji; 409 portal pokazuje jako zajęty termin), zanim cokolwiek
- *   trafi do dostawcy płatności.
+ *   trafi do dostawcy płatności;
+ * - interfejs: karta ustawień zadatku klienta się nie renderuje, edycja
+ *   klienta nie wysyła pól zadatku (`clientDepositPatch` w
+ *   `src/lib/deposit-ui.ts`), a hook rezerwacji portalu nie liczy zadatku
+ *   i nie pyta o ustawienia zadatku klienta.
  *
  * Odblokowanie dopiero po zatwierdzeniu ścieżki zadatku: płatność BLIK na
  * telefon salonu (`isBlikDepositFlow()`), opublikowana polityka prywatności

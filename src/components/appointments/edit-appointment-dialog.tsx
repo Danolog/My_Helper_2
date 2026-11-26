@@ -26,6 +26,7 @@ import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { notesChange } from "@/lib/appointment-notes";
+import { depositsDisabledMessage } from "@/lib/deposit-ui";
 
 interface Client {
   id: string;
@@ -339,6 +340,8 @@ export function EditAppointmentDialog({
       });
 
       const data = await res.json();
+      // 409 DEPOSITS_DISABLED: komunikat z API zamiast ogólnego błędu.
+      const depositsDisabledError = depositsDisabledMessage(data);
 
       if (data.success) {
         const notificationMsg = notifyClient && appointment.client
@@ -349,6 +352,8 @@ export function EditAppointmentDialog({
         });
         onOpenChange(false);
         onAppointmentUpdated();
+      } else if (depositsDisabledError) {
+        toast.error(depositsDisabledError);
       } else {
         toast.error("Nie udalo sie zaktualizowac wizyty", {
           description: data.error,

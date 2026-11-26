@@ -13,9 +13,12 @@ const EMPLOYEE_ID = "employee-1";
 
 // Ten plik testuje ścieżkę płatności online (create-session) — przełącznik
 // zadatku BLIK przypięty na false, żeby zmiana jego ciała nie zmieniła testu.
+// Zadatek włączony (isDepositEnabled) — bez tego hook nie idzie do
+// create-session; stan wyłączony: use-booking-data-deposits-disabled.test.ts.
 vi.mock("@/lib/features", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/features")>()),
   isBlikDepositFlow: () => false,
+  isDepositEnabled: () => true,
 }));
 
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: SALON_ID }) }));

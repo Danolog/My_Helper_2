@@ -31,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { clientDepositPatch, depositsDisabledMessage } from "@/lib/deposit-ui";
 import { HEALTH_DATA_CONSENT_REQUIRED } from "@/lib/health-data-consent";
 import { validatePhone } from "@/lib/validations";
 
@@ -213,13 +214,18 @@ export default function ClientProfilePage() {
           ...healthDataPatch,
           favoriteEmployeeId: selectedFavoriteEmployeeId || null,
           birthday: formBirthday || null,
-          requireDeposit: formRequireDeposit,
-          depositType: formDepositType,
-          depositValue: formRequireDeposit && formDepositValue ? formDepositValue : null,
+          // Bez pól zadatku, gdy zadatek jest wyłączony (isDepositEnabled).
+          ...clientDepositPatch({
+            requireDeposit: formRequireDeposit,
+            depositType: formDepositType,
+            depositValue: formDepositValue,
+          }),
         }),
       });
 
       const data = await res.json();
+      // 409 DEPOSITS_DISABLED: komunikat z API zamiast ogólnego błędu.
+      const depositsDisabledError = depositsDisabledMessage(data);
 
       if (data.success) {
         const updatedClient = data.data as ClientData;
@@ -236,6 +242,8 @@ export default function ClientProfilePage() {
         setFormDepositType(updatedClient.depositType || "percentage");
         setFormDepositValue(updatedClient.depositValue || "");
         toast.success("Dane klienta zostaly zapisane");
+      } else if (depositsDisabledError) {
+        toast.error(depositsDisabledError);
       } else if (data.code === HEALTH_DATA_CONSENT_REQUIRED) {
         // Np. zgodę cofnięto w innej karcie: komunikat przy polu alergii.
         const message = `${data.error} Jeśli zgodę zmieniono w innym oknie, odśwież stronę.`;
