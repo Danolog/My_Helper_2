@@ -226,7 +226,9 @@ export function isBlikDepositFlow(): boolean {
  * - odczyt: `calculateExpectedDeposit` zwraca „brak zadatku” także dla
  *   wierszy zapisanych wcześniej z flagą, więc żadna trasa rezerwacji nie
  *   prowadzi do płatności, a `POST /api/deposits/create-session` odpowiada
- *   409 `DEPOSITS_DISABLED`, zanim cokolwiek trafi do dostawcy płatności.
+ *   400 `DEPOSIT_NOT_APPLICABLE` (portal przechodzi wtedy do zwykłej
+ *   rezerwacji; 409 portal pokazuje jako zajęty termin), zanim cokolwiek
+ *   trafi do dostawcy płatności.
  *
  * Odblokowanie dopiero po zatwierdzeniu ścieżki zadatku: płatność BLIK na
  * telefon salonu (`isBlikDepositFlow()`), opublikowana polityka prywatności
