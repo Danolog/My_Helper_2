@@ -1188,3 +1188,202 @@ for a in "$@"; do printf '%s\\n' "$a"; done > "$REC/psql.argv"
     15_000,
   );
 });
+
+// Bloki kontroli 7b (sekcja 9: zmienna środowiskowa, plik haseł, Docker) i usunięcie sekretu
+// w odwróceniu 9b, wykonane tak, jak są wklejane: na stdin interaktywnej powłoki (`bash -i`,
+// `zsh -f -i`), z atrapami gcloud, cloud-sql-proxy, nc, psql, docker i mktemp.
+describe("G-D3: bloki kontroli 7b i odwrócenie 9b w interaktywnej powłoce", () => {
+  const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
+  const bashBlocks = (s: string) => [...s.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? "");
+  const s7b = RUNBOOK.slice(RUNBOOK.indexOf("**Blok kontroli 7b"), RUNBOOK.indexOf("## 9a."));
+  const s9b = RUNBOOK.slice(RUNBOOK.indexOf("## 9b."), RUNBOOK.indexOf("## 9c."));
+  const [B_ENV = "", B_FILE = "", B_DOCKER = ""] = bashBlocks(s7b);
+  const B_DELETE = bashBlocks(s9b.slice(s9b.indexOf("### Odwrócenie"))).at(0) ?? "";
+  const PW = "Haslo7bTestowe0123456789abcdefXY";
+  const ALL3 = { P: "proj-test", REGION: "europe-central2", INSTANCE: "inst-test" };
+
+  const SHELLS: [string, string[]][] = [
+    ["bash", ["-i"]],
+    ...(existsSync("/bin/zsh") ? ([["/bin/zsh", ["-f", "-i"]]] as [string, string[]][]) : []),
+  ];
+
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const world = () => {
+    const root = join(DIR, `g3-${n++}`);
+    const bin = join(root, "bin");
+    const rec = join(root, "rec");
+    const tmp = join(root, "tmp");
+    const home = join(root, "home");
+    for (const d of [bin, rec, tmp, home]) mkdirSync(d, { recursive: true });
+    const sh = (name: string, body: string) => {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
+      chmodSync(join(bin, name), 0o755);
+    };
+    const argv = (f: string) => `for a in "$@"; do printf '%s\\n' "$a"; done >> "$REC/${f}"\n`;
+    sh("cloud-sql-proxy", `${argv("proxy.argv")}echo $$ > "$REC/proxy.pid"\nexec /bin/sleep 30\n`);
+    sh("nc", "exit 0\n");
+    sh(
+      "gcloud",
+      `${argv("gcloud.argv")}for f in "$TMPDIR"/tmp.*; do [ -e "$f" ] && ls -ln "$f" | cut -c1-10 >> "$REC/gcloud.modes"; done
+case " $* " in *" versions access "*) printf '%s' "$FAKE_PW" ;; esac
+exit 0
+`,
+    );
+    sh(
+      "psql",
+      `${argv("psql.argv")}printf '%s' "\${PGPASSWORD-}" > "$REC/psql.pw"
+if [ -n "\${PGPASSFILE-}" ]; then ls -ln "$PGPASSFILE" | cut -c1-10 > "$REC/psql.mode"; cat "$PGPASSFILE" > "$REC/psql.passfile"; fi
+`,
+    );
+    sh("docker", `${argv("docker.argv")}printf '%s' "\${PGPASSWORD-}" > "$REC/docker.pw"\n`);
+    sh("mktemp", `exec /usr/bin/mktemp "$TMPDIR/tmp.XXXXXXXXXX"\n`);
+    const read = (f: string) => (existsSync(join(rec, f)) ? readFileSync(join(rec, f), "utf8") : "");
+    const run = (shell: [string, string[]], block: string, vars: Record<string, string>) =>
+      spawnSync(shell[0], shell[1], {
+        encoding: "utf8",
+        cwd: root,
+        input: `${block}\n`,
+        env: {
+          NODE_ENV: "test" as const,
+          PATH: `${bin}:${process.env.PATH}`,
+          REC: rec,
+          TMPDIR: tmp,
+          HOME: home,
+          PS1: "",
+          PROMPT: "",
+          BASH_SILENCE_DEPRECATION_WARNING: "1",
+          FAKE_PW: PW,
+          ...vars,
+        },
+      });
+    const leftovers = () => readdirSync(tmp);
+    const proxyDead = async () => {
+      const raw = read("proxy.pid").trim();
+      if (!raw) return true;
+      const pid = Number(raw);
+      for (let i = 0; i < 40 && alive(pid); i++) await new Promise((res) => setTimeout(res, 50));
+      const dead = !alive(pid);
+      if (!dead) process.kill(pid, "SIGKILL");
+      return dead;
+    };
+    return { read, run, leftovers, proxyDead };
+  };
+
+  it("bloki znalezione: trzy bloki 7b i usunięcie sekretu; żaden bez otoczki `if`, żaden ze strażnikiem `:?`", () => {
+    for (const b of [B_ENV, B_FILE, B_DOCKER]) {
+      expect(b).toContain("myhelper_7b_ro");
+      expect(b.split("\n")[1]).toBe('if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then');
+    }
+    expect(B_DELETE).toContain("secrets delete postgres-7b-ro-password");
+    expect(B_DELETE.split("\n")[1]).toBe('if [ -n "${P-}" ]; then');
+    for (const b of [B_ENV, B_FILE, B_DOCKER, B_DELETE]) {
+      expect(b.split("\n")[0]).toBe("set +x");
+      expect(b).not.toContain(":?");
+    }
+    expect(B_FILE).toContain("require_auth=scram-sha-256");
+    // zsh: w otoczce `if` pierwszym zadaniem jest sama otoczka, proxy ma numer 2 — `%1` go nie trafia.
+    for (const b of [B_ENV, B_FILE, B_DOCKER]) {
+      expect(b).toContain("\n  kill $!\n");
+      expect(b).not.toContain("%1");
+      expect(b.split("\n").filter((l) => l.endsWith(" &"))).toHaveLength(1);
+    }
+    // readline w terminalu bez UTF-8 psuje znaki spoza ASCII w wklejonej linii.
+    for (const b of [B_ENV, B_FILE, B_DOCKER, B_DELETE]) expect(b).toMatch(/^[\x20-\x7e\n]*$/);
+  });
+
+  describe.each(SHELLS)("powłoka %s (interaktywna)", (shellName, shellArgs) => {
+    const shell: [string, string[]] = [shellName, shellArgs];
+
+    // Dowód, dlaczego otoczka: w powłoce interaktywnej `: "${P:?}"` nie zatrzymuje kolejnych linii.
+    it("stary strażnik `: \"${P:?}\"` nie zatrzymuje kolejnych wklejonych linii (powód otoczki `if`)", () => {
+      const w = world();
+      const r = w.run(shell, ': "${P:?}"\necho DALEJ-PO-STRAZNIKU', {});
+      expect(r.stdout + r.stderr).toContain("DALEJ-PO-STRAZNIKU");
+    });
+
+    it.each([
+      ["zmienna", () => B_ENV],
+      ["plik haseł", () => B_FILE],
+      ["Docker", () => B_DOCKER],
+    ])("blok 7b (%s): brak P, REGION albo INSTANCE → zero gcloud, zero proxy, zero psql/docker, komunikat stop", async (_n, get) => {
+      for (const missing of ["P", "REGION", "INSTANCE"] as const) {
+        const w = world();
+        const vars: Record<string, string> = { ...ALL3 };
+        delete vars[missing];
+        const r = w.run(shell, get(), vars);
+        expect(w.read("gcloud.argv"), missing).toBe("");
+        expect(w.read("proxy.argv"), missing).toBe("");
+        expect(w.read("psql.argv"), missing).toBe("");
+        expect(w.read("docker.argv"), missing).toBe("");
+        expect(r.stderr, missing).toContain("stop: P, REGION or INSTANCE not set - block not run");
+        expect(w.leftovers(), missing).toEqual([]);
+        expect(await w.proxyDead()).toBe(true);
+      }
+    }, 20_000);
+
+    it("blok 7b (zmienna): hasło tylko w środowisku psql — nie w argumentach i nie na wyjściu; proxy zamknięte", async () => {
+      const w = world();
+      const r = w.run(shell, B_ENV, ALL3);
+      expect(w.read("psql.pw")).toBe(PW);
+      for (const f of ["gcloud.argv", "proxy.argv", "psql.argv"]) expect(w.read(f), f).not.toContain(PW);
+      expect(r.stdout + r.stderr).not.toContain(PW);
+      expect(w.read("proxy.argv")).toContain("proj-test:europe-central2:inst-test");
+      expect(w.read("gcloud.argv").split("\n")).toEqual(expect.arrayContaining(["--project=proj-test", "--secret=postgres-7b-ro-password"]));
+      expect(await w.proxyDead(), "proxy żyje po bloku").toBe(true);
+    }, 20_000);
+
+    it("blok 7b (plik haseł): plik 0600 przy zapisie i przy psql, hasło tylko w pliku, plik znika po bloku; require_auth", async () => {
+      const w = world();
+      const r = w.run(shell, B_FILE, ALL3);
+      const modes = w.read("gcloud.modes").split("\n").filter(Boolean);
+      expect(modes, "plik istnieje przed odczytem sekretu").not.toEqual([]);
+      for (const m of modes) expect(m).toBe("-rw-------");
+      expect(w.read("psql.mode").trim()).toBe("-rw-------");
+      expect(w.read("psql.passfile")).toBe(`127.0.0.1:6543:myhelper:myhelper_7b_ro:${PW}\n`);
+      expect(w.read("psql.pw"), "PGPASSWORD pusty").toBe("");
+      for (const f of ["gcloud.argv", "proxy.argv", "psql.argv"]) expect(w.read(f), f).not.toContain(PW);
+      expect(r.stdout + r.stderr).not.toContain(PW);
+      expect(w.read("psql.argv")).toContain("require_auth=scram-sha-256");
+      expect(w.leftovers(), "plik haseł usunięty").toEqual([]);
+      expect(await w.proxyDead(), "proxy żyje po bloku").toBe(true);
+    }, 20_000);
+
+    it("blok 7b (Docker): `-e` wyłącznie z samą nazwą (bez `=`), hasło w środowisku docker, nie w argumentach", async () => {
+      const w = world();
+      const r = w.run(shell, B_DOCKER, ALL3);
+      const args = w.read("docker.argv").split("\n").filter(Boolean);
+      const envArgs = args.flatMap((a, i) => (a === "-e" ? [args[i + 1] ?? ""] : []));
+      expect(envArgs).toEqual(["PGPASSWORD", "PGOPTIONS"]);
+      for (const a of args) expect(a, a).not.toMatch(/^-e.+|^--env/);
+      for (const a of envArgs) expect(a).not.toContain("=");
+      expect(w.read("docker.pw")).toBe(PW);
+      expect(w.read("docker.argv")).not.toContain(PW);
+      expect(w.read("gcloud.argv")).not.toContain(PW);
+      expect(r.stdout + r.stderr).not.toContain(PW);
+      expect(await w.proxyDead(), "proxy żyje po bloku").toBe(true);
+    }, 20_000);
+
+    it("odwrócenie 9b: brak P → zero gcloud i komunikat stop; z P → `secrets delete` z jawnym --project", () => {
+      const w0 = world();
+      const r0 = w0.run(shell, B_DELETE, {});
+      expect(w0.read("gcloud.argv")).toBe("");
+      expect(r0.stderr).toContain("stop: P not set - block not run");
+      const w1 = world();
+      w1.run(shell, B_DELETE, { P: "proj-test" });
+      expect(w1.read("gcloud.argv").split("\n").filter(Boolean)).toEqual([
+        "--project=proj-test",
+        "secrets",
+        "delete",
+        "postgres-7b-ro-password",
+      ]);
+    });
+  });
+});

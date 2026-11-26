@@ -870,6 +870,14 @@ gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-centra
 
 Po tym kroku `--check` kończy się kodem 0 (wznowione zgodne z tabelą).
 
+**`mh-sms-reminders` w stanie `ENABLED` przed bramką bety** (w liście zadań
+albo w `--check`) = natychmiast pauza, bez czekania na decyzję:
+`gcloud --project=my-helper-2-488419 scheduler jobs pause mh-sms-reminders --location=europe-central2`,
+potem lista zadań ze stanem jak wyżej (oczekiwane `PAUSED`) i zgłoszenie
+właścicielowi. `scheduler.sh` nie ma trybu samej pauzy; przebieg domyślny
+też wstrzymuje wszystkie zadania, ale przy tym czyta sekret i aktualizuje
+nagłówki.
+
 Zadań jest 6 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
 spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
 pierwszym wywołaniem gcloud.
@@ -953,43 +961,76 @@ aplikacji (`myhelper_svc`) ma zapis, więc kontrola 7b idzie rolą tylko do
 odczytu z sekcji 9b. Warunek (dla sesji głównej; w D blok uruchamia
 właściciel): rola utworzona i test akceptacyjny z 9b zapisany w dzienniku
 migracji. Zmienne: `P` (identyfikator projektu),
-`REGION`, `INSTANCE` (instancja Cloud SQL); brak którejkolwiek = stop, nie
-kontynuować. Hasło idzie z sekretu prosto do zmiennej środowiskowej procesu
+`REGION`, `INSTANCE` (instancja Cloud SQL). Cały blok stoi w otoczce
+`if … then … else … fi`: brak którejkolwiek zmiennej = komunikat na stderr
+i żadne polecenie bloku się nie wykonuje (zero `gcloud`, zero proxy).
+Strażnik `: "${P:?}"` tu nie wystarcza: w powłoce interaktywnej (zsh i bash)
+pusta zmienna przerywa tylko tę jedną linię, a kolejne wklejone linie
+wykonują się dalej. Proxy zamyka `kill $!` (PID ostatniego procesu w tle),
+nie `kill %1`: w zsh pierwszym zadaniem jest sama otoczka `if`, a proxy
+dostaje numer 2, więc `%1` go nie trafia. `$!` bez cudzysłowu: w interaktywnym
+zsh `"$!"` uruchamia rozwijanie historii. Komunikat stop jest w ASCII, bo
+readline w terminalu bez UTF-8 psuje znaki spoza ASCII w wklejonej linii.
+Hasło idzie z sekretu prosto do zmiennej środowiskowej procesu
 `psql` — nie trafia na ekran, do argumentów, historii ani pliku. Pętla po
 starcie proxy czeka do 30 s, aż port przyjmie połączenie. `psql -w` nie pyta
 o hasło: pusty sekret kończy się głośnym błędem logowania, a nie promptem.
 `application_name=runbook-7b` oznacza sesję w `pg_stat_activity`, więc przed
-jobem migracji widać, czy kontrola nie została otwarta:
+jobem migracji widać, czy kontrola nie została otwarta. Zalecane jest
+dopisanie `require_auth=scram-sha-256` do napisu połączenia (jak w wariancie
+dla stacji współdzielonej niżej): `psql` odmówi wtedy wysłania hasła
+procesowi, który na porcie 6543 poprosi o inną metodę uwierzytelnienia:
 
 ```bash
 set +x
-: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
-cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
-for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
-PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
-  PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
-  psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
-kill %1
+if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then
+  cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+  for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
+  PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
+    PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+    psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
+  kill $!
+else
+  echo "stop: P, REGION or INSTANCE not set - block not run" >&2
+fi
 ```
 
 **Stacja współdzielona z innymi użytkownikami** — hasło nie idzie przez
 `PGPASSWORD`, tylko przez plik haseł `psql` z prawami 0600, usuwany na końcu
 bloku. Hasło roli ma wyłącznie litery i cyfry (9b część C), więc nie wymaga
-znaków ucieczki w pliku:
+znaków ucieczki w pliku.
+
+Na takiej stacji inny użytkownik może zająć port 6543 przed naszym proxy:
+proxy wtedy nie wstaje, pętla `nc` widzi otwarty port, a `psql` łączy się
+z obcym procesem bez TLS (`sslmode=disable`). Dlatego napis połączenia ma
+`require_auth=scram-sha-256`: `psql` przyjmuje wyłącznie SCRAM, więc hasło
+nie wyjdzie otwartym tekstem, nawet gdy obcy proces o nie poprosi. Opcja
+wymaga `psql` z libpq 16 lub nowszym; starszy klient kończy się głośnym
+błędem nieznanej opcji połączenia. Wtedy najpierw aktualizacja klienta
+`psql`. Wariantu Docker na stacji współdzielonej nie używamy (niżej).
+
+**Blok przerwany przed końcem** (Ctrl-C, błąd, zamknięty terminal): plik
+haseł zostaje w `$TMPDIR`. Przed czymkolwiek innym: w tej samej powłoce
+`rm -f "$PF"` i `kill $!`; po zamkniętym terminalu usunięcie tego pliku
+ręcznie (nazwa `tmp.` i losowy ciąg, prawa `-rw-------`, czas utworzenia
+z chwili uruchomienia bloku).
 
 ```bash
 set +x
-: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
-PF="$(mktemp)"
-chmod 600 "$PF"
-printf '127.0.0.1:6543:myhelper:myhelper_7b_ro:%s\n' "$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" > "$PF"
-cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
-for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
-PGPASSFILE="$PF" PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
-  psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
-kill %1
-rm -f "$PF"
-unset PF
+if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then
+  PF="$(mktemp)"
+  chmod 600 "$PF"
+  printf '127.0.0.1:6543:myhelper:myhelper_7b_ro:%s\n' "$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" > "$PF"
+  cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+  for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
+  PGPASSFILE="$PF" PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+    psql -w "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable require_auth=scram-sha-256 application_name=runbook-7b"
+  kill $!
+  rm -f "$PF"
+  unset PF
+else
+  echo "stop: P, REGION or INSTANCE not set - block not run" >&2
+fi
 ```
 
 Pierwsze zapytanie w sesji (oczekiwane `myhelper_7b_ro|on`; inny wynik =
@@ -1007,23 +1048,32 @@ z RLS w głośny błąd 42501 zamiast cichego pustego wyniku. Rola ma
 logowania, a nie zawieszenie — wtedy zamknąć tamtą sesję i powtórzyć.
 
 **Bez `psql` na stacji** — pełny blok z klientem z obrazu Postgresa w miejsce
-`psql` na stacji (strażnik zmiennych, proxy, czekanie na port i `kill %1` jak
-wyżej). Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
+`psql` na stacji (otoczka `if` ze sprawdzeniem zmiennych, proxy, czekanie na
+port i `kill $!` jak wyżej). Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
 wartość z otoczenia procesu `docker`), nigdy `-e NAZWA=wartość`; hasło
 wyłącznie przez zmienną środowiskową. `host.docker.internal` działa tylko
 w Docker Desktop (macOS, Windows); na Linuksie bez Docker Desktop zamiast
-niego `--network host` i `host=127.0.0.1`:
+niego `--network host` i `host=127.0.0.1`. Klient z obrazu `pg18` obsługuje
+`require_auth=scram-sha-256`, więc dopisanie tej opcji do napisu połączenia
+jest zalecane jak w pierwszym bloku.
+
+**Na stacji współdzielonej wariant Docker jest niedozwolony:** `PGPASSWORD`
+przekazane przez `-e` widać w `docker inspect`, dopóki kontener działa,
+a dostęp do Dockera ma każdy z grupy `docker`.
 
 ```bash
 set +x
-: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
-cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
-for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
-PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
-  PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
-  docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
-  psql -w "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
-kill %1
+if [ -n "${P-}" ] && [ -n "${REGION-}" ] && [ -n "${INSTANCE-}" ]; then
+  cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+  for i in {1..30}; do nc -z 127.0.0.1 6543 2>/dev/null && break; sleep 1; done
+  PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
+    PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+    docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
+    psql -w "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable application_name=runbook-7b"
+  kill $!
+else
+  echo "stop: P, REGION or INSTANCE not set - block not run" >&2
+fi
 ```
 
 **zsh:** w zapisie `$P:europe-central2` zsh czyta `:e` jako modyfikator
@@ -1384,12 +1434,17 @@ REVOKE CONNECT ON DATABASE myhelper FROM myhelper_7b_ro;
 DROP ROLE myhelper_7b_ro;
 ```
 
-Na końcu sekret i wpis w dzienniku migracji:
+Na końcu sekret i wpis w dzienniku migracji. Ta sama otoczka `if` co
+w blokach kontroli 7b: bez `P` polecenie się nie wykonuje (pusty
+`--project=` skierowałby `delete` do domyślnego projektu gcloud):
 
 ```bash
 set +x
-: "${P:?}"
-gcloud --project="${P}" secrets delete postgres-7b-ro-password
+if [ -n "${P-}" ]; then
+  gcloud --project="${P}" secrets delete postgres-7b-ro-password
+else
+  echo "stop: P not set - block not run" >&2
+fi
 ```
 
 ## 9c. Rejestr odczytów sekretów bazy przez właściciela
