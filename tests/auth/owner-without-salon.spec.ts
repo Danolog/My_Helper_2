@@ -19,6 +19,9 @@ import { test, expect } from '../fixtures';
  * Beta na zaproszenie: salon zakłada tylko konto z listy
  * BETA_ALLOWED_OWNER_EMAILS serwera. Test ścieżki udanej używa adresu z
  * E2E_INVITED_OWNER_EMAIL — workflow CI ustawia ten sam adres w obu zmiennych.
+ * Bramka wymaga też potwierdzonego e-maila; bez poczty w CI konto testu ma
+ * niepotwierdzony adres, więc workflow ustawia BETA_ALLOW_UNVERIFIED_OWNER=1
+ * (przełącznik ignorowany na każdym hostingu).
  * Test odmowy używa losowego adresu spoza listy.
  */
 const PANEL_PATHS = ['/dashboard', '/dashboard/clients'] as const;

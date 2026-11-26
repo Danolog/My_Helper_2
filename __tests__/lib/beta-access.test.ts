@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BETA_INVITE_ONLY_MESSAGE,
   betaAllowedOwnerEmails,
+  canCreateSalon,
   isBetaOwnerAllowed,
 } from "@/lib/beta-access";
 import { SUPPORT_CONTACT } from "@/lib/support-contact";
@@ -59,6 +60,53 @@ describe("isBetaOwnerAllowed — zmienna BETA_ALLOWED_OWNER_EMAILS", () => {
     vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", undefined);
     vi.stubEnv("NODE_ENV", "development");
     expect(isBetaOwnerAllowed("owner-a@example.com")).toBe(false);
+  });
+});
+
+describe("canCreateSalon — lista i potwierdzony e-mail", () => {
+  const LIST = { BETA_ALLOWED_OWNER_EMAILS: "owner-a@example.com" };
+  const VERIFIED = { email: "Owner-A@example.com ", emailVerified: true };
+  const UNVERIFIED = { email: "owner-a@example.com", emailVerified: false };
+
+  it("na liście i potwierdzony → true", () => {
+    expect(canCreateSalon(VERIFIED, LIST)).toBe(true);
+  });
+
+  it("potwierdzony, ale spoza listy → false", () => {
+    expect(canCreateSalon({ email: "intruz@example.com", emailVerified: true }, LIST)).toBe(false);
+  });
+
+  it.each([false, null, undefined])("na liście, emailVerified = %s → false", (emailVerified) => {
+    expect(canCreateSalon({ email: "owner-a@example.com", emailVerified }, LIST)).toBe(false);
+  });
+
+  it("pusta lista → false także dla potwierdzonego", () => {
+    expect(canCreateSalon(VERIFIED, {})).toBe(false);
+  });
+
+  it("przełącznik BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem → true dla niepotwierdzonego z listy", () => {
+    expect(canCreateSalon(UNVERIFIED, { ...LIST, BETA_ALLOW_UNVERIFIED_OWNER: "1" })).toBe(true);
+  });
+
+  it.each([["true"], ["yes"], [""], ["0"]])("przełącznik o wartości %j (nie \"1\") → false", (value) => {
+    expect(canCreateSalon(UNVERIFIED, { ...LIST, BETA_ALLOW_UNVERIFIED_OWNER: value })).toBe(false);
+  });
+
+  it.each([
+    ["Vercel", { VERCEL: "1" }],
+    ["Cloud Run", { K_SERVICE: "myhelper" }],
+  ])("przełącznik na hostingu %s ignorowany → false", (_n, hosting) => {
+    expect(canCreateSalon(UNVERIFIED, { ...LIST, BETA_ALLOW_UNVERIFIED_OWNER: "1", ...hosting })).toBe(false);
+  });
+
+  it("przełącznik nie zależy od NODE_ENV (development bez przełącznika → false)", () => {
+    expect(canCreateSalon(UNVERIFIED, { ...LIST, NODE_ENV: "development" })).toBe(false);
+  });
+
+  it("przełącznik nie omija listy", () => {
+    expect(
+      canCreateSalon({ email: "intruz@example.com", emailVerified: false }, { ...LIST, BETA_ALLOW_UNVERIFIED_OWNER: "1" })
+    ).toBe(false);
   });
 });
 

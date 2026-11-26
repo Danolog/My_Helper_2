@@ -266,9 +266,13 @@ jobs:
         # Beta na zaproszenie: jeden testowy adres na liście serwera E2E i ten sam
         # adres dla testu udanego zakładania salonu (tests/auth/owner-without-salon.spec.ts).
         # Wartość testowa, nie sekret; każdy inny adres dostaje 403 (test odmowy).
+        # CI nie ma dostawcy poczty, więc konto testu ma niepotwierdzony e-mail:
+        # BETA_ALLOW_UNVERIFIED_OWNER=1 dopuszcza je TYLKO poza hostingiem
+        # (src/lib/beta-access.ts ignoruje przełącznik na Vercelu i Cloud Run).
         env:
           BETA_ALLOWED_OWNER_EMAILS: invited-owner-e2e@example.com
           E2E_INVITED_OWNER_EMAIL: invited-owner-e2e@example.com
+          BETA_ALLOW_UNVERIFIED_OWNER: "1"
           ALLOW_PAYMENT_SIMULATION: "1"
 
       # Kontrola seeda drugi raz, po zielonych testach E2E @full: użytkownicy testowi z kontem z hasłem, plany i dostęp salonów testowych nadal zgodne z seedem.

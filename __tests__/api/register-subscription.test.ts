@@ -264,6 +264,54 @@ describe("POST /api/register-subscription — beta na zaproszenie", () => {
   });
 
   it.each([
+    ["false", false],
+    ["brak pola", undefined],
+  ])("e-mail na liście, ale niepotwierdzony (emailVerified: %s) → 403, bez zapytań", async (_n, verified) => {
+    const unverified = { ...USER_A, emailVerified: verified };
+    mockRequireAuth.mockResolvedValue({ session: { user: unverified }, user: unverified });
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("niepotwierdzony e-mail z listy + przełącznik BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem (E2E/dev) → 200", async () => {
+    vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
+    vi.stubEnv("VERCEL", undefined);
+    vi.stubEnv("K_SERVICE", undefined);
+    const unverified = { ...USER_A, emailVerified: false };
+    mockRequireAuth.mockResolvedValue({ session: { user: unverified }, user: unverified });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(200);
+  });
+
+  it.each([
+    ["Cloud Run", "K_SERVICE", "myhelper"],
+    ["Vercel", "VERCEL", "1"],
+  ])("przełącznik na hostingu (%s) jest ignorowany → 403", async (_n, key, value) => {
+    vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
+    vi.stubEnv(key, value);
+    const unverified = { ...USER_A, emailVerified: false };
+    mockRequireAuth.mockResolvedValue({ session: { user: unverified }, user: unverified });
+
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(403);
+    expect(opLog).toEqual([]);
+  });
+
+  it("przełącznik nie otwiera bramki dla e-maila spoza listy → 403", async () => {
+    vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(403);
+  });
+
+  it.each([
     ["pusta", ""],
     ["nieustawiona", undefined],
   ])("lista %s → 403 dla każdego konta, bez zapytań", async (_n, value) => {

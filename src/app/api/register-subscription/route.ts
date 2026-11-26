@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE, isBetaOwnerAllowed } from "@/lib/beta-access";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE, canCreateSalon } from "@/lib/beta-access";
 import { TRIAL_DAYS } from "@/lib/constants";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
 import { db } from "@/lib/db";
@@ -62,9 +62,10 @@ function alreadySubscribed() {
  *    `salon_subscriptions_salon_current_uq` → 23505 → 409,
  *  - tylko aktywny plan (`isActive`).
  *
- * Beta na zaproszenie (@/lib/beta-access): tylko konto, którego e-mail z sesji
- * jest na liście BETA_ALLOWED_OWNER_EMAILS; inaczej 403 BETA_INVITE_ONLY bez
- * zapytań do bazy. Pusta lista = nikt. To jedyna produkcyjna ścieżka
+ * Beta na zaproszenie (@/lib/beta-access, `canCreateSalon`): tylko konto, którego
+ * e-mail z sesji jest na liście BETA_ALLOWED_OWNER_EMAILS i jest potwierdzony
+ * (`emailVerified`); inaczej 403 BETA_INVITE_ONLY bez zapytań do bazy. Pusta
+ * lista = nikt; brak poczty na serwerze = nikt. To jedyna produkcyjna ścieżka
  * zakładania salonu (poza seedem).
  *
  * Akceptacja regulaminu i umowy powierzenia (@/lib/legal/acceptance): po
@@ -79,9 +80,10 @@ export async function POST(request: NextRequest) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    // Beta na zaproszenie: e-mail konta z sesji musi być na liście, zanim trasa
-    // przeczyta treść żądania i dotknie bazy. Lista nie trafia do logu.
-    if (!isBetaOwnerAllowed(authResult.user.email)) {
+    // Beta na zaproszenie: e-mail konta z sesji musi być na liście i potwierdzony,
+    // zanim trasa przeczyta treść żądania i dotknie bazy. Ta sama odpowiedź dla
+    // obu powodów odmowy; lista nie trafia do logu.
+    if (!canCreateSalon(authResult.user)) {
       logger.info("[Register Subscription] Owner not on beta allowlist — 403", {
         userId: authResult.user.id,
       });
