@@ -216,7 +216,7 @@ Po 14. dniu panel salonu przechodzi w tryb tylko do odczytu. Przedłużenie
 musi więc wejść **przed 14. dniem**. Najlepiej od razu po ustaleniu daty końca
 pilotażu e-mailem, żeby salon nigdy nie zobaczył blokady.
 
-Procedura: `docs/runbook-krok-d.md`, sekcja 9a („Przedłużenie okresu próbnego
+Procedura: runbook kroku D, sekcja 9a („Przedłużenie okresu próbnego
 salonu pilotażowego”). Stamtąd obowiązuje wszystko: kopia na żądanie przed
 zmianą, data w UTC, jedna transakcja, odczyt przed zmianą i po zmianie, wpis
 w dzienniku audytu bez danych salonu.
