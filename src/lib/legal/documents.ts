@@ -50,7 +50,7 @@ export const LEGAL_DOCUMENTS: LegalDocuments = {
     href: "/terms",
     title: "Regulamin",
     requiresVersion: true,
-    version: "2026-11-26",
+    version: "2026-11-27",
   },
   dpa: {
     href: "/dpa",
