@@ -10,6 +10,7 @@
  * trasy (przy refaktorze) wywraca ten test, zanim dotrze do produkcji.
  * Zachowanie tras (409 / 400 / 200) sprawdzają testy API: services.test.ts,
  * clients.test.ts, deposits-disabled.test.ts, appointments-deposits-disabled.test.ts,
+ * appointments-id-deposits-disabled.test.ts, deposits-blik-booking-disabled.test.ts,
  * salons-id-public.test.ts, clients-deposit-settings.test.ts; wyliczenie
  * zadatku — deposit-calculation.test.ts.
  */
@@ -26,12 +27,16 @@ import {
 const ROOT = process.cwd();
 const source = (path: string) => readFileSync(join(ROOT, path), "utf8");
 
+const APPOINTMENT_ID_ROUTE = "src/app/api/appointments/[id]/route.ts";
+
 /** Egzekutorzy flagi: plik → co bramkuje. */
 const ENFORCERS: ReadonlyArray<{ path: string; field: string | null }> = [
   { path: "src/app/api/services/[id]/route.ts", field: "depositRequired" },
   { path: "src/app/api/clients/[id]/route.ts", field: "requireDeposit" },
   { path: "src/app/api/clients/route.ts", field: "requireDeposit" },
   { path: "src/app/api/deposits/create-session/route.ts", field: null },
+  // Kwota zadatku na wizycie (napis, nie flaga) — reguła „> 0” niżej, osobno.
+  { path: APPOINTMENT_ID_ROUTE, field: null },
   { path: "src/lib/deposit-calculation.ts", field: null },
   // Odczyty zasilające portal: maskują flagę zadatku w odpowiedzi.
   { path: "src/app/api/salons/[id]/route.ts", field: null },
@@ -95,5 +100,28 @@ describe("zadatek wyłączony — każdy egzekutor pyta flagę", () => {
     expect(gate).toBeLessThan(code.indexOf("await getOptionalSession()"));
     expect(gate).toBeLessThan(code.indexOf("isStripeConfigured()"));
     expect(gate).toBeLessThan(code.indexOf("checkout.sessions.create"));
+  });
+
+  it("PUT /api/appointments/[id]: kwota zadatku → 409 z DEPOSITS_DISABLED_CODE, po walidacji i roli, przed zapisem", () => {
+    const code = source(APPOINTMENT_ID_ROUTE);
+    const put = code.slice(code.indexOf("export async function PUT"), code.indexOf("export async function DELETE"));
+    const gate = put.indexOf("!isDepositEnabled()");
+    const validation = put.indexOf("parseBody(updateAppointmentSchema");
+    const roleGate = put.indexOf('ctx.role !== "owner"');
+    const write = put.indexOf(".update(appointments)");
+    expect(gate).toBeGreaterThan(-1);
+    expect(validation).toBeGreaterThan(-1);
+    expect(roleGate).toBeGreaterThan(-1);
+    expect(write).toBeGreaterThan(-1);
+    expect(gate).toBeGreaterThan(validation);
+    expect(gate).toBeGreaterThan(roleGate);
+    expect(gate).toBeLessThan(write);
+
+    // Bramka pyta o kwotę z body, nie o samą obecność pola.
+    expect(put).toMatch(/mayBePositiveDepositAmount\(depositAmount\) && !isDepositEnabled\(\)/);
+
+    const gateBlock = put.slice(gate, put.indexOf("const updateData"));
+    expect(gateBlock).toContain("code: DEPOSITS_DISABLED_CODE");
+    expect(gateBlock).toMatch(/DEPOSITS_DISABLED_MESSAGE\s*\},\s*\{\s*status:\s*409\s*\}/);
   });
 });

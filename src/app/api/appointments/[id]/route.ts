@@ -9,6 +9,7 @@ import {
 } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { recordDepositStatusEvent, type DepositStatusEventActor } from "@/lib/deposit-status-events";
+import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
 import {
@@ -34,6 +35,18 @@ function isForeignForEmployee(
     ctx.role === "employee" &&
     (!ctx.employeeId || appointmentEmployeeId !== ctx.employeeId)
   );
+}
+
+/**
+ * Czy kwota zadatku z body może być dodatnia. Brak pola i null — nie.
+ * Napis przechodzi tylko wtedy, gdy na pewno nie jest większy od 0 ("0",
+ * "0.00"). Napis, który nie jest liczbą (np. "NaN", który baza przyjmuje
+ * w kolumnie numeric), traktujemy jak kwotę dodatnią: przy wyłączonym
+ * zadatku lepiej odmówić niż zapisać zadatek, który klient zobaczy.
+ */
+function mayBePositiveDepositAmount(amount: string | null | undefined): boolean {
+  if (amount === null || amount === undefined) return false;
+  return !(Number(amount) <= 0);
 }
 
 // GET /api/appointments/[id] - Get a single appointment
@@ -211,6 +224,18 @@ export async function PUT(
       newEmployeeId !== existing.employeeId;
     const revived = existing.status === "cancelled" && resultingStatus !== "cancelled";
     const checkTimeBlocks = resultingStatus !== "cancelled" && (slotChanged || revived);
+
+    // Zadatek wyłączony (isDepositEnabled): kwota zadatku większa od 0 dałaby
+    // klientowi w portalu zadatek „oczekujący”, którego nie ma jak wpłacić.
+    // Odmowa przed zapisem; null i zero przechodzą, żeby dało się wyczyścić
+    // kwotę na starych wizytach. Stoi za walidacją, bramką roli i sprawdzeniem
+    // wizyty, więc odpowiedzi 401/403/404/400 zostają w dotychczasowej kolejności.
+    if (mayBePositiveDepositAmount(depositAmount) && !isDepositEnabled()) {
+      return NextResponse.json(
+        { success: false, code: DEPOSITS_DISABLED_CODE, error: DEPOSITS_DISABLED_MESSAGE },
+        { status: 409 }
+      );
+    }
 
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};

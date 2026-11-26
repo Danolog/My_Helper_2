@@ -223,6 +223,9 @@ export function isBlikDepositFlow(): boolean {
  *   `POST /api/clients` i `PUT /api/clients/[id]` z `requireDeposit: true`
  *   odpowiadają 409 `DEPOSITS_DISABLED` i niczego nie zapisują; wartość
  *   false przechodzi, żeby dało się zadatek wyłączyć;
+ * - kwota zadatku na wizycie: `PUT /api/appointments/[id]` z `depositAmount`
+ *   większym od 0 odpowiada 409 `DEPOSITS_DISABLED` i niczego nie zapisuje;
+ *   null i zero przechodzą, żeby dało się wyczyścić stare wiersze;
  * - odczyt: `calculateExpectedDeposit` zwraca „brak zadatku” także dla
  *   wierszy zapisanych wcześniej z flagą, więc żadna trasa rezerwacji nie
  *   prowadzi do płatności, a `POST /api/deposits/create-session` odpowiada
