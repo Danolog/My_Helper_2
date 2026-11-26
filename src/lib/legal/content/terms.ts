@@ -39,7 +39,7 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 1. **Phishing.** Ktoś może podszyć się pod MyHelper albo salon w e-mailu lub SMS-ie. Nigdy nie prosimy o hasło ani o kod BLIK. Wpisuj adres Aplikacji ręcznie. Podejrzaną wiadomość prześlij na kontakt@nordsignal.cc.
 2. **Wspólne komputery w salonie.** Sesja wygasa po 15 minutach bezczynności, ale do tego czasu konto jest otwarte. Wylogowuj się po pracy. Niewysłany szkic formularza zostaje w przeglądarce i może go zobaczyć następna osoba (Polityka prywatności, pkt 8).
 3. **Widoczność numeru BLIK.** Numer telefonu salonu do wpłat BLIK widzi każda osoba, która zarezerwuje wizytę z zadatkiem, także gość bez konta. Nie sprawdzamy tożsamości rezerwujących. Numer może więc trafić do kogoś, kto rezerwuje tylko po to, żeby go poznać. Zalecamy numer służbowy.
-4. **Fałszywe rezerwacje.** Ktoś może zarezerwować wizytę na cudzy numer telefonu. Ograniczamy to limitami rezerwacji z zadatkiem, ale nie wykluczymy tego całkowicie.
+4. **Fałszywe rezerwacje.** Ktoś może zarezerwować wizytę na cudzy numer telefonu. Ograniczamy to limitem liczby rezerwacji składanych w krótkim czasie bez logowania, a gdy działają zadatki, także limitami rezerwacji z zadatkiem (pkt 8.2.7). Nie wykluczymy tego całkowicie.
 5. **Złośliwe oprogramowanie i słabe hasła.** Używaj aktualnej przeglądarki i systemu oraz własnego, niepowtarzalnego hasła. Nie udostępniaj go innym.
 
 ## 6. Zawarcie i rozwiązanie umowy
@@ -70,7 +70,7 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 5. Zapis na listę oczekujących zakłada Twoją kartotekę w tym salonie (Polityka prywatności, pkt 2). Powiadomienia SMS z listy oczekujących nie wychodzą między 21:00 a 8:00.
 
 ### 8.2. Zadatek BLIK na telefon salonu
-Zadatki są obecnie niedostępne: Aplikacja nie wymaga ani nie pobiera zadatku przy żadnej rezerwacji, a postanowienia tego punktu zaczną obowiązywać dopiero po włączeniu zadatków, o którym poinformujemy zgodnie z pkt 19.
+Zadatki są obecnie niedostępne. Salon nie może w Aplikacji wymagać zadatku, a rezerwacja przez Aplikację nie wymaga wpłaty i nie pokazuje danych do przelewu. Do czasu włączenia zadatków nie stosuje się tego punktu ani pkt 5.3, 11.4 i 11.5. Zadatki włączymy tylko zmianą regulaminu w trybie pkt 19. Zmiana nie obejmie rezerwacji złożonych przed jej wejściem w życie (pkt 19.4).
 
 1. Salon może wymagać zadatku za wizytę. Kwotę wylicza Aplikacja według ustawień salonu.
 2. Zasady zadatku i odwołania wizyty ustala salon i powinien Ci je przekazać przed rezerwacją. Jeśli salon ich nie określił, zadatek działa według art. 394 Kodeksu cywilnego. Gdy nie przyjdziesz na wizytę z przyczyn, za które odpowiadasz, salon może zatrzymać zadatek. Gdy wizyta nie dojdzie do skutku z przyczyn, za które odpowiada salon, możesz żądać zwrotu dwukrotności zadatku. Gdy umowa zostanie rozwiązana albo wizyta nie dojdzie do skutku z przyczyn, za które nikt nie odpowiada lub odpowiadają obie strony, zadatek wraca do Ciebie.
@@ -94,7 +94,7 @@ Reklamacje: pkt 18. Konto klienta jest bezpłatne i możesz je rozwiązać w ka�
 
 ## 9. Opłaty dla klientów
 
-Korzystanie z Aplikacji przez klientów salonów jest bezpłatne. Cenę usługi salonu i zadatek ustala salon.
+Korzystanie z Aplikacji przez klientów salonów jest bezpłatne. Cenę usługi salonu i zadatek ustala salon (zadatki obecnie niedostępne, pkt 8.2).
 
 ## 10. Dostęp salonu do Aplikacji
 
