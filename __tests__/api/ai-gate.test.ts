@@ -85,6 +85,16 @@ vi.mock("@/lib/ai/business/chat", () => ({
 vi.mock("@/lib/ai/business/trends", () => ({
   generateBusinessTrends: (...a: unknown[]) => m.generateBusinessTrends(...a),
 }));
+// Moduł opinii jest zamrożony; alerty opinii testujemy z flagą włączoną,
+// żeby bramka AI tej trasy została pod testami (zamrożenie: frozen-routes-guard).
+vi.mock("@/lib/features", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
 
 import { requireProAI, requireProPlan } from "@/lib/ai/gate";
 import { POST as businessChat } from "@/app/api/ai/business/chat/route";

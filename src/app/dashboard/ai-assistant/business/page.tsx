@@ -11,6 +11,7 @@ import {
   Sparkles,
   TrendingUp,
 } from "lucide-react";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -35,6 +36,8 @@ function BusinessAssistantContent() {
   } = useAnalytics();
 
   const chat = useBusinessChat();
+  // Zakładka alertów opinii należy do modułu opinii (zamrożony = bez zakładki).
+  const reviewsEnabled = useModuleEnabled("reviews");
 
   return (
     <div className="container mx-auto p-4 sm:p-6">
@@ -71,15 +74,21 @@ function BusinessAssistantContent() {
       </div>
 
       <Tabs defaultValue="alerts" className="space-y-6">
-        <TabsList className="flex w-full overflow-x-auto no-scrollbar sm:grid sm:grid-cols-5">
+        <TabsList
+          className={`flex w-full overflow-x-auto no-scrollbar sm:grid ${
+            reviewsEnabled ? "sm:grid-cols-5" : "sm:grid-cols-4"
+          }`}
+        >
           <TabsTrigger value="alerts" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
             <Bell className="h-4 w-4 shrink-0" />
             Alerty
           </TabsTrigger>
-          <TabsTrigger value="review-alerts" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
-            <MessageSquareWarning className="h-4 w-4 shrink-0" />
-            Opinie
-          </TabsTrigger>
+          {reviewsEnabled && (
+            <TabsTrigger value="review-alerts" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
+              <MessageSquareWarning className="h-4 w-4 shrink-0" />
+              Opinie
+            </TabsTrigger>
+          )}
           <TabsTrigger value="suggestions" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
             <Lightbulb className="h-4 w-4 shrink-0" />
             <span className="hidden sm:inline">Sugestie AI</span>
@@ -103,9 +112,11 @@ function BusinessAssistantContent() {
         </TabsContent>
 
         {/* Review Alerts Tab - Negative Review Notifications */}
-        <TabsContent value="review-alerts">
-          <ReviewAlerts />
-        </TabsContent>
+        {reviewsEnabled && (
+          <TabsContent value="review-alerts">
+            <ReviewAlerts />
+          </TabsContent>
+        )}
 
         {/* Suggestions Tab */}
         <TabsContent value="suggestions">

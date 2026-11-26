@@ -12,6 +12,7 @@ import {
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 
 const requestSchema = z.object({
@@ -54,6 +55,10 @@ async function loadReviewContext(salonId: string, reviewId: string) {
 }
 
 export async function POST(req: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+
   const proResult = await requireProAI();
   if (isProAIError(proResult)) return proResult;
   const { salonId } = proResult;

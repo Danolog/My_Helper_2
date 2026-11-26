@@ -106,6 +106,17 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     expect(FROZEN_ROUTES).toContain("/api/ai/image/banner");
     expect(FROZEN_ROUTES).toContain("/api/ai/image/service-illustration");
     expect(FROZEN_ROUTES).not.toContain("/api/ai/image/enhance");
+    // Opinie: panel, portal klienta i AI opinii
+    expect(FROZEN_ROUTES).toContain("/api/reviews");
+    expect(FROZEN_ROUTES).toContain("/api/reviews/x1/moderate");
+    expect(FROZEN_ROUTES).toContain("/api/reviews/x1/respond");
+    expect(FROZEN_ROUTES).toContain("/api/client/reviews");
+    expect(FROZEN_ROUTES).toContain("/api/client/appointments/x1/review");
+    expect(FROZEN_ROUTES).toContain("/api/ai/content/generate-review-response");
+    expect(FROZEN_ROUTES).toContain("/api/ai/business/review-alerts");
+    // Publiczny katalog zostaje — sam nie zwraca ocen ani opinii.
+    expect(FROZEN_ROUTES).not.toContain("/api/salons/x1");
+    expect(FROZEN_ROUTES).not.toContain("/api/salons/x1/employees/x1");
   });
 
   describe.each(FROZEN_ROUTES)("%s", (route) => {
@@ -294,6 +305,9 @@ describe("proxy: trasy sąsiednie przechodzą", () => {
     "/api/promo-codes",
     "/api/promo-codes/validate",
     "/api/subscription-plans",
+    "/api/salons/x1",
+    "/api/salons/x1/employees/x1",
+    "/api/client/appointments/x1",
   ];
 
   it("trasy sąsiednie istnieją w repo (kontrola listy)", () => {
@@ -330,6 +344,7 @@ describe("proxy: strony panelu modułów zamrożonych", () => {
         "/dashboard/invoices",
         "/dashboard/settings/loyalty",
         "/dashboard/content-generator/newsletters",
+        "/dashboard/reviews",
       ])
     );
   });

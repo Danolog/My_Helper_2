@@ -23,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { isModuleFrozen } from "@/lib/features";
 
 interface EmployeeSpecialty {
   id: string;
@@ -205,7 +206,8 @@ export default function EmployeeProfilePage() {
                 {getRoleLabel(employee.role)}
               </Badge>
 
-              {/* Rating */}
+              {/* Rating (moduł opinii zamrożony — bez ocen) */}
+              {!isModuleFrozen("reviews") && (
               <div className="flex items-center gap-2 mt-3" data-testid="employee-profile-rating">
                 {employee.averageRating !== null && employee.averageRating > 0 ? (
                   <>
@@ -228,6 +230,7 @@ export default function EmployeeProfilePage() {
                   </span>
                 )}
               </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -364,7 +367,8 @@ export default function EmployeeProfilePage() {
         </Card>
       </div>
 
-      {/* Reviews section */}
+      {/* Reviews section (moduł opinii zamrożony — bez sekcji) */}
+      {!isModuleFrozen("reviews") && (
       <Card className="mt-6">
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -438,6 +442,7 @@ export default function EmployeeProfilePage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <Separator className="my-6" />
 

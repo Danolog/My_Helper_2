@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isModuleFrozen } from "@/lib/features";
 import { AppointmentActions } from "./_components/appointment-actions";
 import { AppointmentDateCard } from "./_components/appointment-date-card";
 import { AppointmentNotesCard } from "./_components/appointment-notes-card";
@@ -96,7 +97,8 @@ export default function AppointmentDetailPage() {
         <AppointmentNotesCard notes={appointment.notes} />
       )}
 
-      {appointment.status === "completed" && (
+      {/* Moduł opinii zamrożony — bez sekcji wystawiania opinii. */}
+      {appointment.status === "completed" && !isModuleFrozen("reviews") && (
         <ReviewSection
           existingReview={existingReview}
           reviewLoading={reviewLoading}

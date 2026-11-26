@@ -6,9 +6,10 @@ import { auth } from "@/lib/auth";
 import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { reviews } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 // PATCH /api/reviews/[id]/respond - Save owner response to a review
-export const PATCH = withApiHandler(
+const saveResponse = withApiHandler(
   {
     auth: "user",
     logLabel: "[Reviews API] PATCH Respond",
@@ -75,7 +76,7 @@ export const PATCH = withApiHandler(
 );
 
 // DELETE /api/reviews/[id]/respond - Remove owner response from a review
-export const DELETE = withApiHandler(
+const removeResponse = withApiHandler(
   {
     auth: "user",
     logLabel: "[Reviews API] DELETE Respond",
@@ -128,3 +129,19 @@ export const DELETE = withApiHandler(
     });
   }
 );
+
+/*
+ * Druga linia obrony zamrożenia (pierwsza: src/proxy.ts). Bramka stoi przed
+ * sesją, więc jest poza withApiHandler, który sprawdza sesję jako pierwszy.
+ */
+export async function PATCH(...args: Parameters<typeof saveResponse>) {
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+  return saveResponse(...args);
+}
+
+export async function DELETE(...args: Parameters<typeof removeResponse>) {
+  const frozen = frozenModuleResponse("reviews");
+  if (frozen) return frozen;
+  return removeResponse(...args);
+}

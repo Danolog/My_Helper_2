@@ -44,6 +44,20 @@ vi.mock("@/lib/auth-middleware", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
+/**
+ * Moduł opinii jest zamrożony (`hardOff` w `src/lib/features.ts`). Oceny
+ * w katalogu testujemy z flagą podmienioną na włączoną; blok „moduł opinii
+ * zamrożony” sprawdza katalog bez ocen.
+ */
+const frozenState = vi.hoisted(() => ({ unfreezeReviews: true }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeReviews && key === "reviews" ? false : actual.isModuleFrozen(key),
+  };
+});
 
 const SALON_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SALON_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -85,6 +99,7 @@ function employeeRow(id: string, salonId: string, firstName: string) {
 }
 
 function seed() {
+  frozenState.unfreezeReviews = true;
   resetFixture({
     salons: [salonRow(SALON_A, OWNER_A, "SalonA"), salonRow(SALON_B, OWNER_B, "SalonB")],
     services: [
@@ -151,6 +166,33 @@ const EXPECTED_A = {
 
 const get = (id: string) =>
   GET(new Request(`http://localhost/api/salons/${id}`), { params: Promise.resolve({ id }) });
+
+describe("GET /api/salons/[id] — moduł opinii zamrożony", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seed();
+    frozenState.unfreezeReviews = false;
+  });
+
+  it("200 — bez ocen salonu i pracowników, bez zapytań do opinii", async () => {
+    const res = await get(SALON_A);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      success: true,
+      data: {
+        ...EXPECTED_A,
+        employees: [{ ...EXPECTED_A.employees[0], averageRating: null, reviewCount: 0 }],
+        averageRating: null,
+      },
+    });
+    expect(selectCalls.filter((c) => c.table === "reviews")).toEqual([]);
+  });
+
+  it("404 — salon nie istnieje (bez zmian)", async () => {
+    const res = await get(MISSING_SALON);
+    expect(res.status).toBe(404);
+  });
+});
 
 describe("GET /api/salons/[id] — publiczny katalog", () => {
   beforeEach(() => {

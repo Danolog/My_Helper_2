@@ -19,6 +19,7 @@ import {
   MessageSquareReply,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -43,6 +44,14 @@ interface Review {
 }
 
 export default function ReviewModerationPage() {
+  return (
+    <ModuleGate module="reviews">
+      <ReviewModerationPageInner />
+    </ModuleGate>
+  );
+}
+
+function ReviewModerationPageInner() {
   const { data: session, isPending } = useSession();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);

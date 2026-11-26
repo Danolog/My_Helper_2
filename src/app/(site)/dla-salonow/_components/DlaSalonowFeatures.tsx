@@ -45,8 +45,8 @@ const FEATURES = [
   },
   {
     icon: Heart,
-    title: "Opinie i galeria",
-    description: "Zbieraj opinie po wizytach i pokazuj zdjęcia swoich prac na stronie salonu.",
+    title: "Galeria",
+    description: "Pokazuj zdjęcia swoich prac na stronie salonu.",
     color: "gold" as const,
   },
 ] as const;

@@ -3,9 +3,9 @@
  *
  * Proxy (`src/proxy.ts`) blokuje trasy modułów zamrożonych — to pilnują
  * `frozen-modules.test.ts` i `proxy-frozen-modules.test.ts`. Ten plik
- * pilnuje, że trasy promocji złożonych i generowania obrazów odpowiadają 404
- * także SAME, gdy proxy zostanie ominięte: handler wołany wprost nie sprawdza
- * sesji ani planu, nie sięga do bazy i nie wywołuje modelu.
+ * pilnuje, że trasy promocji złożonych, generowania obrazów i opinii
+ * odpowiadają 404 także SAME, gdy proxy zostanie ominięte: handler wołany
+ * wprost nie sprawdza sesji ani planu, nie sięga do bazy i nie wywołuje modelu.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -18,14 +18,23 @@ import {
 } from "@/lib/features";
 import { createMockRequest } from "./helpers";
 
-const { mockRequireProAI, mockRequireAuth, mockDbSelect, mockGenerateImage } = vi.hoisted(
-  () => ({
-    mockRequireProAI: vi.fn(),
-    mockRequireAuth: vi.fn(),
-    mockDbSelect: vi.fn(),
-    mockGenerateImage: vi.fn(),
-  })
-);
+const {
+  mockRequireProAI,
+  mockRequireAuth,
+  mockDbSelect,
+  mockGenerateImage,
+  mockGetSession,
+  mockGetUserSalon,
+  mockForSalon,
+} = vi.hoisted(() => ({
+  mockRequireProAI: vi.fn(),
+  mockRequireAuth: vi.fn(),
+  mockDbSelect: vi.fn(),
+  mockGenerateImage: vi.fn(),
+  mockGetSession: vi.fn(),
+  mockGetUserSalon: vi.fn(),
+  mockForSalon: vi.fn(),
+}));
 
 vi.mock("@/lib/ai/openrouter", () => ({
   requireProAI: (...a: unknown[]) => mockRequireProAI(...a),
@@ -33,6 +42,20 @@ vi.mock("@/lib/ai/openrouter", () => ({
   createAIClient: vi.fn(),
   getAIModel: vi.fn(),
   getSalonContext: vi.fn(),
+  trackAIUsage: vi.fn(),
+}));
+// Trasy opinii w panelu: sesja w handlerze, salon właściciela, repozytorium.
+vi.mock("@/lib/auth", () => ({
+  auth: { api: { getSession: (...a: unknown[]) => mockGetSession(...a) } },
+}));
+vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalon: (...a: unknown[]) => mockGetUserSalon(...a),
+  getUserSalonId: (...a: unknown[]) => mockGetUserSalon(...a),
+}));
+vi.mock("@/lib/server/repository", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/repository")>()),
+  forSalon: (...a: unknown[]) => mockForSalon(...a),
 }));
 vi.mock("@/lib/ai/google-imagen", () => ({
   generateImage: (...a: unknown[]) => mockGenerateImage(...a),
@@ -82,6 +105,50 @@ const ROUTES: Array<[string, string, () => Promise<Handler>]> = [
     "/api/ai/image/service-illustration",
     async () => (await import("@/app/api/ai/image/service-illustration/route")).POST,
   ],
+  // Opinie
+  ["GET", "/api/reviews", async () => (await import("@/app/api/reviews/route")).GET],
+  [
+    "PATCH",
+    "/api/reviews/x1/moderate",
+    async () => (await import("@/app/api/reviews/[id]/moderate/route")).PATCH,
+  ],
+  [
+    "PATCH",
+    "/api/reviews/x1/respond",
+    async () => (await import("@/app/api/reviews/[id]/respond/route")).PATCH,
+  ],
+  [
+    "DELETE",
+    "/api/reviews/x1/respond",
+    async () => (await import("@/app/api/reviews/[id]/respond/route")).DELETE,
+  ],
+  [
+    "GET",
+    "/api/client/reviews",
+    async () => (await import("@/app/api/client/reviews/route")).GET as unknown as Handler,
+  ],
+  [
+    "GET",
+    "/api/client/appointments/x1/review",
+    async () =>
+      (await import("@/app/api/client/appointments/[id]/review/route")).GET as unknown as Handler,
+  ],
+  [
+    "POST",
+    "/api/client/appointments/x1/review",
+    async () =>
+      (await import("@/app/api/client/appointments/[id]/review/route")).POST as unknown as Handler,
+  ],
+  [
+    "POST",
+    "/api/ai/content/generate-review-response",
+    async () => (await import("@/app/api/ai/content/generate-review-response/route")).POST,
+  ],
+  [
+    "GET",
+    "/api/ai/business/review-alerts",
+    async () => (await import("@/app/api/ai/business/review-alerts/route")).GET,
+  ],
 ];
 
 beforeEach(() => {
@@ -107,6 +174,9 @@ describe("trasy zamrożone odpowiadają 404 same, bez proxy", () => {
     expect(mockRequireProAI).not.toHaveBeenCalled();
     expect(mockDbSelect).not.toHaveBeenCalled();
     expect(mockGenerateImage).not.toHaveBeenCalled();
+    expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockGetUserSalon).not.toHaveBeenCalled();
+    expect(mockForSalon).not.toHaveBeenCalled();
   });
 });
 
@@ -115,7 +185,7 @@ describe("trasy zamrożone odpowiadają 404 same, bez proxy", () => {
  * w katalogu tych modułów bez wywołania `frozenModuleResponse("<moduł>")`
  * w każdym eksportowanym handlerze = czerwono.
  */
-const ROUTE_GUARDED_MODULES: ModuleKey[] = ["complexPromotions", "imageGen"];
+const ROUTE_GUARDED_MODULES: ModuleKey[] = ["complexPromotions", "imageGen", "reviews"];
 
 const API_DIR = join(process.cwd(), "src/app/api");
 
@@ -140,7 +210,10 @@ describe("każda trasa modułu z bramką w handlerze ją ma (system plików)", (
     );
 
   it("lista tras nie jest pusta (kontrola)", () => {
-    expect(guarded.map((r) => r.path).sort()).toEqual(ROUTES.map(([, path]) => path).sort());
+    // Jedna trasa może mieć kilka metod (PATCH i DELETE odpowiedzi salonu).
+    expect(guarded.map((r) => r.path).sort()).toEqual(
+      [...new Set(ROUTES.map(([, path]) => path))].sort()
+    );
   });
 
   it.each(guarded.map((r) => [r.path, r] as const))("%s", (_path, route) => {
