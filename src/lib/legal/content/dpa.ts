@@ -4,7 +4,7 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const DPA_CONTENT = `Wersja: [DO UZUPEŁNIENIA: data publikacji] · obowiązuje od: [DO UZUPEŁNIENIA: data publikacji]
+export const DPA_CONTENT = `Wersja: 26.11.2026 · obowiązuje od: 26.11.2026
 
 ## § 1. Strony i zawarcie umowy
 
@@ -123,7 +123,7 @@ Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane
 
 ---
 
-## Załącznik A. Podprocesorzy (stan na [DO UZUPEŁNIENIA: data publikacji])
+## Załącznik A. Podprocesorzy (stan na 26.11.2026)
 
 Lista jest taka sama jak na stronie [/podprocesorzy](/podprocesorzy).
 

@@ -4,7 +4,7 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const SUBPROCESSORS_CONTENT = `Stan na: [DO UZUPEŁNIENIA: data publikacji]
+export const SUBPROCESSORS_CONTENT = `Stan na: 26.11.2026
 
 Na tej liście są firmy, które przetwarzają dane osobowe w imieniu MyHelper, gdy świadczymy usługę. Ta sama lista jest załącznikiem A do [umowy powierzenia przetwarzania danych](/dpa).
 

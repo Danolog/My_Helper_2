@@ -4,7 +4,7 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const PRIVACY_CONTENT = `Wersja: [DO UZUPEŁNIENIA: data publikacji] · obowiązuje od: [DO UZUPEŁNIENIA: data publikacji]
+export const PRIVACY_CONTENT = `Wersja: 26.11.2026 · obowiązuje od: 26.11.2026
 
 ## 1. Kto odpowiada za Twoje dane
 

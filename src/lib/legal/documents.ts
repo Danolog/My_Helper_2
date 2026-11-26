@@ -14,7 +14,7 @@
  * wymaga recenzji bezpieczeństwa i zgody właściciela produktu na treść
  * wszystkich dokumentów.
  */
-export const LEGAL_DOCS_PUBLISHED: boolean = false;
+export const LEGAL_DOCS_PUBLISHED: boolean = true;
 
 export type LegalDocumentKey =
   | "privacy"
@@ -44,19 +44,19 @@ export const LEGAL_DOCUMENTS: LegalDocuments = {
     href: "/privacy",
     title: "Polityka prywatności",
     requiresVersion: true,
-    version: null,
+    version: "2026-11-26",
   },
   terms: {
     href: "/terms",
     title: "Regulamin",
     requiresVersion: true,
-    version: null,
+    version: "2026-11-26",
   },
   dpa: {
     href: "/dpa",
     title: "Umowa powierzenia przetwarzania danych",
     requiresVersion: true,
-    version: null,
+    version: "2026-11-26",
   },
   subprocessors: {
     href: "/podprocesorzy",
