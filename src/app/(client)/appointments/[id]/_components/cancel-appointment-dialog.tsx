@@ -126,10 +126,11 @@ function CancelInfoDetails({ cancelInfo }: { cancelInfo: CancelInfo }) {
         )}
       </div>
 
-      {/* Cancellation policy */}
+      {/* Cancellation policy — polityka 24 h dotyczy tylko wizyty z zadatkiem;
+          wizyta bez zadatku nie ma czego tracic, wiec ramki nie pokazujemy. */}
       {cancelInfo.deposit.settledBySalon ? (
         <SalonSettledPolicy cancelInfo={cancelInfo} />
-      ) : (
+      ) : cancelInfo.deposit.amount > 0 ? (
       <div
         className={`p-3 rounded-lg border ${
           cancelInfo.isMoreThan24h
@@ -162,7 +163,7 @@ function CancelInfoDetails({ cancelInfo }: { cancelInfo: CancelInfo }) {
           </div>
         </div>
       </div>
-      )}
+      ) : null}
 
       {/* Deposit info */}
       {cancelInfo.deposit.amount > 0 && cancelInfo.deposit.paid && (
