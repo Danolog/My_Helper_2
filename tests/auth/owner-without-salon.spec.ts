@@ -61,6 +61,21 @@ test.describe('Panel: konto bez salonu', () => {
       const sidebar = page.locator('aside[aria-label="Panel nawigacyjny"]');
       const clientLink = page.getByRole('link', { name: /Jestem klientem/ });
 
+      // Ponowienie (--retries=1) albo kolejny przebieg na tej samej bazie: konto
+      // ze stałego adresu mogło już założyć salon w poprzedniej próbie (porażka
+      // dopiero po kroku 3). Wtedy kroków 2–3 nie da się powtórzyć — sprawdzamy
+      // tylko stan końcowy (krok 4): panel zamiast zakładania salonu.
+      if (signUp.status() !== 200) {
+        await page.goto(LAST_PANEL_PATH, { waitUntil: 'domcontentloaded' });
+        await expect(sidebar.or(createHeading).first()).toBeVisible({ timeout: 15000 });
+        if (await sidebar.isVisible()) {
+          await expect(createHeading).toHaveCount(0);
+          await expect(clientLink).toHaveCount(0);
+          await expect(page).toHaveURL(pathRegExp(LAST_PANEL_PATH));
+          return;
+        }
+      }
+
       // 2. /dashboard i dowolna podstrona: tylko zakładanie salonu, bez przekierowania.
       for (const path of PANEL_PATHS) {
         await page.goto(path, { waitUntil: 'domcontentloaded' });
