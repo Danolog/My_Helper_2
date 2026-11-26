@@ -910,7 +910,14 @@ Hasła Cloud SQL są wyłącznie w Secret Managerze
 i `postgres-url` (URL loginu `myhelper_svc`, z którego wycinamy samo hasło).
 Odczyt do zmiennej, bez ekranu i bez lokalnego logu gcloud — ten sam wzorzec
 co `docs/runbook-krok-d.md:753`. `<projekt GCP>` = identyfikator projektu z
-`docs/runbook-krok-d.md` sekcja 9 (nie zapisuje się go w notatce okna):
+`docs/runbook-krok-d.md` sekcja 9 (nie zapisuje się go w notatce okna).
+
+**Uruchamia wyłącznie właściciel.** Blok niżej odczytuje
+`postgres-admin-password`, a funkcja `psql_csql_admin` łączy się jako
+`postgres` — sesja główna i agenci nie uruchamiają ani tego bloku, ani
+poleceń z `psql_csql_admin` (zasada jak w `docs/runbook-krok-d.md` sekcja 9:
+hasło administratora = tylko właściciel). Kontrolę ról 1.0 pkt 2 uruchamia
+właściciel, dopóki nie powstanie osobna rola tylko do odczytu.
 
 ```bash
 set +x

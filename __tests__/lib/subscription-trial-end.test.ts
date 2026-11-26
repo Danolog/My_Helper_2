@@ -174,6 +174,16 @@ describe("koniec okresu próbnego — getSalonAccess", () => {
     expect(mockWarn).toHaveBeenCalledWith("Trialing subscription without trial end date", { salonId: SALON });
   });
 
+  it("przedłużenie: przesunięcie trialEndsAt z przeszłości na przyszłość przy statusie trialing zdejmuje tryb tylko do odczytu", async () => {
+    mockRows.mockReturnValue([row("trialing", new Date(NOW.getTime() - DAY))]);
+    expect(await getSalonAccess(SALON)).toEqual({ state: "expired", mode: "read_only", planSlug: null, until: null });
+    // Ten sam wiersz po UPDATE samej kolumny trial_ends_at (status bez zmian).
+    const extended = new Date(NOW.getTime() + 90 * DAY);
+    mockRows.mockReturnValue([row("trialing", extended)]);
+    expect(await getSalonAccess(SALON)).toEqual({ state: "trialing", mode: "full", planSlug: "pro", until: extended });
+    expect(await isProPlan(SALON)).toBe(true);
+  });
+
   it("brak salonu w sesji -> getCurrentPlan zwraca basic ze statusem none", async () => {
     mockGetUserSalonId.mockResolvedValue(null);
     expect(await getCurrentPlan()).toEqual({ slug: "basic", name: "Basic", status: "none" });
