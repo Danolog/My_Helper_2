@@ -1,5 +1,6 @@
 import { failedLoginEmail } from '../failed-login-email';
 import { test, expect, type Page } from '../fixtures';
+import { acceptLegalDocuments } from '../legal-acceptance';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -231,6 +232,10 @@ test.describe('Flow 7: Client Portal', () => {
 
       const submitBtn = page.getByRole('button', { name: /zarejestruj|register|utw[oó]rz/i });
       if (await submitBtn.isVisible()) {
+        // Po publikacji dokumentów przycisk jest nieaktywny do zaznaczenia akceptacji;
+        // bez zaznaczenia klik nie dotarłby do walidacji pustych pól.
+        await acceptLegalDocuments(page.locator('form'));
+        await expect(submitBtn).toBeEnabled({ timeout: 15000 });
         await submitBtn.click();
         // Should show validation errors
         await expect(

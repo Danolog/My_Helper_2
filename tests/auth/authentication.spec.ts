@@ -2,6 +2,7 @@ import * as path from 'path';
 import { decideCleanupTarget, guardedCleanupClient, resolveCleanupUrl } from '../e2e-cleanup';
 import { failedLoginEmail } from '../failed-login-email';
 import { test, expect, type Page } from '../fixtures';
+import { acceptLegalDocuments } from '../legal-acceptance';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,6 +93,9 @@ test.describe('Flow 1: Authentication', () => {
       await page.fill('#email', TEST_USER.email);
       await page.fill('#password', TEST_USER.password);
       await page.fill('#confirmPassword', TEST_USER.password);
+      // Po publikacji dokumentów przycisk jest nieaktywny do zaznaczenia akceptacji.
+      await acceptLegalDocuments(page.locator('form'));
+      await expect(page.locator('form button[type="submit"]')).toBeEnabled();
       await page.locator('form button[type="submit"]').click();
       // Should see success or redirect (UI text has no diacritics: "Konto utworzone!" / "Konto zostalo utworzone pomyslnie!")
       await expect(
@@ -276,6 +280,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'Password123!');
       await page.fill('#confirmPassword', 'DifferentPassword123!');
+      await acceptLegalDocuments(page.locator('form'));
       await page.locator('form button[type="submit"]').click();
       // UI: "Hasla nie sa identyczne..." (no diacritics)
       await expect(
@@ -292,6 +297,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'short');
       await page.fill('#confirmPassword', 'short');
+      await acceptLegalDocuments(page.locator('form'));
       await page.locator('form button[type="submit"]').click();
       // UI: "Haslo jest za krotkie. Wpisz co najmniej 8 znakow" (no diacritics)
       await expect(
