@@ -16,6 +16,7 @@ import {
   DEPOSIT_NOT_APPLICABLE_CODE,
   depositDecision,
 } from "@/lib/deposit-guard";
+import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } from "@/lib/features";
 import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -111,6 +112,15 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
       { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+    );
+  }
+
+  // Zadatek wyłączony (isDepositEnabled): bez odczytu sesji, bazy i dostawcy
+  // płatności — nic nie powstaje, także dla wierszy zapisanych wcześniej z flagą.
+  if (!isDepositEnabled()) {
+    return NextResponse.json(
+      { success: false, code: DEPOSITS_DISABLED_CODE, error: DEPOSITS_DISABLED_MESSAGE },
+      { status: 409 }
     );
   }
 

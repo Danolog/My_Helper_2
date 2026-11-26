@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { verifiedClientMatchEmail, type SessionUserLike } from "@/lib/client-match";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
-import { isPromotionTypeFrozen } from "@/lib/features";
+import { isDepositEnabled, isPromotionTypeFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import {
   clients,
@@ -213,6 +213,13 @@ async function calculateInTransaction(
       .where(and(eq(serviceVariants.id, variantId), eq(serviceVariants.serviceId, serviceId)));
     if (!variant) return { ok: false, error: "variant_not_found" };
     priceModifier = variant.priceModifier ? parseFloat(variant.priceModifier) : 0;
+  }
+
+  // Zadatek wyłączony (isDepositEnabled): wiersze zapisane wcześniej z flagą
+  // usługi albo klienta nie prowadzą do płatności. Usługa i wariant są już
+  // sprawdzone (404 bez zmian); kwota i ustawienia klienta nie są czytane.
+  if (!isDepositEnabled()) {
+    return { ok: true, required: false, amount: 0, serviceName: service.name };
   }
 
   const baseEffectivePrice = parseFloat(service.basePrice) + priceModifier;

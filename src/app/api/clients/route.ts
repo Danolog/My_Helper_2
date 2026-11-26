@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createClientSchema } from "@/lib/api-validation";
+import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } from "@/lib/features";
 import { healthDataConsentRequiredBody, normalizeAllergies } from "@/lib/health-data-consent";
 import { logger } from "@/lib/logger";
 import { getSalonContext } from "@/lib/salon-context";
@@ -163,6 +164,14 @@ export const POST = withApiHandler(
       return NextResponse.json(
         { success: false, error: "Brak uprawnien" },
         { status: 403 }
+      );
+    }
+
+    // Zadatek wyłączony (isDepositEnabled): klient z wymogiem zadatku nie powstaje.
+    if (requireDeposit === true && !isDepositEnabled()) {
+      return NextResponse.json(
+        { success: false, code: DEPOSITS_DISABLED_CODE, error: DEPOSITS_DISABLED_MESSAGE },
+        { status: 409 }
       );
     }
 

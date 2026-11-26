@@ -53,6 +53,12 @@ vi.mock("@/lib/db", () => {
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+// Zadatek liczony tak, jak po jego włączeniu (isDepositEnabled); reszta
+// rejestru prawdziwa — odmrożenie zmienia ten sam obiekt `MODULES`.
+vi.mock("@/lib/features", async (orig) => ({
+  ...(await orig<typeof import("@/lib/features")>()),
+  isDepositEnabled: () => true,
+}));
 
 // UUID: trasa check-happy-hours odrzuca zły format salonId przed forSalon.
 const SALON = "11111111-1111-4111-8111-111111111111";

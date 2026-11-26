@@ -19,7 +19,7 @@ const { selectQueue, selectCalls, frozen, mockDbSelect, mockDbSelectWhere, mockT
   vi.hoisted(() => {
     const selectQueue: unknown[][] = [];
     const selectCalls: { table: string; cols: unknown }[] = [];
-    const frozen = { happyHours: false };
+    const frozen = { happyHours: false, depositEnabled: true };
     const mockDbSelectWhere = vi.fn((..._args: unknown[]) => {
       const result = selectQueue.length > 0 ? selectQueue.shift()! : [];
       const thenable = Promise.resolve(result) as Promise<unknown[]> & {
@@ -59,12 +59,15 @@ vi.mock("@/lib/server/repository", async (orig) => {
  * jest zawsze 0 i baza nie jest pytana (pilnuje tego
  * __tests__/lib/frozen-promotions.test.ts). Testy logiki ponizej omijaja
  * zamrozenie, zeby obliczenie bylo pilnowane takze na wypadek odmrozenia.
+ * Tak samo zadatek: w produkcji wylaczony (isDepositEnabled = false, blok
+ * „zadatek wylaczony” nizej), logika kwoty testowana przy wlaczonym.
  */
 vi.mock("@/lib/features", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/features")>();
   return {
     ...real,
     isPromotionTypeFrozen: (type: string) => type === "happy_hours" && frozen.happyHours,
+    isDepositEnabled: () => frozen.depositEnabled,
   };
 });
 
@@ -175,6 +178,71 @@ const baseParams = {
 beforeEach(() => {
   selectCalls.length = 0;
   frozen.happyHours = false;
+  frozen.depositEnabled = true;
+});
+
+describe("calculateExpectedDeposit — zadatek wylaczony (isDepositEnabled = false)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectQueue.length = 0;
+    frozen.depositEnabled = false;
+  });
+
+  it("usluga z depositRequired → brak zadatku (required false, kwota 0), bez odczytu promocji i klienta", async () => {
+    queueSelect([baseService]);
+
+    const result = await calculateExpectedDeposit(baseParams);
+
+    expect(result).toEqual({ ok: true, required: false, amount: 0, serviceName: "Strzyzenie" });
+    expect(selectCalls.map((c) => c.table)).toEqual(["services"]);
+  });
+
+  it("klient z requireDeposit (fixed 80 PLN) → brak zadatku, ustawienia klienta nieczytane", async () => {
+    queueSelect([{ ...baseService, depositRequired: false }]);
+
+    const result = await calculateExpectedDeposit({ ...baseParams, clientId: "client-1" });
+
+    expect(result).toEqual({ ok: true, required: false, amount: 0, serviceName: "Strzyzenie" });
+    expect(selectCalls.map((c) => c.table)).not.toContain("clients");
+  });
+
+  it("wariant z doplata → brak zadatku", async () => {
+    queueSelect([baseService], [{ id: "var-1", priceModifier: "50.00" }]);
+
+    const result = await calculateExpectedDeposit({ ...baseParams, variantId: "var-1" });
+
+    expect(result).toEqual({ ok: true, required: false, amount: 0, serviceName: "Strzyzenie" });
+  });
+
+  it("brak uslugi → nadal service_not_found (404 tras bez zmian)", async () => {
+    queueSelect([]);
+
+    expect(await calculateExpectedDeposit(baseParams)).toEqual({ ok: false, error: "service_not_found" });
+  });
+
+  it("usluga wylaczona → nadal service_not_found", async () => {
+    queueSelect([{ ...baseService, isActive: false }]);
+
+    expect(await calculateExpectedDeposit(baseParams)).toEqual({ ok: false, error: "service_not_found" });
+  });
+
+  it("obcy wariant → nadal variant_not_found", async () => {
+    queueSelect([baseService], []);
+
+    expect(await calculateExpectedDeposit({ ...baseParams, variantId: "var-obcy" })).toEqual({
+      ok: false,
+      error: "variant_not_found",
+    });
+  });
+
+  it("blad bazy przy odczycie uslugi → wyjatek (bez cichego „brak zadatku”)", async () => {
+    mockDbSelectWhere.mockImplementationOnce(() => {
+      const failed = Promise.reject(new Error("connection terminated"));
+      return Object.assign(failed, { limit: () => failed });
+    });
+
+    await expect(calculateExpectedDeposit(baseParams)).rejects.toThrow("connection terminated");
+  });
 });
 
 describe("calculateExpectedDeposit — walidacja usluga/wariant", () => {

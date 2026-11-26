@@ -136,6 +136,12 @@ vi.mock("@/lib/stripe", async (orig) => ({
   ...(await orig<typeof import("@/lib/stripe")>()),
   isStripeConfigured: () => false,
 }));
+// Ścieżki zadatku testowane tak, jak zadziałają po włączeniu zadatku
+// (isDepositEnabled); dzisiejszy stan: __tests__/lib/deposits-disabled.test.ts.
+vi.mock("@/lib/features", async (orig) => ({
+  ...(await orig<typeof import("@/lib/features")>()),
+  isDepositEnabled: () => true,
+}));
 
 const RUN = randomUUID().slice(0, 8);
 const USER_ID = `it-t3-ovl-${RUN}`;
