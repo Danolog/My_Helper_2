@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 
 /** Zmienne klasy `secret` z infra/gcp/env-manifest.json (test pilnuje zgodności). */
 export const GUARDED_SECRET_ENV = Object.freeze([
+  "BETA_ALLOWED_OWNER_EMAILS",
   "BETTER_AUTH_SECRET",
   "CRON_SECRET",
   "GOOGLE_CLIENT_SECRET",
@@ -75,6 +76,9 @@ export const FORBIDDEN_SHA256 = Object.freeze(new Set([
   "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b", // __tests__/lib/google-auth.test.ts GOOGLE_CLIENT_SECRET
   "481a36da141951626b4ef245a045f83a33e4c5af0c1b8b1cc6510a1f54a5e6c1", // __tests__/lib/google-auth.test.ts GOOGLE_CLIENT_SECRET
   "9f9c052ae27393a875b9e11b282ffc9c81073d72e25dd5f9c892e73da5cf4f6a", // __tests__/lib/google-auth.test.ts GOOGLE_CLIENT_SECRET
+  "e22a2bafe6944a430a46492a9f5a709b7da885340d4b9368f30277d27a3d9458", // .github/workflows/quality-gate.yml BETA_ALLOWED_OWNER_EMAILS
+  "22eb21b454e7ac9d1d1e8310bd03b98b1a63d3dc9e8d45048c1fbf2d7e3653b9", // __tests__/api/register-subscription.test.ts BETA_ALLOWED_OWNER_EMAILS
+  "068c47060389bc0f52ff994632833732519ea89aedcf81ddb81153dcb36875c1", // __tests__/lib/beta-access.test.ts BETA_ALLOWED_OWNER_EMAILS
   // FORBIDDEN_SHA256:END
 ]));
 

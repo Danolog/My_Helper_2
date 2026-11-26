@@ -12,8 +12,10 @@
  * istniejącej subskrypcji ta trasa nie zmienia (zmiana planu tylko przez
  * Stripe) — 409, bez zapisu.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextResponse } from "next/server";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE } from "@/lib/beta-access";
+import { SUPPORT_CONTACT } from "@/lib/support-contact";
 import { createMockRequest, parseResponse } from "./helpers";
 
 const USER_A = { id: "user-a", name: "Anna", email: "anna@example.com", emailVerified: true };
@@ -189,6 +191,13 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+// Poczta na serwerze (isEmailConfigured): domyślnie skonfigurowana; testy bramki
+// bety sprawdzają też serwer bez poczty.
+const emailState = vi.hoisted(() => ({ configured: true }));
+vi.mock("@/lib/email", () => ({
+  isEmailConfigured: () => emailState.configured,
+}));
+
 import { POST } from "@/app/api/register-subscription/route";
 
 function post(body: unknown) {
@@ -208,6 +217,193 @@ beforeEach(() => {
   legalState.terms = null;
   legalState.dpa = null;
   mockRequireAuth.mockResolvedValue({ session: { user: USER_A }, user: USER_A });
+  // Beta na zaproszenie: konto A jest na liście, poczta skonfigurowana, bez
+  // przełącznika testowego (osobne testy bramki niżej).
+  vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", USER_A.email);
+  vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", undefined);
+  emailState.configured = true;
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("POST /api/register-subscription — beta na zaproszenie", () => {
+  const OTHER = { id: "user-x", name: "Xawery", email: "xawery@example.com", emailVerified: true };
+
+  it("e-mail z sesji na liście → 200, salon i trial", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    const { status, body } = await post({ planSlug: "basic" });
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(mockInsert).toHaveBeenCalledWith("salons");
+  });
+
+  it("e-mail spoza listy → 403 BETA_INVITE_ONLY z kontaktem, bez zapytań i bez zapisu", async () => {
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(body.error).toBe(BETA_INVITE_ONLY_MESSAGE);
+    expect(body.error).toContain(SUPPORT_CONTACT);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("e-mail z treści żądania nie otwiera bramki (liczy się konto z sesji)", async () => {
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { status } = await post({ planSlug: "basic", email: USER_A.email });
+    expect(status).toBe(403);
+    expect(opLog).toEqual([]);
+  });
+
+  it("wielkość liter i spacje w liście i w e-mailu konta → 200", async () => {
+    vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", ` inny@example.com ,  ${USER_A.email.toUpperCase()}  `);
+    mockRequireAuth.mockResolvedValue({
+      session: { user: { ...USER_A, email: " Anna@Example.COM " } },
+      user: { ...USER_A, email: " Anna@Example.COM " },
+    });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(200);
+  });
+
+  it.each([
+    ["false", false],
+    ["brak pola", undefined],
+  ])("e-mail na liście, ale niepotwierdzony (emailVerified: %s) → 403, bez zapytań", async (_n, verified) => {
+    const unverified = { ...USER_A, emailVerified: verified };
+    mockRequireAuth.mockResolvedValue({ session: { user: unverified }, user: unverified });
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["niepotwierdzony", false],
+    ["potwierdzony", true],
+  ])("adres na liście, poczta nieskonfigurowana, brak przełącznika, %s → 403, bez zapytań", async (_n, verified) => {
+    emailState.configured = false;
+    const user = { ...USER_A, emailVerified: verified };
+    mockRequireAuth.mockResolvedValue({ session: { user }, user });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("niepotwierdzony e-mail z listy + przełącznik BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem, bez poczty (E2E/dev) → 200", async () => {
+    emailState.configured = false;
+    vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
+    vi.stubEnv("VERCEL", undefined);
+    vi.stubEnv("K_SERVICE", undefined);
+    const unverified = { ...USER_A, emailVerified: false };
+    mockRequireAuth.mockResolvedValue({ session: { user: unverified }, user: unverified });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(200);
+  });
+
+  it.each([
+    ["Cloud Run", "K_SERVICE", "myhelper"],
+    ["Vercel", "VERCEL", "1"],
+  ])("przełącznik na hostingu (%s) jest ignorowany → 403", async (_n, key, value) => {
+    emailState.configured = false;
+    vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
+    vi.stubEnv(key, value);
+    const unverified = { ...USER_A, emailVerified: false };
+    mockRequireAuth.mockResolvedValue({ session: { user: unverified }, user: unverified });
+
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(403);
+    expect(opLog).toEqual([]);
+  });
+
+  it("przełącznik nie otwiera bramki dla e-maila spoza listy → 403", async () => {
+    vi.stubEnv("BETA_ALLOW_UNVERIFIED_OWNER", "1");
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(403);
+  });
+
+  it.each([
+    ["pusta", ""],
+    ["nieustawiona", undefined],
+  ])("lista %s → 403 dla każdego konta, bez zapytań", async (_n, value) => {
+    vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", value);
+    const { status, body } = await post({ planSlug: "basic" });
+    expect(status).toBe(403);
+    expect(body.code).toBe(BETA_INVITE_ONLY_CODE);
+    expect(opLog).toEqual([]);
+  });
+
+  it("brak sesji → 401 przed bramką (nie 403)", async () => {
+    mockRequireAuth.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+    );
+    const { status } = await post({ planSlug: "basic" });
+    expect(status).toBe(401);
+    expect(opLog).toEqual([]);
+  });
+
+  it("e-mail na liście, niepoprawne body → 400", async () => {
+    const { status } = await post({ planSlug: 123 });
+    expect(status).toBe(400);
+    expect(opLog).toEqual([]);
+  });
+
+  it("e-mail spoza listy i niepoprawne body → 403 (bramka przed walidacją)", async () => {
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { status } = await post({ planSlug: 123 });
+    expect(status).toBe(403);
+  });
+
+  it("odpowiedź 403 i log nie zawierają listy dozwolonych adresów", async () => {
+    vi.stubEnv("BETA_ALLOWED_OWNER_EMAILS", "tajny-wpis@example.com");
+    mockRequireAuth.mockResolvedValue({ session: { user: OTHER }, user: OTHER });
+    const { logger } = await import("@/lib/logger");
+
+    const { status, body } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(JSON.stringify(body)).not.toContain("tajny-wpis");
+    const logged = JSON.stringify(vi.mocked(logger.info).mock.calls);
+    expect(logged).not.toContain("tajny-wpis");
+    expect(logged).not.toContain(OTHER.email);
+  });
+
+  it.each([
+    ["adres spoza listy", "list", { ...USER_A, email: "xawery@example.com" }, true],
+    ["serwer bez poczty", "mail", USER_A, false],
+    ["e-mail niepotwierdzony", "verified", { ...USER_A, emailVerified: false }, true],
+  ])("log odmowy: %s → reason %s, tylko userId i powód", async (_n, reason, account, mail) => {
+    emailState.configured = mail;
+    mockRequireAuth.mockResolvedValue({ session: { user: account }, user: account });
+    const { logger } = await import("@/lib/logger");
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(403);
+    expect(vi.mocked(logger.info)).toHaveBeenCalledWith(expect.stringContaining("Beta gate denied"), {
+      userId: account.id,
+      reason,
+    });
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain(account.email);
+  });
 });
 
 describe("POST /api/register-subscription — konto tylko z sesji", () => {

@@ -37,6 +37,9 @@ B='infra/gcp/bootstrap.sh --project=my-helper-2-488419 --region=europe-central2'
 
 1. `gcloud config list` — zalogowane konto sesji głównej z rolą owner; projekt
    NIE jest brany z konfiguracji (skrypt podaje `--project` w każdym wywołaniu).
+   Rola owner służy sesji głównej do poleceń gcloud, nie do sekretów bazy:
+   wartości `postgres-url` i `postgres-admin-password` sesja główna nie czyta
+   (sekcja 9).
 2. Budżet 300 PLN/mies. z progami 50/90/100% istnieje (stan dzisiejszy).
 3. **Koszt przed etapem `sql` (warunek Ethana) — SPEŁNIONY** (Oliver, 2026-11-15).
    Źródło: publiczny katalog cen Google (Cloud Billing Catalog API, usługa
@@ -690,13 +693,18 @@ z bazą, więc tego nie wykryje: rewizja dostanie cały ruch, a zapytania do
 
 **Przed wdrożeniem** (baza produkcyjna, tylko odczyt):
 
-Kontrole przed migracją i po niej idą w sesji `psql` ustawionej na tylko
-odczyt: `PGOPTIONS='-c default_transaction_read_only=on'` w środowisku
-procesu `psql` (blok w sekcji 9) albo, gdy sesja jest już otwarta,
-`SET default_transaction_read_only = on;` jako pierwsze polecenie. To
-zabezpieczenie przed pomyłką (zapis kończy się błędem 25006), nie
-uprawnienie: login aplikacji mógłby je wyłączyć, więc w tej sesji żadnych
-poleceń poza zapytaniami z tej sekcji.
+Kontrola a i kontrole po wdrożeniu idą przez rolę tylko do odczytu
+`myhelper_7b_ro` (sekcja 9b), w bloku kontroli 7b z sekcji 9. Granicą są
+uprawnienia roli: `SELECT` wyłącznie na `drizzle.__drizzle_migrations`
+i domyślny odczyt katalogu. `default_transaction_read_only` w `PGOPTIONS` to
+dodatkowe zabezpieczenie przed pomyłką (zapis kończy się błędem 25006).
+
+**Do zielonego D z sekcji 9b** (rola `myhelper_7b_ro` jeszcze nie istnieje albo
+test akceptacyjny nie jest zapisany) sesja główna nie łączy się z bazą wcale.
+Wdrożenie z migracjami czeka albo kontrolę a i kontrole po wdrożeniu wykonuje
+właściciel we własnym terminalu, blokiem połączenia z sekcji 9a, z
+`-c default_transaction_read_only=on` dopisanym do `PGOPTIONS` i z wpisem
+w rejestrze (sekcja 9c).
 
 a) liczba wpisów w `drizzle.__drizzle_migrations` równa 15; inna wartość = stop:
 
@@ -704,14 +712,21 @@ a) liczba wpisów w `drizzle.__drizzle_migrations` równa 15; inna wartość = s
 SELECT count(*) FROM drizzle.__drizzle_migrations;
 ```
 
-b) zapytanie kontrolne na duplikaty opinii musi dać pusty wynik; inaczej
+**Kontrole b i c są zamknięte.** Dotyczyły jednorazowo migracji 0015–0017
+i już przeszły. Czytały tabele z RLS (`reviews`, `clients`), więc rola bez
+`BYPASSRLS` dostałaby po cichu 0 wierszy, czyli fałszywie zielony wynik.
+Nie przenosimy ich na `myhelper_7b_ro`. Zapis zostaje jako historia. Każda
+przyszła kontrola danych przed migracją powstaje jako nowy punkt z osobną
+analizą roli i domyślnie wykonuje ją właściciel.
+
+b) (zamknięte) zapytanie kontrolne na duplikaty opinii musi dać pusty wynik; inaczej
 migracja 0016 zatrzyma się z błędem:
 
 ```sql
 SELECT appointment_id, count(*) FROM reviews WHERE appointment_id IS NOT NULL GROUP BY appointment_id HAVING count(*) > 1;
 ```
 
-c) zapytanie kontrolne 0017 musi dać `alergie_niepuste=0`; inna wartość =
+c) (zamknięte) zapytanie kontrolne 0017 musi dać `alergie_niepuste=0`; inna wartość =
 stop, bo 0017 zeruje wypełnione `allergies` bez możliwości odtworzenia.
 Zapytanie i wynik trafiają do dziennika migracji (oczekiwana wartość: 0):
 
@@ -719,7 +734,7 @@ Zapytanie i wynik trafiają do dziennika migracji (oczekiwana wartość: 0):
 SELECT 'alergie_niepuste=' || count(*) FROM clients WHERE allergies IS NOT NULL;
 ```
 
-Po kontroli (a, b, c) wychodzimy z `psql`: przed startem joba żadna sesja nie
+Po kontroli a wychodzimy z `psql`: przed startem joba żadna sesja nie
 zostaje otwarta (otwarta transakcja na `reviews` zablokuje indeks z 0016,
 błąd 55P03).
 
@@ -769,8 +784,8 @@ błąd 55P03).
   są tylko w Cloud SQL, więc eksport jednej tabeli nie wystarcza.
 - Czerwony job migracji = wdrożenie wstrzymane.
 
-**Po wdrożeniu** (ten sam blok kontroli 7b z sekcji 9 — login aplikacji,
-tylko odczyt):
+**Po wdrożeniu** (ten sam blok kontroli 7b z sekcji 9 — rola
+`myhelper_7b_ro`, tylko odczyt):
 
 - liczba migracji = 18 (`SELECT count(*) FROM drizzle.__drizzle_migrations;`);
 - suma kontrolna zgodna ze wzorcem z dziennika migracji, liczona dokładnie
@@ -783,7 +798,14 @@ tylko odczyt):
   ```
 
 - tabele i kolumny z 0015–0017 istnieją (w tym indeks
-  `reviews_appointment_id_uq`).
+  `reviews_appointment_id_uq`). Sprawdzamy w katalogu (`to_regclass`,
+  `pg_attribute`), a nie w `information_schema.columns`: ten widok ukrywa
+  kolumny tabel, do których rola nie ma prawa, i dałby fałszywe „brak
+  kolumny”. Oczekiwane `t|t|2`:
+
+  ```sql
+  SELECT to_regclass('public.legal_acceptances') IS NOT NULL, to_regclass('public.reviews_appointment_id_uq') IS NOT NULL, (SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.clients'::regclass AND attname IN ('health_data_consent_at','health_data_consent_by') AND NOT attisdropped);
+  ```
 
 ## 8. D-8 — harmonogram (sesja główna, po K-3 #137)
 
@@ -797,22 +819,39 @@ nigdy nie wznawia. Kolejność obowiązkowa:
 (bez ścieżki i bez taga rewizji). Inny host skrypt odrzuca przed pierwszym
 wywołaniem gcloud (#143 pkt 1).
 
-Kolejność w bloku: 1. utworzenie/aktualizacja — wszystkie 5 zadań `PAUSED`;
+Kolejność w bloku: 1. utworzenie/aktualizacja — wszystkie 6 zadań `PAUSED`;
 2. `--check`: dryf ENABLED→PAUSED oczekiwany, innego dryfu brak; 3. `--resume`
-dopiero po decyzji Darka — jawne nazwy (W-3), można wznowić część zadań;
-4. `--check`: kod 0 (wznowione zgodne z tabelą); 5. lista zadań ze stanem.
+dopiero po decyzji właściciela — jawne nazwy (W-3), tu wyłącznie zadania
+porządkowe; 4. `--check`: dryf zostaje tylko dla `mh-sms-reminders` (w tabeli
+`ENABLED`, w Scheduler `PAUSED` do bramki bety), innego dryfu brak; 5. lista
+zadań ze stanem.
 
 ```bash
+set +x
 S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
 env $S infra/gcp/scheduler.sh
 env $S infra/gcp/scheduler.sh --check
-env $S infra/gcp/scheduler.sh --resume mh-sms-reminders \
-  mh-cleanup-pending-deposits mh-cleanup-temporary-access
+env $S infra/gcp/scheduler.sh --resume mh-cleanup-pending-deposits \
+  mh-cleanup-temporary-access mh-cleanup-expired-auth
 env $S infra/gcp/scheduler.sh --check
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
 
-Zadań jest 5 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
+**Osobny krok: `mh-sms-reminders` przy bramce bety, decyzja właściciela.**
+Nie razem z zadaniami porządkowymi. Najpierw warunek niżej („Warunek przed
+`--resume mh-sms-reminders`”), potem:
+
+```bash
+set +x
+S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
+env $S infra/gcp/scheduler.sh --resume mh-sms-reminders
+env $S infra/gcp/scheduler.sh --check
+gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
+```
+
+Po tym kroku `--check` kończy się kodem 0 (wznowione zgodne z tabelą).
+
+Zadań jest 6 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
 spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
 pierwszym wywołaniem gcloud.
 
@@ -848,8 +887,29 @@ tworzone — wracają z R3-C.
 
 ## 9. Dostęp administracyjny do bazy
 
-Wyłącznie przez `cloud-sql-proxy` z kontem sesji głównej (bez autoryzowanych
-sieci, bez publicznego dostępu hasłem):
+Wyłącznie przez `cloud-sql-proxy` z poświadczeniami gcloud osoby uruchamiającej
+dany blok (bez autoryzowanych sieci, bez publicznego dostępu hasłem).
+
+**Zakaz dla sesji głównej.** Sesja główna nie czyta sekretów `postgres-url`
+ani `postgres-admin-password` i nie łączy się z bazą jako `postgres` ani jako
+login aplikacji `myhelper_svc`. Z bazą łączy się wyłącznie rolą
+`myhelper_7b_ro` (blok kontroli 7b niżej) i czyta wyłącznie sekret
+`postgres-7b-ro-password`. Rola owner na projekcie technicznie pozwala
+odczytać każdy sekret, więc to reguła procedury, a nie granica techniczna.
+Dowodem jest ślad Data Access Secret Managera (10b pkt 3) zestawiony
+z rejestrem odczytów właściciela (sekcja 9c).
+
+**Okres przejściowy.** Od scalenia tej wersji runbooka do zielonego D
+z sekcji 9b sesja główna nie łączy się z bazą wcale, także rolą
+`myhelper_7b_ro`. Wdrożenie z migracjami w tym czasie czeka albo kontrole
+z sekcji 7b wykonuje właściciel we własnym terminalu, blokiem połączenia
+z sekcji 9a, z `-c default_transaction_read_only=on` dopisanym do `PGOPTIONS`
+i z wpisem w rejestrze (sekcja 9c).
+
+**Uruchamia wyłącznie właściciel, we własnym terminalu.** Blok niżej łączy
+się jako `postgres` hasłem z `postgres-admin-password`. Sesja główna i agenci
+go nie uruchamiają. Blok zostaje w runbooku, bo to awaryjna droga właściciela
+do bazy. Każdy odczyt sekretu w tym bloku = wpis w rejestrze (sekcja 9c).
 
 ```bash
 set +x
@@ -868,27 +928,37 @@ proxy do bazy nie zostaje w tle.
 login`). Bez tej flagi proxy szuka danych ADC, a gdy ich nie ma, kończy się
 kodem 1 i `psql` nie ma z czym się połączyć.
 
-**Rola `postgres` nie wystarcza do kontroli 7b.** Wbudowana rola `postgres`
-nie ma praw do schematu `drizzle` ani do tabel aplikacji, bo ich właścicielem
-jest login aplikacji (`myhelper_svc`). Kontrole 7b uruchamia się jako login
-aplikacji, w sesji tylko do odczytu. Hasło jest wycinane z sekretu
-`postgres-url` prosto do zmiennej środowiskowej procesu `psql` — nie trafia na
-ekran, do argumentów, historii ani pliku:
+**Blok kontroli 7b — rola `myhelper_7b_ro`.** Jedyna droga sesji głównej do
+bazy. Wbudowana rola `postgres` nie ma praw do schematu `drizzle`, a login
+aplikacji (`myhelper_svc`) ma zapis, więc kontrola 7b idzie rolą tylko do
+odczytu z sekcji 9b. Warunek: rola utworzona i test akceptacyjny z 9b
+zapisany w dzienniku migracji. Zmienne: `P` (identyfikator projektu),
+`REGION`, `INSTANCE` (instancja Cloud SQL); brak którejkolwiek = stop, nie
+kontynuować. Hasło idzie z sekretu prosto do zmiennej środowiskowej procesu
+`psql` — nie trafia na ekran, do argumentów, historii ani pliku:
 
 ```bash
 set +x
-P=my-helper-2-488419
-cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
-PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
-  PGOPTIONS='-c default_transaction_read_only=on' \
-  psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+: "${P:?}" "${REGION:?}" "${INSTANCE:?}"
+cloud-sql-proxy --gcloud-auth --port 6543 "${P}:${REGION}:${INSTANCE}" &
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
+  PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
+  psql "host=127.0.0.1 port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable"
 kill %1
 ```
 
-`sed -n … p` wypisuje tylko dopasowane hasło i tylko do podstawienia; gdy
-sekret ma inny format, zmienna jest pusta i `psql` odmawia logowania (bez
-wartości sekretu na ekranie). Pierwsze zapytanie w sesji:
-`SHOW default_transaction_read_only;` → `on`; inna wartość = wyjść.
+Pierwsze zapytanie w sesji (oczekiwane `myhelper_7b_ro|on`; inny wynik =
+wyjść):
+
+```sql
+SELECT current_user, current_setting('default_transaction_read_only');
+```
+
+Potem wyłącznie zapytania z sekcji 7b: `count(*)`, `migrations_sha256`
+i kontrola obiektów w katalogu. `row_security=off` zamienia odczyt tabeli
+z RLS w głośny błąd 42501 zamiast cichego pustego wyniku. Rola ma
+`CONNECTION LIMIT 1`: druga sesja (np. niezamknięty test z 9b) daje odmowę
+logowania, a nie zawieszenie — wtedy zamknąć tamtą sesję i powtórzyć.
 
 **Bez `psql` na stacji** — ten sam blok, w miejsce linii z `psql` klient
 z obrazu Postgresa. Zmienne idą do kontenera przez `-e NAZWA` (sama nazwa,
@@ -897,20 +967,441 @@ wyłącznie przez zmienną środowiskową:
 
 ```bash
 set +x
-PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
-  PGOPTIONS='-c default_transaction_read_only=on' \
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-7b-ro-password)" \
+  PGOPTIONS='-c default_transaction_read_only=on -c row_security=off' \
   docker run --rm -it -e PGPASSWORD -e PGOPTIONS pgvector/pgvector:pg18 \
-  psql "host=host.docker.internal port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+  psql "host=host.docker.internal port=6543 user=myhelper_7b_ro dbname=myhelper sslmode=disable"
 ```
 
 **zsh:** w zapisie `$P:europe-central2` zsh czyta `:e` jako modyfikator
-(rozszerzenie pliku) i psuje nazwę instancji. Zawsze `${P}:europe-central2`.
+(rozszerzenie pliku) i psuje nazwę instancji. Zawsze w klamrach:
+`${P}:${REGION}:${INSTANCE}`.
+
+## 9a. Przedłużenie okresu próbnego salonu pilotażowego
+
+**Kiedy.** Przy przyjęciu salonu pilotażowego, gdy data końca pilotażu jest
+już ustalona e-mailem (regulamin pkt 12.2). Domyślnie wynosi +90 dni od
+przyjęcia. Zmianę robimy od razu przy przyjęciu, a nie 14. dnia, żeby salon
+nigdy nie zobaczył blokady. Każde kolejne przedłużenie idzie tą samą drogą.
+
+**Kto.** To zmiana danych produkcyjnych. Decyzję o wykonaniu podejmuje CTO.
+Każdy dostęp do bazy w tej procedurze wykonuje **wyłącznie właściciel**:
+blok połączenia z zapisem oraz kroki 2–4 (odczyt przed zmianą, zmiana,
+odczyt po zmianie) w jednej sesji `psql` i w jednej transakcji. Sesja główna
+robi tylko trzy rzeczy: kopię na żądanie (krok 1, operacja gcloud bez
+połączenia z bazą), przygotowanie parametrów dla właściciela (krok 1) oraz
+wpis w dzienniku audytu (krok 5). W ramach tej procedury sesja główna nie
+łączy się z bazą. Agenci nie wykonują żadnego z kroków.
+
+**Połączenie z zapisem — uruchamia wyłącznie właściciel, we własnym
+terminalu.** Rola kontroli 7b (`myhelper_7b_ro`, sekcja 9) nie ma zapisu,
+więc do tej procedury się nie nadaje. Właściciel łączy się loginem aplikacji
+(`myhelper_svc`), z hasłem z sekretu `postgres-url`, tylko na czas kroków
+2–4. Sesja główna i agenci tego bloku nie uruchamiają. Odczyt sekretu = wpis
+w rejestrze (sekcja 9c). `P` = identyfikator projektu; brak `P` = stop, nie
+kontynuować. Hasło administratora (`postgres`) nie jest tu potrzebne.
+
+```bash
+set +x
+: "${P:?}"
+cloud-sql-proxy --gcloud-auth --port 6543 "${P}:europe-central2:myhelper-pg" &
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions access latest --secret=postgres-url | sed -n 's#^postgresql://myhelper_svc:\([A-Za-z0-9]*\)@.*#\1#p')" \
+  PGOPTIONS='-c lock_timeout=5s -c idle_in_transaction_session_timeout=5min -c statement_timeout=30s' \
+  psql "host=localhost port=6543 user=myhelper_svc dbname=myhelper sslmode=disable"
+kill %1
+```
+
+Limity czasu idą w środowisku procesu `psql`, tak jak hasło. Pierwsze zapytanie
+w sesji: `SHOW idle_in_transaction_session_timeout;` → `5min`; inna wartość =
+wyjść. Kroki 2–4 wykonuj jednym ciągiem, bez przerw; nie zostawiaj otwartej
+transakcji. Jeśli `psql` wypisze komunikat o utracie połączenia albo
+o przekroczeniu limitu bezczynności w transakcji, nie wpisuj kolejnych
+poleceń. Wyjdź z `psql`, zamknij proxy i zacznij od kroku 2 w nowej sesji.
+Zmiany nie ma, więc kopia z kroku 1 zostaje ważna. Jeśli `COMMIT;` wypisze
+`ROLLBACK`, zmiany też nie ma.
+
+**Data w UTC.** Kolumna `salon_subscriptions.trial_ends_at` nie ma strefy
+czasowej, a aplikacja zapisuje i porównuje w niej czas UTC. Datę podajemy
+więc jawnie w UTC. Koniec dnia D w Polsce to `D 22:59:59` w czasie zimowym
+albo `D 21:59:59` w czasie letnim. Salon ma pełny dostęp do tej chwili,
+wyłącznie.
+
+**Kroki.**
+
+1. **Kopia na żądanie przed zmianą i parametry** (sesja główna; zasada
+   30 dni z 3.6a obowiązuje). Brak `P` = stop, nie kontynuować:
+
+   ```bash
+   set +x
+   : "${P:?}"
+   gcloud --project="${P}" sql backups create --instance=myhelper-pg --description=pre-trial-extension
+   gcloud --project="${P}" sql backups list --instance=myhelper-pg --sort-by='~windowStartTime' --limit=1 --format='value(id,type,status,windowStartTime)'
+   ```
+
+   Oczekiwane: `ON_DEMAND`, `SUCCESSFUL`. Inny wynik = stop, bez zmiany.
+   Id kopii trafia do wpisu z kroku 5. Potem sesja główna przekazuje
+   właścicielowi parametry: id salonu i nową datę w UTC (patrz „Data w UTC”).
+
+2. **Otwarcie transakcji i odczyt przed zmianą** (właściciel, w sesji `psql`
+   z bloku połączenia z zapisem wyżej):
+
+   ```sql
+   BEGIN;
+   SELECT id, status, trial_ends_at, stripe_subscription_id IS NULL AS bez_stripe
+   FROM salon_subscriptions
+   WHERE salon_id = '<id salonu>' AND status IN ('trialing', 'active')
+   FOR UPDATE;
+   ```
+
+   Oczekiwane: dokładnie jeden wiersz, `status = trialing`, `bez_stripe = t`.
+   Zapisz starą wartość `trial_ends_at`. Inny wynik = `ROLLBACK;`, stop
+   i pytanie do CTO. Przy `active` salon już płaci i nie ma czego przedłużać.
+   Przy wierszu z subskrypcją Stripe (`bez_stripe = f`) synchronizacja ze
+   Stripe nadpisałaby datę, więc też `ROLLBACK;` i stop. `FOR UPDATE`
+   blokuje wiersz do końca transakcji, więc między sprawdzeniem warunków
+   a zmianą nikt go nie zmieni.
+
+3. **Zmiana** (właściciel, ta sama sesja i ta sama transakcja):
+
+   ```sql
+   UPDATE salon_subscriptions SET trial_ends_at = '<data UTC, np. 2027-03-01 22:59:59>'
+   WHERE salon_id = '<id salonu>' AND status = 'trialing';
+   ```
+
+   `psql` ma wypisać `UPDATE 1`. Każdy inny wynik = `ROLLBACK;` i stop.
+   Jeśli wyszło `UPDATE 0`, choć odczyt z kroku 2 pokazał ten wiersz,
+   właściciel robi `ROLLBACK;` i sprawa wraca do CTO, bo zapis zablokowało
+   coś innego niż warunek, np. polityka RLS. W migracjach RLS jest włączone
+   bez `FORCE`, więc właściciel tabel (login aplikacji) powinien ją omijać.
+
+4. **Odczyt po zmianie i zatwierdzenie** (właściciel, ta sama sesja i ta
+   sama transakcja):
+
+   ```sql
+   SELECT status, trial_ends_at FROM salon_subscriptions
+   WHERE salon_id = '<id salonu>' AND status = 'trialing';
+   ```
+
+   Oczekiwane: jeden wiersz z nową datą. Wtedy `COMMIT;`. Każda rozbieżność
+   = `ROLLBACK;` i stop. Po `COMMIT;` wyjście z `psql`, a proxy zamyka
+   `kill %1`. Właściciel przekazuje sesji głównej tylko starą datę, nową datę
+   i wynik („1 wiersz”, `COMMIT`). Pełny dostęp przy `trialing` z przyszłą
+   datą potwierdza test „przedłużenie: przesunięcie trialEndsAt
+   z przeszłości na przyszłość…” w `__tests__/lib/subscription-trial-end.test.ts`.
+
+5. **Wpis w dzienniku audytu i powiązanie z salonem** (sesja główna). Wpis
+   jak przy kopiach na żądanie (komentarz w #121) zawiera numer porządkowy
+   („przedłużenie pilotażu nr N”), starą i nową wartość `trial_ends_at`,
+   wynik „1 wiersz”, id kopii z kroku 1 oraz informację „decyzja CTO, zapis
+   wykonał właściciel”. Wpis nie zawiera id salonu ani jego skrótu, nazwy
+   salonu, adresów e-mail ani danych osobowych. Powiązanie numeru
+   porządkowego z salonem jest prywatne i trzymamy je poza repozytorium:
+   sesja główna zakłada i prowadzi zgłoszenie w prywatnym systemie zadań
+   z dostępem tylko dla zespołu.
+
+**Cotygodniowy przegląd** (sesja główna, przy cotygodniowym odczycie
+kosztów). Sesja główna czyta wpisy z kroku 5 w dzienniku audytu, bez
+łączenia się z bazą, i wypisuje przedłużenia, którym do końca zostało mniej
+niż 7 dni albo termin już minął. Każdy wpis
+zawiera nową datę końca pilotażu, więc najnowszy wpis dla danego numeru
+porządkowego wyznacza obowiązujący termin. Każdy salon pilotażowy z tej
+listy dostaje pytanie o przedłużenie. Po zgodzie salonu przedłużenie idzie
+krokami 1–5. Gdy potrzebne jest zapytanie do bazy (np. przy podejrzeniu
+rozbieżności z dziennikiem), uruchamia je wyłącznie właściciel:
+
+```sql
+SELECT salon_id, trial_ends_at FROM salon_subscriptions
+WHERE status = 'trialing' AND trial_ends_at < (now() AT TIME ZONE 'UTC') + interval '7 days'
+ORDER BY trial_ends_at;
+```
+
+**Próg na przycisk w kodzie.** Ręczna procedura obowiązuje, dopóki nie
+nastąpi pierwsze z dwóch zdarzeń: salonów pilotażowych jest więcej niż 3 albo
+startuje płatny plan. Wtedy przedłużenie przechodzi do funkcji w panelu
+(pełny proces z CTO, bo dotyczy subskrypcji).
+
+## 9b. Rola tylko do odczytu `myhelper_7b_ro`
+
+**Kto.** Wszystkie bloki tej sekcji (sekret, części A–D, odwrócenie)
+uruchamia **wyłącznie właściciel, we własnym terminalu**. Sesja główna
+i agenci ich nie uruchamiają. Każdy odczyt `postgres-admin-password` (części
+A i D) oraz `postgres-url` (część B) = wpis w rejestrze (sekcja 9c). Wyniki
+części D trafiają do dziennika migracji, bez wartości sekretów. Dopiero po
+zielonym D sesja główna może uruchomić blok kontroli 7b z sekcji 9.
+
+Zmienne (ustawia właściciel): `P` (identyfikator projektu), `REGION`,
+`INSTANCE` (instancja Cloud SQL), `RO_PW` (hasło, tylko w części C).
+
+**Co dostaje rola.** Logowanie, `CONNECT` do bazy `myhelper`, `USAGE` na
+schemacie `drizzle` i `SELECT` wyłącznie na `drizzle.__drizzle_migrations`
+(kolumny `id`, `hash`, `created_at`, bez danych osobowych). Katalog
+(`pg_class`, `pg_attribute`, `to_regclass`) jest czytelny domyślnie. Bez
+`ALL TABLES`, bez `ALTER DEFAULT PRIVILEGES`, bez `GRANT` w `public`.
+
+### Sekret `postgres-7b-ro-password`
+
+Tworzony **poza manifestem** `bootstrap.sh`, tak jak `postgres-admin-password`.
+W manifeście etap `sa` dałby `secretAccessor` kontu `myhelper-runtime`, a to
+konto tej roli nie potrzebuje. Bez wiązań na poziomie sekretu: czyta go
+właściciel i konto sesji głównej (rola owner na projekcie).
+
+```bash
+set +x
+: "${P:?}"
+CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets create postgres-7b-ro-password --replication-policy=user-managed --locations=europe-central2
+gcloud --project="${P}" secrets get-iam-policy postgres-7b-ro-password
+```
+
+Oczekiwane: polityka sekretu bez `bindings`. Inny wynik = stop. Lokalizacja
+replikacji jest stała (`europe-central2`, sekcja 0), a nie brana ze zmiennej
+`REGION`: strażnik zmiennej sprawdza tylko, czy nie jest pusta.
+
+### A. Jako `postgres` (blok `postgres` z sekcji 9)
+
+```sql
+\set ON_ERROR_STOP on
+CREATE ROLE myhelper_7b_ro LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 1;
+ALTER ROLE myhelper_7b_ro SET default_transaction_read_only = on;
+ALTER ROLE myhelper_7b_ro SET statement_timeout = '30s';
+ALTER ROLE myhelper_7b_ro SET idle_in_transaction_session_timeout = '60s';
+ALTER ROLE myhelper_7b_ro SET row_security = off;
+GRANT CONNECT ON DATABASE myhelper TO myhelper_7b_ro;
+```
+
+Brak klauzuli `PASSWORD` jest celowy: rola powstaje bez hasła (NULL, nie da
+się na nią zalogować do części C). Hasło nie przechodzi przez SQL: `PASSWORD '…'`
+albo `:'pw'` wysyła jawny tekst w treści polecenia, a ta przy błędzie trafia
+do logu serwera (Cloud Logging). `idle_in_transaction_session_timeout`:
+pozostawiona otwarta transakcja nie zablokuje joba migracji (55P03).
+`row_security = off`: odczyt tabeli z RLS kończy się błędem 42501, a nie
+pustym wynikiem.
+
+### B. Jako `myhelper_svc` (blok „Połączenie z zapisem” z sekcji 9a)
+
+`postgres` nie ma praw do schematu `drizzle`, więc `GRANT` daje właściciel
+obiektu. Sesja nie może być tylko do odczytu: `GRANT` w transakcji tylko do
+odczytu kończy się błędem 25006.
+
+```sql
+\set ON_ERROR_STOP on
+GRANT USAGE ON SCHEMA drizzle TO myhelper_7b_ro;
+GRANT SELECT ON TABLE drizzle.__drizzle_migrations TO myhelper_7b_ro;
+```
+
+### C. Hasło (zsh, terminal właściciela)
+
+Ten sam wzorzec co hasło loginu aplikacji w `bootstrap.sh`: `set-password` na
+loginie utworzonym SQL-em nie nadaje `cloudsqlsuperuser` (sprawdza to D).
+Hasło trafia do sekretu strumieniem i do `set-password` przez plik flag
+czytany ze strumienia: `printf` jest wbudowanym poleceniem powłoki, więc
+wartość nie trafia do `ps`, argumentów, historii ani na dysk.
+`set-password` rusza tylko wtedy, gdy zapis do sekretu się udał.
+
+```bash
+set +x
+: "${P:?}" "${INSTANCE:?}"
+RO_PW="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
+if [[ "$RO_PW" =~ ^[A-Za-z0-9]{32}$ ]]; then
+  printf '%s' "$RO_PW" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" secrets versions add postgres-7b-ro-password --data-file=- && CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project="${P}" --quiet sql users set-password myhelper_7b_ro --instance="${INSTANCE}" --flags-file=<(printf -- '--password: "%s"\n' "$RO_PW") && echo "pw=set"
+else
+  echo "pw=bad"
+fi
+unset RO_PW
+```
+
+Oczekiwane: `pw=set`. `pw=bad` = nic nie zostało zapisane, blok można
+powtórzyć.
+
+**Gdy `set-password` padnie po zapisie do sekretu** (brak `pw=set`, a nowa
+wersja sekretu jest): nowa wersja nie pasuje do hasła roli, więc ją
+wyłączamy, zanim ktokolwiek jej użyje. `NUMER` w drugiej linii to miejsce
+na numer wersji z pierwszej linii; wklejone bez zmiany kończy się błędem i niczego
+nie wyłącza:
+
+```bash
+set +x
+: "${P:?}"
+gcloud --project="${P}" secrets versions list postgres-7b-ro-password --sort-by='~createTime' --limit=1 --format='value(name,state)'
+gcloud --project="${P}" secrets versions disable NUMER --secret=postgres-7b-ro-password
+```
+
+**Hasło nie może trafić do logu audytu.** Po części C trzy odczyty wpisu
+Admin Activity zmiany użytkownika, każdy z odpowiedzią tak/nie i bez treści
+żądania na ekranie:
+
+```bash
+set +x
+: "${P:?}"
+gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(timestamp)'
+gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(protoPayload.request.body.name)'
+gcloud --project="${P}" logging read 'protoPayload.methodName="cloudsql.users.update" AND protoPayload.request.body.password:*' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(timestamp)'
+```
+
+Oczekiwane: pierwszy odczyt daje znacznik czasu (wpis jest), drugi
+`myhelper_7b_ro` (ścieżka `protoPayload.request.body` jest właściwa), trzeci
+pusty wynik (w żądaniu nie ma pola z hasłem). Pusty wynik trzeciego odczytu
+dowodzi czegoś tylko razem z wynikiem drugiego: inny wynik drugiego = ścieżka
+pola jest inna, stop i analiza. Wynik trzeciego niepusty = hasło
+unieważnione (wyłączona wersja sekretu i `\password myhelper_7b_ro` z nową
+wartością) i dalej tylko wariant zapasowy niżej. Wyniku nie przepisujemy do
+repo ani komentarzy.
+
+**Wariant zapasowy:** `\password myhelper_7b_ro` w sesji części A (psql liczy
+SCRAM po stronie klienta, a prompt nie trafia do historii), potem ta sama
+wartość do sekretu przez `--data-file=-`.
+
+**Jedynym dowodem, że gcloud przeczytał plik flag, jest logowanie w D.**
+Nieudane logowanie = stop i analiza, a nie ponowienie z `--password=` (hasło
+w argumentach polecenia).
+
+### D. Kontrola i test akceptacyjny
+
+Jako `postgres` (blok z sekcji 9), po C:
+
+```sql
+SELECT rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls, rolconnlimit FROM pg_roles WHERE rolname = 'myhelper_7b_ro';
+SELECT count(*) FROM pg_auth_members WHERE member = 'myhelper_7b_ro'::regrole;
+SELECT pg_has_role('myhelper_7b_ro','cloudsqlsuperuser','MEMBER'), pg_has_role('myhelper_7b_ro','myhelper_svc','MEMBER'), pg_has_role('myhelper_7b_ro','myhelper_app','MEMBER');
+SELECT has_database_privilege('myhelper_7b_ro', current_database(), 'CREATE'), has_schema_privilege('myhelper_7b_ro','public','CREATE'), has_schema_privilege('myhelper_7b_ro','drizzle','CREATE');
+SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname IN ('public','drizzle') AND p.prosecdef;
+SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public','drizzle') AND c.relkind IN ('r','p','v','m','S') AND has_table_privilege('myhelper_7b_ro', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE');
+```
+
+Oczekiwane, w tej kolejności: `f|f|f|f|f|f|1`; `0`; `f|f|f`; `f|f|f`; `0`;
+`1`. Piąte zapytanie liczy funkcje `SECURITY DEFINER`: przy domyślnym
+`EXECUTE` dla PUBLIC każda byłaby drogą zapisu, więc wynik większy od 0 =
+stop. Szóste liczy tabele, na których rola ma jakiekolwiek prawo; jedyną ma
+być `__drizzle_migrations`. Funkcja `has_table_privilege` widzi prawa
+niezależnie od tego, kto je nadał (widok `information_schema.role_table_grants`
+pokazałby jako `postgres` 0, bo grantorem jest `myhelper_svc`). Każdy inny
+wynik = stop i odwrócenie (niżej).
+
+Potem jako `myhelper_7b_ro` (blok kontroli 7b z sekcji 9; sesję `postgres`
+najpierw zamknąć). Pierwsze zapytanie ma dać `myhelper_7b_ro|on|30s|off`,
+każde z czterech kolejnych ma skończyć się `ERROR: permission denied` (42501).
+`SET TRANSACTION READ WRITE` zdejmuje zabezpieczenie sesji, więc test sprawdza
+same uprawnienia; `WHERE false` sprawdza prawo bez zmiany wiersza:
+
+```sql
+SELECT current_user, current_setting('default_transaction_read_only'), current_setting('statement_timeout'), current_setting('row_security');
+BEGIN; SET TRANSACTION READ WRITE; UPDATE drizzle.__drizzle_migrations SET hash = hash WHERE false; ROLLBACK;
+BEGIN; SET TRANSACTION READ WRITE; CREATE TABLE public.t7b_probe (x int); ROLLBACK;
+BEGIN; SET TRANSACTION READ WRITE; CREATE TABLE drizzle.t7b_probe (x int); ROLLBACK;
+BEGIN; SET TRANSACTION READ WRITE; SELECT count(*) FROM public.clients; ROLLBACK;
+```
+
+Inny wynik (zwłaszcza `UPDATE 0`, `CREATE TABLE` albo liczba) = stop
+i odwrócenie. Wynik całego D do dziennika migracji. Po teście wyjść z `psql`
+(limit jednego połączenia).
+
+### Ryzyka i utrzymanie
+
+- **Nowa migracja nie wymaga nowego `GRANT`**: kontrola 7b czyta tylko
+  `__drizzle_migrations` i katalog. Jeśli kiedyś kontrola ma czytać dane innej
+  tabeli, `GRANT` nadaje właściciel (część B), **nigdy w pliku migracji**:
+  roli nie ma w bazach lokalnych, testowych ani w CI, więc migracja by padła.
+- **Utrata `GRANT`**: gdy aktualizacja `drizzle-orm` przebuduje
+  `__drizzle_migrations`, prawo znika i kontrola 7b kończy się błędem 42501
+  (głośno, nie fałszywie zielono). Naprawa: ponowić część B.
+- **Narzędzia porównań bez zmian**: `drizzle.config.ts` nie ma
+  `entities.roles`, więc rola nie pojawia się w `generate` ani w diffie;
+  `compare.sh`, `rls-check.sh` i oczekiwane wyniki kontroli ról
+  (`docs/runbook-przelaczenie-bazy.md` 1.0 pkt 2) się nie zmieniają.
+- **Ryzyko resztkowe**: `default_transaction_read_only` i `row_security`
+  sesja może wyłączyć, więc granicą są uprawnienia z D. PUBLIC ma domyślnie
+  `TEMPORARY` na bazie, więc rola może utworzyć tabelę tymczasową (obiekt
+  sesji, nie dane). Tego prawa PUBLIC nie odbieramy, bo dotknęłoby innych ról.
+
+### Odwrócenie
+
+Kolejność obowiązkowa; `DROP ROLE` przy pozostałych prawach kończy się
+błędem zależności. Nic tu nie dotyka danych ani obiektów aplikacji.
+
+Jako `myhelper_svc` (blok z sekcji 9a):
+
+```sql
+REVOKE SELECT ON drizzle.__drizzle_migrations FROM myhelper_7b_ro;
+REVOKE USAGE ON SCHEMA drizzle FROM myhelper_7b_ro;
+```
+
+Jako `postgres` (blok z sekcji 9):
+
+```sql
+REVOKE CONNECT ON DATABASE myhelper FROM myhelper_7b_ro;
+DROP ROLE myhelper_7b_ro;
+```
+
+Na końcu sekret i wpis w dzienniku migracji:
+
+```bash
+set +x
+gcloud --project="${P}" secrets delete postgres-7b-ro-password
+```
+
+## 9c. Rejestr odczytów sekretów bazy przez właściciela
+
+**Zasada.** Każdy odczyt wartości `postgres-url` albo
+`postgres-admin-password` poza kontem usługi (niżej) wykonuje wyłącznie
+właściciel i każdy ma wpis
+w rejestrze, w dzienniku migracji, **przed** zamknięciem sesji, w której
+nastąpił. **Odczyt sekretu bez wpisu = incydent P0**, niezależnie od tego,
+kto go wykonał. Sesja główna tych sekretów nie czyta (sekcja 9), więc każdy
+ślad bez wpisu jest albo pominięciem właściciela, albo odczytem spoza
+procedury.
+
+**Wzór wpisu** (bez wartości, bez adresów e-mail i IP, bez identyfikatorów
+salonów):
+
+| Pole | Wartość |
+|---|---|
+| Nagłówek | „odczyt sekretu nr N” (kolejny numer) |
+| Czas (UTC) | np. `2026-01-31 14:05` |
+| Sekret | `postgres-admin-password` albo `postgres-url` |
+| Wykonał | właściciel, własny terminal |
+| Sekcja runbooka | 9 (blok `postgres`), 9a (połączenie z zapisem), 9b część A/B/D albo inna z opisem |
+| Cel | jedno zdanie |
+| Sesja zamknięta (`psql` i proxy) | tak |
+
+**Dowód.** Data Access `DATA_READ` dla `secretmanager.googleapis.com` jest
+włączone (10b pkt 3), więc każdy odczyt ma wpis audytu w `myhelper-audit`.
+Rejestr zestawia sesja główna: przy cotygodniowym odczycie kosztów i po
+każdej procedurze z sekcji 9, 9a i 9b.
+
+**Odczyty konta usługi są poza rejestrem.** Usługa i job `myhelper-migrate`
+działają jako `myhelper-runtime` (sekcja 3.6) i czytają `postgres-url` przy
+każdym starcie instancji i każdym przebiegu joba. To normalna praca usługi
+i joba, więc zestawienie je pomija, a rejestr ich nie obejmuje. Rejestr
+obejmuje odczyty wszystkich innych tożsamości.
+
+**Przed pierwszym zestawieniem** odczyt `auditConfigs` (ostatnie polecenie
+z podsekcji „Sprawdzenie” w 10b): oczekiwane `DATA_READ` dla
+`secretmanager.googleapis.com`. Bez tego pusty wynik zestawienia niczego
+nie dowodzi, więc brak `DATA_READ` = stop, zestawienia nie robimy.
+
+Odczyt zwraca wyłącznie czas i nazwę zasobu, bez adresów kont:
+
+```bash
+set +x
+: "${P:?}"
+gcloud --project="${P}" logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND (protoPayload.resourceName:"/secrets/postgres-url/" OR protoPayload.resourceName:"/secrets/postgres-admin-password/") AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp,protoPayload.resourceName)'
+```
+
+Każdy znacznik czasu ma odpowiadający mu wpis w rejestrze (ten sam sekret,
+czas w obrębie tej samej sesji). Znacznik bez wpisu = incydent P0: zgłoszenie
+od razu do właściciela (tylko on może powiedzieć, czy to jego pominięty wpis)
+i tego samego dnia do CTO i CRCO, a do wyjaśnienia żadnych kolejnych odczytów
+tych sekretów. Wynik zestawienia w dzienniku migracji: liczba odczytów
+i „wszystkie z wpisem” albo lista czasów bez wpisu. Zestawienie robi sesja
+główna, czyli strona, której odczyty są sprawdzane, więc do czasu osobnego
+konta do zestawień ten sam wynik (liczba odczytów i „wszystkie z wpisem” albo
+lista czasów) trafia także do właściciela.
 
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
 Obowiązujący wariant (decyzja COO z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.
 Na produkcji były tylko konta testowe. Neona nie kasujemy, nie kopiujemy i nie zmieniamy do 0.13. Bramka bazy (j'): plan, wiersz 0.5 (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, etap 0).
 Z `docs/runbook-przelaczenie-bazy.md` obowiązują tylko kontrola ról (1.0 pkt 2) i próba odtworzenia; kopia w przód i wstecz (sekcje 2–3) nie obowiązuje, odchudzenie w osobnym PR.
+Kontrola ról 1.0 pkt 2 czyta dwa sekrety: `postgres-admin-password` (przez `psql_csql_admin`) i `postgres-url` (krok 1, przez `psql_csql_app`), więc uruchamia ją wyłącznie właściciel (odczyt każdego z dwóch sekretów = osobny wpis w rejestrze, sekcja 9c). Rola `myhelper_7b_ro` (sekcja 9b) jej nie zastępuje: krok 1 sprawdza `current_user = myhelper_svc`, a nowa rola nie zmienia żadnego oczekiwanego wyniku tej kontroli.
 
 ## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)
 

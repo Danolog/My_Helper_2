@@ -170,10 +170,24 @@ const nameOf = (c: string[]) => {
 };
 
 describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
-  it("tabela: 5 zadań systemowych /api/cron/*, bez mh-notify-* (decyzja produktowa: do R3-C)", () => {
+  it("tabela: 6 zadań systemowych /api/cron/*, bez mh-notify-* (decyzja produktowa: do R3-C)", () => {
     expect(TABLE.map((j) => j.name).sort()).toEqual(
-      ["mh-cleanup-pending-deposits", "mh-cleanup-temporary-access", "mh-push-reminders", "mh-push-reminders-24h", "mh-sms-reminders"],
+      [
+        "mh-cleanup-expired-auth",
+        "mh-cleanup-pending-deposits",
+        "mh-cleanup-temporary-access",
+        "mh-push-reminders",
+        "mh-push-reminders-24h",
+        "mh-sms-reminders",
+      ],
     );
+    // Czyszczenie wygasłych sesji: raz na dobę w nocy, wznawialne.
+    expect(TABLE.find((j) => j.name === "mh-cleanup-expired-auth")).toEqual({
+      name: "mh-cleanup-expired-auth",
+      path: "/api/cron/cleanup-expired-auth",
+      schedule: "17 3 * * *",
+      state: "ENABLED",
+    });
     expect(TABLE.every((j) => j.path.startsWith("/api/cron/"))).toBe(true);
     expect(SOURCE.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/mh-notify-|\/api\/notifications\//);
     // Każde przyszłe zadanie z wiadomościami do klientów musi być PAUSED (W-2).

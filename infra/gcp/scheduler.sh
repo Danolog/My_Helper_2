@@ -98,6 +98,7 @@ JOBS=(
   "mh-push-reminders-24h|/api/cron/push-reminders-24h|13,43 * * * *|PAUSED"
   "mh-cleanup-pending-deposits|/api/cron/cleanup-pending-deposits|*/15 * * * *|ENABLED"
   "mh-cleanup-temporary-access|/api/cron/cleanup-temporary-access|7 * * * *|ENABLED"
+  "mh-cleanup-expired-auth|/api/cron/cleanup-expired-auth|17 3 * * *|ENABLED"
 )
 # mh-push-reminders i mh-push-reminders-24h: PAUSED, dopóki moduł
 # pushNotifications ma `hardOff` w src/lib/features.ts (crony i tak nic nie

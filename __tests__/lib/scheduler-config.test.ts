@@ -41,8 +41,9 @@ const JOBS = jobs();
  * Zamknięta lista tras crona bez zadania w skrypcie: harmonogram dochodzi
  * osobnym krokiem infrastruktury (zmiana produkcji). Do tego czasu trasa
  * istnieje, ale nikt jej nie woła. Dopisanie pozycji = zmiana przypiętej listy.
+ * Dziś pusta: każda trasa crona ma zadanie w skrypcie.
  */
-const CRON_ROUTES_AWAITING_SCHEDULE = ["/api/cron/cleanup-expired-auth"];
+const CRON_ROUTES_AWAITING_SCHEDULE: readonly string[] = [];
 
 function routeFile(path: string): string {
   return join(ROOT, "src/app", path, "route.ts");
@@ -73,7 +74,7 @@ describe("G-C5: scheduler.sh ↔ trasy", () => {
   });
 
   it("lista tras czekających na harmonogram: przypięta, każda istnieje i nie ma jeszcze zadania", () => {
-    expect(CRON_ROUTES_AWAITING_SCHEDULE).toEqual(["/api/cron/cleanup-expired-auth"]);
+    expect(CRON_ROUTES_AWAITING_SCHEDULE).toEqual([]);
     const paths = new Set(JOBS.map((j) => j.path));
     for (const p of CRON_ROUTES_AWAITING_SCHEDULE) {
       expect(existsSync(routeFile(p)), p).toBe(true);

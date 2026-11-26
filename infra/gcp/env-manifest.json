@@ -25,6 +25,16 @@
       "required": false,
       "note": "Brak zmiennej = memory. Dozwolone wyłącznie memory albo database; inna wartość (także pusta) zatrzymuje start."
     },
+    "BETA_ALLOWED_OWNER_EMAILS": {
+      "class": "secret",
+      "secretName": "beta-allowed-owner-emails",
+      "required": false,
+      "note": "Beta na zaproszenie: e-maile właścicieli, którzy mogą założyć salon (po przecinku). Dane osobowe: wartość wyłącznie w Secret Manager, nigdy w vars.* ani w workflow (logi repo publicznego). Sekret bez włączonej wersji = pominięty przy wdrożeniu = nikt nie założy salonu."
+    },
+    "BETA_ALLOW_UNVERIFIED_OWNER": {
+      "class": "ci-only",
+      "note": "Tylko serwer E2E w CI i lokalny dev bez poczty: konto z listy bety może założyć salon bez poczty na serwerze i bez potwierdzonego e-maila. Nigdy na hostingu (bramka lib/hosting ignoruje ją na Vercelu i Cloud Run)."
+    },
     "BETTER_AUTH_SECRET": {
       "class": "secret",
       "secretName": "better-auth-secret",

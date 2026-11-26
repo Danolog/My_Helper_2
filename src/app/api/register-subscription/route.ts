@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE, salonGateDenial } from "@/lib/beta-access";
 import { TRIAL_DAYS } from "@/lib/constants";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
 import { db } from "@/lib/db";
+import { isEmailConfigured } from "@/lib/email";
 import {
   checkLegalAcceptance,
   recordLegalAcceptances,
@@ -61,6 +63,13 @@ function alreadySubscribed() {
  *    `salon_subscriptions_salon_current_uq` → 23505 → 409,
  *  - tylko aktywny plan (`isActive`).
  *
+ * Beta na zaproszenie (@/lib/beta-access, `salonGateDenial`): tylko konto, którego
+ * e-mail z sesji jest na liście BETA_ALLOWED_OWNER_EMAILS i jest potwierdzony
+ * (`emailVerified`), a serwer ma pocztę (`isEmailConfigured()`); inaczej 403
+ * BETA_INVITE_ONLY bez zapytań do bazy. Pusta lista = nikt; brak poczty = nikt
+ * (wyjątek: BETA_ALLOW_UNVERIFIED_OWNER=1 poza hostingiem, CI i dev). To jedyna produkcyjna ścieżka
+ * zakładania salonu (poza seedem).
+ *
  * Akceptacja regulaminu i umowy powierzenia (@/lib/legal/acceptance): po
  * publikacji dokumentów obie bieżące wersje są wymagane (inaczej 400
  * LEGAL_ACCEPTANCE_REQUIRED, bez zapytań do bazy), a dwa wpisy
@@ -72,6 +81,23 @@ export async function POST(request: NextRequest) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    // Beta na zaproszenie: e-mail konta z sesji musi być na liście, serwer musi mieć
+    // pocztę, a e-mail musi być potwierdzony, zanim trasa przeczyta treść żądania i
+    // dotknie bazy. Ta sama odpowiedź dla każdego powodu odmowy; log ma tylko
+    // userId i powód (list / mail / verified), bez e-maila i bez listy.
+    const denial = salonGateDenial(authResult.user, isEmailConfigured());
+    if (denial !== null) {
+      logger.info("[Register Subscription] Beta gate denied — 403", {
+        userId: authResult.user.id,
+        reason: denial,
+      });
+      return NextResponse.json(
+        { success: false, code: BETA_INVITE_ONLY_CODE, error: BETA_INVITE_ONLY_MESSAGE },
+        { status: 403 }
+      );
+    }
+
     const rawBody = await request.json();
     const validationError = validateBody(registerSubscriptionSchema, rawBody);
     if (validationError) {
