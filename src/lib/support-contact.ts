@@ -1,6 +1,6 @@
 /**
- * Kontakt do wsparcia MyHelper w tekstach dla salonu (decyzja produktowa, 2026-11-15).
- * Jedna stała dla wszystkich miejsc: nieudany zwrot zadatku (refund-fix),
- * zaległa płatność subskrypcji (#91 wariant B). Nie link do /contact (404).
+ * Kontakt do wsparcia MyHelper w tekstach dla salonu. Używany w toaście po nieudanym zwrocie
+ * zadatku. Adres e-mail, nie link do /contact: strona kontaktu zwraca 404 do czasu publikacji
+ * dokumentów prawnych. Ten sam adres co na /pricing i w informacji o okresie próbnym.
  */
-export const SUPPORT_CONTACT = "dg@nordsignal.cc";
+export const SUPPORT_CONTACT = "kontakt@nordsignal.cc";
