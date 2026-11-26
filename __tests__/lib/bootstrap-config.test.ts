@@ -1192,7 +1192,7 @@ for a in "$@"; do printf '%s\\n' "$a"; done > "$REC/psql.argv"
 // Bloki kontroli 7b (sekcja 9: zmienna środowiskowa, plik haseł, Docker) i usunięcie sekretu
 // w odwróceniu 9b, wykonane tak, jak są wklejane: na stdin interaktywnej powłoki (`bash -i`,
 // `zsh -f -i`), z atrapami gcloud, cloud-sql-proxy, nc, psql, docker i mktemp.
-describe("G-D3: bloki kontroli 7b i odwrócenie 9b w interaktywnej powłoce", () => {
+describe("bloki kontroli 7b i odwrócenie 9b w interaktywnej powłoce", () => {
   const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
   const bashBlocks = (s: string) => [...s.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? "");
   const s7b = RUNBOOK.slice(RUNBOOK.indexOf("**Blok kontroli 7b"), RUNBOOK.indexOf("## 9a."));

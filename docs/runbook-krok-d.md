@@ -872,7 +872,7 @@ Po tym kroku `--check` kończy się kodem 0 (wznowione zgodne z tabelą).
 
 **`mh-sms-reminders` w stanie `ENABLED` przed bramką bety** (w liście zadań
 albo w `--check`) = natychmiast pauza, bez czekania na decyzję:
-`gcloud --project=my-helper-2-488419 scheduler jobs pause mh-sms-reminders --location=europe-central2`,
+`gcloud --project="${P}" scheduler jobs pause mh-sms-reminders --location=europe-central2`,
 potem lista zadań ze stanem jak wyżej (oczekiwane `PAUSED`) i zgłoszenie
 właścicielowi. `scheduler.sh` nie ma trybu samej pauzy; przebieg domyślny
 też wstrzymuje wszystkie zadania, ale przy tym czyta sekret i aktualizuje
@@ -2114,6 +2114,25 @@ używają polityki tego skryptu.
   logowanie nie działa (`src/components/auth/sign-in-button.tsx:168-206`). Ukrycie
   przycisku bez `GOOGLE_CLIENT_ID` to osobna zmiana przed przełączeniem
   (warunek P10 w `docs/runbook-zatrzymanie-zapisow.md`).
+- Test bloków kontroli 7b: gałąź zsh nie działa na runnerze Ubuntu, bo nie ma
+  tam `/bin/zsh` (lista powłok w teście dodaje zsh tylko wtedy, gdy plik
+  istnieje). W CI test przechodzi tylko dla bash, a przebieg zsh jest
+  lokalny (stacja z macOS). Poprawka: instalacja zsh w workflow albo test,
+  który pada, gdy zsh pominięto po cichu. Próg: następna zmiana bloków 7b
+  albo tego testu.
+- Siedem bloków ze strażnikiem `: "${X:?}"`, który w powłoce interaktywnej
+  nie zatrzymuje kolejnych linii (sekcje 9a, 9b, 9c): pięć bloków właściciela
+  bez otoczki `if` (9a z zapisem, 9b utworzenie sekretu, 9b część C, 9b
+  wyłączenie wersji, 9b trzy odczyty logu audytu), brak `require_auth`
+  w 9a z zapisem i zdanie w 9a „brak `P` = stop”, które nie odpowiada kodowi.
+  Bloki sesji głównej (9a krok 1, 9c) działają, bo powłoka nieinteraktywna
+  kończy się na `:?`. Poprawka: otoczka `if` w pięciu blokach,
+  `require_auth=scram-sha-256` w 9a, test w tym samym zestawie, poprawione
+  zdanie. Próg: przed pierwszym uruchomieniem przez właściciela bloku 9b
+  (sekret lub część C) albo bloku 9a z zapisem, zależnie od tego, które
+  przyjdzie pierwsze, bez przesunięcia. Do czasu poprawki każde zlecenie dla
+  właściciela obejmujące te bloki zaczyna się od kroku: `echo "P=${P:-BRAK}
+  REGION=${REGION:-BRAK} INSTANCE=${INSTANCE:-BRAK}"`; `BRAK` = nie wklejać.
 - Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
 - Pomiar TTFB (plan 0.6): otwarty do pomiaru na domenie po K1 (sekcja 12).
 
