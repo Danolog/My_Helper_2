@@ -5,7 +5,8 @@
  *   odczyt płatności i zapis anulowania przez `forSalon(salon z wyniku odczytu)`.
  *   Surowe `db` nie jest używane (atrapa rzuca przy dostępie).
  * - Zapis ponawia warunki: id, salon, tożsamość z sesji i stan (bez
- *   `cancelled`/`completed`); jawne kolumny w `returning`.
+ *   `cancelled`/`completed`/`no_show`); jawne kolumny w `returning`.
+ * - Wizyta „Nie przyszedł” (także jeszcze w przyszłości) → 400 bez zapisu.
  * - 0 wierszy z zapisu = 404, bez zwrotu, zatrzymania zadatku i powiadomień.
  * - Zadatek wpłacony bez płatności `succeeded` w MyHelper (np. BLIK na telefon
  *   salonu oznaczony ręcznie) nie daje obietnicy zwrotu ani przepadku.
@@ -86,6 +87,7 @@ const SALON_ID = "salon-a";
 const USER_ID = "client-user";
 const HOUR = 60 * 60 * 1000;
 const SALON_PHONE = "+48 600 100 200";
+const NO_SHOW_CANCEL_ERROR = "Tej wizyty nie można już anulować. Skontaktuj się z salonem.";
 
 function installTx() {
   const u = m.update;
@@ -316,6 +318,14 @@ describe("GET /api/client/appointments/[id]/cancel", () => {
     expect(m.selectSucceededInTx).not.toHaveBeenCalled();
   });
 
+  it("400: wizyta „Nie przyszedł” w przyszłości, bez odczytu płatności", async () => {
+    given(found({ hoursAhead: 6, status: "no_show" }));
+    const { status, body } = await get();
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: NO_SHOW_CANCEL_ERROR });
+    expect(m.selectSucceededInTx).not.toHaveBeenCalled();
+  });
+
   it("401: brak sesji", async () => {
     m.requireAuth.mockResolvedValue(NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
     m.isAuthError.mockReturnValue(true);
@@ -359,7 +369,7 @@ describe("POST /api/client/appointments/[id]/cancel", () => {
         { op: "eq", col: "appointments.id", val: APPOINTMENT_ID },
         { op: "eq", col: "appointments.salonId", val: SALON_ID },
         { op: "eq", col: "appointments.bookedByUserId", val: USER_ID },
-        { op: "notInArray", col: "appointments.status", val: ["cancelled", "completed"] },
+        { op: "notInArray", col: "appointments.status", val: ["cancelled", "completed", "no_show"] },
       ],
     });
     expect(m.update.returning).toEqual({
@@ -530,6 +540,19 @@ describe("POST /api/client/appointments/[id]/cancel", () => {
     expect(status).toBe(400);
     expect(body).toEqual({ success: false, error });
     expect(m.update.calls).toBe(0);
+  });
+
+  it("400: wizyta „Nie przyszedł” w przyszłości (oznaczona rano), bez zapisu i bez zwrotu", async () => {
+    given(found({ hoursAhead: 6, status: "no_show" }));
+    m.selectSucceededInTx.mockResolvedValue([SUCCEEDED_PAYMENT]);
+    const { status, body } = await post();
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: NO_SHOW_CANCEL_ERROR });
+    // Komunikat dla klienta nie zdradza oznaczenia.
+    expect(body.error).not.toMatch(/przyszed|no.?show/i);
+    expect(m.update.calls).toBe(0);
+    expect(m.refundDeposits).not.toHaveBeenCalled();
+    expect(m.notifyWaitingList).not.toHaveBeenCalled();
   });
 
   it("400: zły UUID, bez odczytu i zapisu", async () => {

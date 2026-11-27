@@ -60,6 +60,13 @@ describe("AppointmentHeader — faktury zamrożone", () => {
     expect(screen.getByTestId("back-btn")).toBeInTheDocument();
   });
 
+  it("„Nie przyszedł”: bez przycisku „Zakończ wizytę”, edycja zostaje", () => {
+    renderHeader({ status: "no_show" });
+
+    expect(screen.queryByTestId("complete-appointment-btn")).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-appointment-btn")).toBeInTheDocument();
+  });
+
   it("fiskalizacja usunięta (B5): nie ma przycisków paragonu", () => {
     renderHeader({});
 

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
+import { NO_SHOW_STATUS } from "@/lib/no-show";
 import type { AppointmentDetail, InvoiceData } from "./types";
 
 interface AppointmentHeaderProps {
@@ -30,6 +31,9 @@ export function AppointmentHeader({
   const startDate = new Date(appointment.startTime);
   const isActive = appointment.status !== "completed" && appointment.status !== "cancelled";
   const isCompleted = appointment.status === "completed";
+  // „Nie przyszedł”: zakończenie i tak skończyłoby się 409 — najpierw cofnięcie
+  // oznaczenia (przycisk cofnięcia jest w szczegółach wizyty).
+  const canComplete = isActive && appointment.status !== NO_SHOW_STATUS;
   // Faktury to moduł z rejestru (src/lib/features.ts) — wyłączony albo
   // zamrożony chowa przyciski faktury.
   const invoicesEnabled = useModuleEnabled("invoices");
@@ -67,13 +71,15 @@ export function AppointmentHeader({
             <Pencil className="h-4 w-4 mr-2" />
             Edytuj
           </Button>
-          <Button
-            onClick={onComplete}
-            data-testid="complete-appointment-btn"
-          >
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Zakoncz wizyte
-          </Button>
+          {canComplete && (
+            <Button
+              onClick={onComplete}
+              data-testid="complete-appointment-btn"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Zakoncz wizyte
+            </Button>
+          )}
         </div>
       )}
       {isCompleted && (

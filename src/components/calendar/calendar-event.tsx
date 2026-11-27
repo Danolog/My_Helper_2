@@ -51,7 +51,7 @@ const STATUS_LABELS = {
   confirmed: "Potwierdzona",
   completed: "Zakonczona",
   cancelled: "Anulowana",
-  no_show: "Niestawienie sie",
+  no_show: "Nie przyszedł",
 };
 
 export const CalendarEventComponent = memo(function CalendarEventComponent({

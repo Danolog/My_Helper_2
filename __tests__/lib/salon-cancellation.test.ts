@@ -20,7 +20,54 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { logger } from "@/lib/logger";
-import { expireCheckoutSessions } from "@/lib/salon-cancellation";
+import {
+  AppointmentMarkedNoShowError,
+  cancelAppointmentInTx,
+  expireCheckoutSessions,
+} from "@/lib/salon-cancellation";
+import type { DbTx } from "@/lib/server/repository";
+
+/**
+ * Atrapa transakcji: pierwszy UPDATE (płatności `pending → failed`) zwraca
+ * `failedRows`, odczyt `for update` zwraca `lockedRow`. Zapisuje, które
+ * zapisy wykonano, żeby sprawdzić, że po `no_show` nie ma UPDATE wizyty.
+ */
+function fakeTx(lockedRow: Record<string, unknown> | null) {
+  const updates: unknown[] = [];
+  const chain = (result: unknown[]) => {
+    const c: Record<string, unknown> = {};
+    for (const m of ["set", "where", "returning", "from", "for", "limit"]) c[m] = () => c;
+    c.then = (resolve: (v: unknown) => unknown) => resolve(result);
+    return c;
+  };
+  const tx = {
+    update: (table: unknown) => {
+      updates.push(table);
+      return chain([]);
+    },
+    select: () => chain(lockedRow ? [lockedRow] : []),
+  };
+  return { tx: tx as unknown as DbTx, updates };
+}
+
+describe("cancelAppointmentInTx — stan po blokadzie wiersza", () => {
+  it("wizyta no_show (oznaczenie weszło po odczycie w trasie) → błąd wycofujący transakcję, bez anulowania", async () => {
+    const { tx, updates } = fakeTx({ id: "appt-1", salonId: "salon-a", status: "no_show" });
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1")).rejects.toBeInstanceOf(
+      AppointmentMarkedNoShowError
+    );
+    // Tylko krok 1 (płatności) przed blokadą; UPDATE wizyty nie zapadł.
+    expect(updates).toHaveLength(1);
+  });
+
+  it("kontrola: wizyta cancelled → alreadyCancelled, bez błędu", async () => {
+    const { tx, updates } = fakeTx({ id: "appt-1", salonId: "salon-a", status: "cancelled" });
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1")).resolves.toEqual({ alreadyCancelled: true });
+    expect(updates).toHaveLength(1);
+  });
+});
 
 describe("expireCheckoutSessions", () => {
   beforeEach(() => {

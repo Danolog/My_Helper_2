@@ -72,6 +72,7 @@ vi.mock("@/lib/deposit-status-events", () => ({
 }));
 vi.mock("@/lib/refund", () => ({ refundAppointmentDeposits: vi.fn() }));
 vi.mock("@/lib/salon-cancellation", () => ({
+  AppointmentMarkedNoShowError: class extends Error {},
   buildSalonCancellationSms: vi.fn(),
   cancelAppointmentInTx: vi.fn(),
   expireCheckoutSessions: vi.fn(),
