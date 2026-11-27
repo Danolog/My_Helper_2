@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { ClientHistoryTab } from "@/components/clients/client-history-tab";
 import { ClientInsightsTab } from "@/components/clients/client-insights-tab";
 import { ClientLoyaltyTab } from "@/components/clients/client-loyalty-tab";
+import { ClientNoShowCount } from "@/components/clients/client-no-show-count";
 import { ClientProfileHeader } from "@/components/clients/client-profile-header";
 import { ClientProfileTab } from "@/components/clients/client-profile-tab";
 import {
@@ -305,6 +306,8 @@ export default function ClientProfilePage() {
         saving={saving}
         onSave={handleSave}
       />
+
+      <ClientNoShowCount clientId={clientId} />
 
       {/* Allergy warning banner - displayed prominently when allergies exist */}
       {allergiesList.length > 0 && (
