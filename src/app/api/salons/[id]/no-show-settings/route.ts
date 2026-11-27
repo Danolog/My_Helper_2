@@ -12,7 +12,7 @@ import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
 /**
- * Ustawienie salonu „Blokuj rezerwację online po N nieobecnościach”
+ * Ustawienie salonu „Automatyczna blokada rezerwacji online”
  * (`settingsJson.noShowAutoBlockThreshold`: 1, 2, 3 albo null = wyłączone).
  * Tylko właściciel salonu z sesji; recepcja i pracownik 403.
  *
@@ -110,11 +110,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     // Zapis atomowy jednym UPDATE (jsonb_set): podmienia tylko ten klucz,
     // inne ustawienia salonu zostają (wzorzec tras ustawień salonu).
+    // Baza zapisu to obiekt ustawień; SQL NULL, JSON-owe `null` albo skalar
+    // (ręczny SQL, stare wiersze) zastępuje pusty obiekt — jsonb_set na
+    // skalarze kończy się błędem bazy, a nie ma tam ustawień do zachowania.
     const updated = await forSalon(scopedSalonId).raw((tx) =>
       tx
         .update(salons)
         .set({
-          settingsJson: sql`jsonb_set(coalesce(${salons.settingsJson}, '{}'::jsonb), '{noShowAutoBlockThreshold}', ${JSON.stringify(threshold)}::jsonb)`,
+          settingsJson: sql`jsonb_set(case when jsonb_typeof(${salons.settingsJson}) = 'object' then ${salons.settingsJson} else '{}'::jsonb end, '{noShowAutoBlockThreshold}', ${JSON.stringify(threshold)}::jsonb)`,
         })
         .where(eq(salons.id, scopedSalonId))
         .returning({ id: salons.id })

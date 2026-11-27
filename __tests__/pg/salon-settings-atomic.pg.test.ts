@@ -14,6 +14,9 @@
  * (d) `settings_json` = `'{}'` i SQL NULL → 200 (coalesce). JSON null
  *     (`'null'::jsonb`) → 500: `coalesce` nie zamienia skalarnego null jsonb,
  *     a `jsonb_set` na skalarze rzuca błąd. Test dokumentuje dzisiejszy wynik.
+ * (e) PUT /api/salons/[id]/no-show-settings bierze za bazę zapisu obiekt
+ *     ustawień tylko, gdy `jsonb_typeof = 'object'`; SQL NULL, JSON null
+ *     i skalary zastępuje pusty obiekt → 200.
  *
  * Atrapy: sesja (requireAuth, requireSalonStaff) i logger. Baza, RLS i trasy — prawdziwe.
  * Dane: użytkownicy `it-t3-set-…` (prefiks z notatki sprzątania w pg-harness.ts),
@@ -27,6 +30,7 @@ import { PUT as putBlikDeposit } from "@/app/api/salon/blik-deposit/route";
 import { PUT as putBirthday } from "@/app/api/salons/[id]/birthday-settings/route";
 import { PUT as putLoyalty } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { PUT as putModules } from "@/app/api/salons/[id]/modules/route";
+import { PUT as putNoShowSettings } from "@/app/api/salons/[id]/no-show-settings/route";
 import { PUT as putNotificationTypes } from "@/app/api/salons/[id]/notification-type-settings/route";
 import { PUT as putWeMissYou } from "@/app/api/salons/[id]/we-miss-you-settings/route";
 import { logger } from "@/lib/logger";
@@ -49,9 +53,16 @@ vi.mock("@/lib/auth-middleware", () => ({
   isAuthError: () => false,
 }));
 // blik-deposit bierze salon wyłącznie z sesji; atrapa zwraca kontekst właściciela.
+// no-show-settings czyta ten sam kontekst przez getSalonContext.
 vi.mock("@/lib/salon-context", () => ({
   requireSalonStaff: async () => ({
     ctx: { salonId: session.salonId, role: "owner", employeeId: null, userId: session.userId },
+  }),
+  getSalonContext: async () => ({
+    salonId: session.salonId,
+    role: "owner",
+    employeeId: null,
+    userId: session.userId,
   }),
 }));
 vi.mock("@/lib/logger", () => ({
@@ -230,5 +241,49 @@ suite("ustawienia salonu — zapis jednego klucza, prawdziwy Postgres", () => {
 
     expect(await settingsKind(salonA)).toEqual({ sqlNull: false, jsonType: "null" });
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  describe("(e) PUT no-show-settings: baza zapisu to obiekt ustawień albo pusty obiekt", () => {
+    function putNoShow(threshold: number | null) {
+      return putNoShowSettings(
+        new Request(`http://localhost/api/salons/${salonA}/no-show-settings`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ noShowAutoBlockThreshold: threshold }),
+        }),
+        { params: Promise.resolve({ id: salonA }) }
+      );
+    }
+
+    it("obiekt z deposits → 200, próg dopisany, deposits A i salon B bez zmian", async () => {
+      const beforeB = await settingsOf(salonB);
+
+      expect((await putNoShow(2)).status).toBe(200);
+
+      expect(await settingsOf(salonA)).toEqual({ deposits: DEPOSITS, noShowAutoBlockThreshold: 2 });
+      expect(await settingsOf(salonB)).toEqual(beforeB);
+    });
+
+    it.each([
+      ["SQL NULL", sql`NULL`],
+      ["JSON null", sql`'null'::jsonb`],
+      ["liczba", sql`'5'::jsonb`],
+      ["napis", sql`'"stare"'::jsonb`],
+      ["tablica", sql`'[1, 2]'::jsonb`],
+    ])("settings_json = %s → 200, obiekt z samym progiem", async (_label, value) => {
+      await setSettings(salonA, value);
+
+      const res = await putNoShow(1);
+
+      expect(res.status).toBe(200);
+      expect(await settingsOf(salonA)).toEqual({ noShowAutoBlockThreshold: 1 });
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("wyłączenie (null) zapisuje JSON null pod kluczem progu", async () => {
+      expect((await putNoShow(null)).status).toBe(200);
+
+      expect(await settingsOf(salonA)).toEqual({ deposits: DEPOSITS, noShowAutoBlockThreshold: null });
+    });
   });
 });

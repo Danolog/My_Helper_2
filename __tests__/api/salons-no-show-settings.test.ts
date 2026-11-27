@@ -120,11 +120,27 @@ describe("PUT 200", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, data: { noShowAutoBlockThreshold: threshold } });
     const written = dialect.sqlToQuery(h.setArgs[0]!.settingsJson as SQL);
-    expect(written.sql).toMatch(/^jsonb_set\(coalesce\(("salons"\.)?"settings_json", '\{\}'::jsonb\), /);
+    expect(written.sql).toMatch(/^jsonb_set\(case when jsonb_typeof\(("salons"\.)?"settings_json"\) = 'object' /);
     expect(written.sql).toContain(`'{noShowAutoBlockThreshold}', $1::jsonb)`);
     expect(written.params).toEqual([JSON.stringify(threshold)]);
     const [update] = m.writes.filter((w) => w.op === "update");
     expect(dialect.sqlToQuery(update!.where as SQL).params).toEqual([SALON_A]);
+  });
+
+  it("ustawienia w postaci SQL NULL, JSON-owego null albo skalara → baza zapisu to pusty obiekt", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: SALON_A }]);
+
+    expect((await put(JSON.stringify({ noShowAutoBlockThreshold: 2 }))).status).toBe(200);
+
+    // jsonb_set na `null` albo skalarze kończy się błędem bazy (500), więc
+    // obiekt ustawień zostaje tylko wtedy, gdy jsonb_typeof = 'object'.
+    // jsonb_typeof(SQL NULL) to NULL, więc SQL NULL też idzie do '{}'.
+    const written = dialect.sqlToQuery(h.setArgs[0]!.settingsJson as SQL);
+    expect(written.sql).toMatch(
+      /^jsonb_set\(case when jsonb_typeof\(("salons"\.)?"settings_json"\) = 'object' then ("salons"\.)?"settings_json" else '\{\}'::jsonb end, /
+    );
+    expect(written.sql).not.toContain("coalesce");
   });
 });
 
