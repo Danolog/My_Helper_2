@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, like, or } from "drizzle-orm";
 import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE, salonGateDenial } from "@/lib/beta-access";
@@ -14,6 +14,7 @@ import {
   type LegalAcceptanceInput,
 } from "@/lib/legal/acceptance";
 import { logger } from "@/lib/logger";
+import { isSalonSlugConflict, pickAvailableSalonSlug, slugFromSalonName } from "@/lib/salon-slug";
 import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
 import {
   isSubscriptionLockFailure,
@@ -23,6 +24,25 @@ import {
 import { isUniqueViolation } from "@/lib/subscription-predicates";
 
 type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
+
+/** Ile razy zakładanie salonu próbuje od nowa, gdy równoległa rejestracja zajęła ten sam adres. */
+const SLUG_CONFLICT_MAX_ATTEMPTS = 3;
+
+/**
+ * Ponawia całą transakcję po konflikcie adresu salonu (23505 na salons_slug_uq):
+ * kolejna próba czyta zajęte adresy od nowa i bierze następny sufiks. Inne
+ * błędy i konflikt w ostatniej próbie przechodzą do wołającego.
+ */
+async function withSlugConflictRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      if (attempt >= SLUG_CONFLICT_MAX_ATTEMPTS || !isSalonSlugConflict(error)) throw error;
+      logger.info("[Register Subscription] Salon slug taken concurrently — retry", { attempt });
+    }
+  }
+}
 
 function alreadySubscribed() {
   // Bez zmiany planu: ta trasa nie pobiera płatności, więc podniesienie
@@ -134,7 +154,7 @@ export async function POST(request: NextRequest) {
 
     let result: { exists: true } | { salonId: string; subscription: SubscriptionRow };
     try {
-      result = await db.transaction(async (tx) => {
+      result = await withSlugConflictRetry(() => db.transaction(async (tx) => {
         await setSubscriptionLockTimeout(tx);
 
         // Salon konta z sesji (jeden na konto — salons_owner_id_uq).
@@ -146,12 +166,27 @@ export async function POST(request: NextRequest) {
 
         let salonId = salon?.id;
         if (!salonId) {
+          const name = `Salon ${account.name || "Nowy"}`;
+          // Krótki adres `/s/<slug>` z nazwy: pierwszy wolny z `base`, `base-2`…
+          // Odczyt zajętych adresów surowym db (rola właściciela bazy) widzi
+          // wszystkie salony. Wyścig dwóch rejestracji o ten sam adres kończy się
+          // 23505 na salons_slug_uq — wtedy cała transakcja jest ponawiana niżej.
+          const baseSlug = slugFromSalonName(name);
+          const takenSlugs = await tx
+            .select({ slug: salons.slug })
+            .from(salons)
+            .where(or(eq(salons.slug, baseSlug), like(salons.slug, `${baseSlug}-%`)));
+          const slug = pickAvailableSalonSlug(
+            baseSlug,
+            takenSlugs.flatMap((row) => (row.slug ? [row.slug] : []))
+          );
           const [newSalon] = await tx
             .insert(salons)
             .values({
-              name: `Salon ${account.name || "Nowy"}`,
+              name,
               email: account.email,
               ownerId: account.id,
+              slug,
             })
             .returning({ id: salons.id });
           if (!newSalon) throw new Error("Register subscription: salon insert returned no row");
@@ -189,10 +224,12 @@ export async function POST(request: NextRequest) {
           await recordLegalAcceptances(tx, { salonId, userId: account.id, acceptance: legal.acceptance });
         }
         return { salonId, subscription };
-      });
+      }));
     } catch (error) {
-      if (isSubscriptionLockFailure(error)) {
-        logger.warn("[Register Subscription] Lock failure — retry", { userId: account.id });
+      // Adres salonu wciąż zajmowany równolegle po wszystkich próbach — jak
+      // blokada: nic nie zapisano, klient może ponowić.
+      if (isSubscriptionLockFailure(error) || isSalonSlugConflict(error)) {
+        logger.warn("[Register Subscription] Lock failure or slug conflict — retry", { userId: account.id });
         return NextResponse.json(
           { success: false, code: "LOCK_BUSY", error: "Rejestracja jest w toku. Sprobuj ponownie za chwile." },
           { status: 503 }

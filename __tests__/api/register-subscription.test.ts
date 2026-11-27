@@ -176,9 +176,12 @@ vi.mock("@/lib/legal/documents", async (importOriginal) => {
 });
 
 const mockEq = vi.fn((...args: unknown[]) => ({ type: "eq", args }));
+const mockLike = vi.fn((...args: unknown[]) => ({ type: "like", args }));
 vi.mock("drizzle-orm", () => ({
   eq: (...args: unknown[]) => mockEq(...args),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  or: vi.fn((...args: unknown[]) => ({ type: "or", args })),
+  like: (...args: unknown[]) => mockLike(...args),
 }));
 
 const mockRequireAuth = vi.fn();
@@ -532,6 +535,8 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
       "tx:start",
       "lock_timeout",
       "select:salons",
+      // Zajęte adresy `/s/<slug>` przed zapisem nowego salonu.
+      "select:salons",
       "insert:salons",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",
@@ -604,6 +609,86 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
     const { status } = await post({ planSlug: 123 });
     expect(status).toBe(400);
     expect(opLog).toEqual([]);
+  });
+});
+
+describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", () => {
+  it("nowy salon dostaje slug z nazwy (polskie znaki → ASCII); zapytanie o zajęte adresy base i base-%", async () => {
+    mockRequireAuth.mockResolvedValue({
+      session: { user: { ...USER_A, name: "Żaneta Łęcka" } },
+      user: { ...USER_A, name: "Żaneta Łęcka" },
+    });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Salon Żaneta Łęcka", slug: "salon-zaneta-lecka" })
+    );
+    expect(mockEq).toHaveBeenCalledWith("salons.slug", "salon-zaneta-lecka");
+    expect(mockLike).toHaveBeenCalledWith("salons.slug", "salon-zaneta-lecka-%");
+  });
+
+  it("adres zajęty → pierwszy wolny sufiks (-2 zajęte → -3)", async () => {
+    // Atrapa oddaje te same wiersze `salons` dla obu zapytań: wiersze bez `id`
+    // nie są salonem konta (pierwsze zapytanie), a ich slugi są zajęte (drugie).
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ slug: "salon-anna" }, { slug: "salon-anna-2" }] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ slug: "salon-anna-3" }));
+  });
+
+  it("istniejący salon konta: bez zapytania o adresy i bez zmiany sluga", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockLike).not.toHaveBeenCalled();
+    expect(mockInsertValues).not.toHaveBeenCalledWith(expect.objectContaining({ slug: expect.anything() }));
+  });
+
+  it("równoległa rejestracja zajęła adres (23505 na salons_slug_uq) → cała transakcja od nowa, 200", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    failInsert = {
+      table: "salons",
+      error: Object.assign(new Error("db"), { cause: { code: "23505", constraint_name: "salons_slug_uq" } }),
+    };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(2);
+    expect(opLog).toContain("rollback");
+    expect(opLog.at(-1)).toBe("commit");
+  });
+
+  it("konflikt adresu w każdej próbie → 503 LOCK_BUSY (nie 409 „salon ma subskrypcję”)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    const slugConflict = Object.assign(new Error("db"), { code: "23505", constraint_name: "salons_slug_uq" });
+    // failInsert działa raz — każda kolejna próba dostaje go od nowa.
+    mockInsert.mockImplementation((table: string) => {
+      if (table === "salons") failInsert = { table: "salons", error: slugConflict };
+    });
+    failInsert = { table: "salons", error: slugConflict };
+
+    let result: Awaited<ReturnType<typeof post>>;
+    try {
+      result = await post({ planSlug: "basic" });
+    } finally {
+      // clearAllMocks w beforeEach nie zdejmuje implementacji — tu zdejmujemy ją sami.
+      mockInsert.mockReset();
+      failInsert = null;
+    }
+    const { status, body } = result;
+
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(3);
+    expect(opLog.at(-1)).toBe("rollback");
   });
 });
 
@@ -690,6 +775,7 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
       "select:subscriptionPlans",
       "tx:start",
       "lock_timeout",
+      "select:salons",
       "select:salons",
       "insert:salons",
       `lock:salon:${SALON_A}`,
