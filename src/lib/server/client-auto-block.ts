@@ -7,9 +7,12 @@
  *
  * Karty, których dotyczy nieobecność:
  * - wizyta z kartą (`client_id`) — ta karta;
- * - wizyta online bez karty (portal, gość) — każda karta tego salonu, która
- *   według reguły „ten sam klient” (src/lib/online-booking-block.ts) pasuje
- *   do telefonu wizyty albo zweryfikowanego e-maila konta rezerwującego.
+ * - wizyta online bez karty (portal, gość) — każda karta tego salonu ze
+ *   zweryfikowanym e-mailem konta rezerwującego (reguła `"autoBlock"`
+ *   w src/lib/online-booking-block.ts). Sam telefon wizyty karty nie
+ *   wskazuje: numeru nikt nie sprawdził, więc gość z cudzym numerem nie
+ *   zablokuje cudzej karty. Takie nieobecności widać na liczniku karty
+ *   (reguła `"counter"`), a blokadę zakłada właściciel ręcznie.
  *   Bez pasującej karty nie ma blokady. Wizyta nie dostaje `client_id`
  *   i żadna karta nie powstaje.
  *
@@ -19,7 +22,8 @@
  *    oznaczenia wizyt tego samego klienta liczą po kolei, więc drugie widzi
  *    wizytę pierwszego i próg nie „przeskakuje” przez wyścig; stała kolejność
  *    przy kilku kartach nie daje zakleszczeń między dwoma oznaczeniami;
- * 3. dla każdej karty licznik `countCardNoShows` (ten sam co na karcie klienta);
+ * 3. dla każdej karty `countCardNoShows(..., "autoBlock")`: wizyty z kartą
+ *    i wizyty online po zweryfikowanym e-mailu (bez dopasowań po telefonie);
  * 4. UPDATE tylko karty bez blokady (`blocked_at IS NULL`): istniejąca blokada,
  *    ręczna albo automatyczna, zostaje z pierwotną datą, autorem i notatką.
  *
@@ -36,7 +40,7 @@ import {
   type NoShowAutoBlockThreshold,
 } from "@/lib/client-block";
 import { NO_SHOW_STATUS } from "@/lib/no-show";
-import { cardOfOnlineAppointment, onlineAppointmentOfCard } from "@/lib/online-booking-block";
+import { cardOfOnlineAppointment, onlineAppointmentOfCard, type OnlineNoShowMatch } from "@/lib/online-booking-block";
 import { appointments, clients, salons } from "@/lib/schema";
 import type { DbTx } from "@/lib/server/repository";
 
@@ -51,10 +55,17 @@ export function noShowAutoBlockThresholdColumn() {
 
 /**
  * Liczba nieobecności karty `clientId` w salonie: wizyty z tą kartą plus
- * wizyty online tego samego klienta (bez karty). Jedno źródło licznika dla
- * blokady i dla licznika „Nie przyszedł” na karcie klienta.
+ * wizyty online tego samego klienta (bez karty) według reguły `match` —
+ * `"counter"` dla licznika „Nie przyszedł” na karcie klienta (telefon albo
+ * zweryfikowany e-mail), `"autoBlock"` dla progu blokady (sam zweryfikowany
+ * e-mail). Jedno zapytanie dla obu, różni je tylko reguła.
  */
-export async function countCardNoShows(tx: DbTx, salonId: string, clientId: string): Promise<number> {
+export async function countCardNoShows(
+  tx: DbTx,
+  salonId: string,
+  clientId: string,
+  match: OnlineNoShowMatch
+): Promise<number> {
   const [row] = await tx
     .select({ noShowCount: count() })
     .from(appointments)
@@ -62,7 +73,7 @@ export async function countCardNoShows(tx: DbTx, salonId: string, clientId: stri
       and(
         eq(appointments.salonId, salonId),
         eq(appointments.status, NO_SHOW_STATUS),
-        or(eq(appointments.clientId, clientId), onlineAppointmentOfCard(salonId, clientId))
+        or(eq(appointments.clientId, clientId), onlineAppointmentOfCard(salonId, clientId, match))
       )
     );
   return Number(row?.noShowCount ?? 0);
@@ -84,12 +95,13 @@ export type NoShowAutoBlockOutcome =
 
 /**
  * Karty, których dotyczy nieobecność, zablokowane `FOR NO KEY UPDATE`
- * w kolejności `id` (Postgres blokuje wiersze po sortowaniu).
+ * w kolejności `id` (Postgres blokuje wiersze po sortowaniu). Wizyta online:
+ * tylko karty po zweryfikowanym e-mailu konta (reguła `"autoBlock"`).
  */
 async function lockNoShowCards(tx: DbTx, salonId: string, appointment: NoShowAppointmentRef): Promise<string[]> {
   const target = appointment.clientId
     ? eq(clients.id, appointment.clientId)
-    : cardOfOnlineAppointment(salonId, appointment.id);
+    : cardOfOnlineAppointment(salonId, appointment.id, "autoBlock");
   const rows = await tx
     .select({ id: clients.id })
     .from(clients)
@@ -128,7 +140,7 @@ export async function applyNoShowAutoBlock(
   // Po kolei, nie równolegle: jedna transakcja to jedno połączenie.
   const cards: NoShowCardOutcome[] = [];
   for (const clientId of cardIds) {
-    const noShowCount = await countCardNoShows(tx, salonId, clientId);
+    const noShowCount = await countCardNoShows(tx, salonId, clientId, "autoBlock");
     if (!reachesNoShowAutoBlock(noShowCount, threshold)) {
       cards.push({ clientId, noShowCount, result: "below" });
       continue;

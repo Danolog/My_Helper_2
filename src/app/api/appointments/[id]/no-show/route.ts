@@ -44,9 +44,10 @@ import { isValidUuid } from "@/lib/validations";
  * w tej samej transakcji `applyNoShowAutoBlock` — gdy licznik karty klienta
  * dojdzie do progu salonu, karta dostaje blokadę `blocked_by = 'auto'`
  * (osobny log `info` na kartę), a odpowiedź ma `data.clientAutoBlocked: true`.
- * Wizyta online bez karty liczy się do kart salonu tego samego klienta
- * (telefon wizyty albo zweryfikowany e-mail konta) — dopasowanie robi baza,
- * trasa nie czyta telefonu ani e-maila. Kolejność blokad wierszy: wizyta,
+ * Wizyta online bez karty liczy się do progu tylko kart salonu ze
+ * zweryfikowanym e-mailem konta rezerwującego; dopasowanie po samym telefonie
+ * widać na liczniku karty, ale nie blokuje automatycznie. Dopasowanie robi
+ * baza, trasa nie czyta telefonu ani e-maila. Kolejność blokad wierszy: wizyta,
  * potem karty w kolejności `id`. Usuwanie karty bierze je odwrotnie
  * (karta, potem wizyty); zakleszczenie rozstrzyga baza (40P01) i jedna
  * z transakcji się wycofuje — nic nie zapisane, trasa zwraca 409 `RETRY`

@@ -4,25 +4,31 @@
  *
  * Trasy: `POST /api/appointments/[id]/no-show` i `GET /api/clients/[id]/no-shows`
  * przez prawdziwe `forSalon` (rola aplikacji bez BYPASSRLS + kontekst salonu).
- * Reguła „ten sam klient” (src/lib/online-booking-block.ts):
- * - gość: telefon wizyty w kluczu 9 cyfr równy numerowi karty;
- * - zalogowany: zweryfikowany e-mail konta `booked_by_user_id` równy e-mailowi
- *   karty, bez wielkości liter i spacji na brzegach.
+ * Dwie reguły (src/lib/online-booking-block.ts, `OnlineNoShowMatch`):
+ * - licznik „Nie przyszedł”: telefon wizyty w kluczu 9 cyfr równy numerowi
+ *   karty ALBO zweryfikowany e-mail konta `booked_by_user_id` równy e-mailowi
+ *   karty (bez wielkości liter i spacji na brzegach);
+ * - próg i automatyczna blokada: TYLKO zweryfikowany e-mail konta. Sam
+ *   telefon nie wystarcza, także u zalogowanego, który go wpisał.
  *
  * Dowody (próg salonu A = 2):
- * 1. gość nie przyszedł dwa razy → jego karta zablokowana ('auto'), licznik 2;
- *    wizyty nadal bez karty, żadna karta nie powstała;
- * 2. to samo dla zalogowanego (e-mail karty innej wielkości liter, ze spacją);
- *    konto z niezweryfikowanym e-mailem nie liczy się do karty;
- * 3. numer bez karty → 200 bez blokady, kart w salonie tyle samo;
- * 4. karta z tym numerem tylko w salonie B → nieobecności w A jej nie liczą;
- * 5. dwie karty tego samego klienta (dwa zapisy numeru) → obie zablokowane;
+ * 1. gość z numerem karty nie przyszedł dwa razy → licznik 2, karta BEZ
+ *    blokady; wizyty nadal bez karty, żadna karta nie powstała;
+ * 2. zalogowany ze zweryfikowanym e-mailem (e-mail karty innej wielkości
+ *    liter, ze spacją) → karta zablokowana ('auto'), licznik 2;
+ * 2b. konto z niezweryfikowanym e-mailem → licznik 0, bez blokady;
+ * 2c. zalogowany wpisał telefon karty, ale ma inny e-mail → licznik 2, bez blokady;
+ * 3. brak karty → 200 bez blokady, kart w salonie tyle samo;
+ * 4. karta tylko w salonie B (ten numer i ten e-mail) → nieobecności w A nie
+ *    liczą się nigdzie; w B ten sam klient się liczy;
+ * 5. dwie karty z e-mailem tego samego konta → obie zablokowane;
+ * 5b. dwie karty z tym samym numerem w dwóch zapisach → licznik obu, bez blokady;
  * 6. numer nieczytelny (8 cyfr) na karcie i wizycie → brak dopasowania;
  * 7. próg wyłączony (salon C) → bez blokady, licznik i tak liczy;
- * 8. dwa równoległe oznaczenia wizyt tej samej karty na dwóch połączeniach
- *    (bariera: obserwator trzyma wiersz karty): próg nie przeskakuje — jedna
- *    blokada albo 409 RETRY, nigdy dwa 200 bez blokady; także para „wizyta
- *    z kartą + wizyta online”.
+ * 8. dwa równoległe oznaczenia wizyt online tej samej karty (po e-mailu) na
+ *    dwóch połączeniach (bariera: obserwator trzyma wiersz karty): próg nie
+ *    przeskakuje — jedna blokada albo 409 RETRY, nigdy dwa 200 bez blokady
+ *    ani 500; 8b: para „wizyta z kartą + wizyta online po e-mailu”.
  *
  * Mocki: sesja (`requireAuth`), kontekst salonu (`getSalonContext`), logger.
  * Baza, RLS i obie trasy — prawdziwe.
@@ -69,11 +75,29 @@ const RUN = randomUUID().slice(0, 8);
 const OWNER_A = `it-t3-nsonline-a-${RUN}`;
 const OWNER_B = `it-t3-nsonline-b-${RUN}`;
 const OWNER_C = `it-t3-nsonline-c-${RUN}`;
+/** Każdy scenariusz z kontem ma własne konto, żeby nie liczył wizyt innego. */
 const CUSTOMER = `it-t3-nsonline-u-${RUN}`;
 const UNVERIFIED = `it-t3-nsonline-v-${RUN}`;
-const USERS = [OWNER_A, OWNER_B, OWNER_C, CUSTOMER, UNVERIFIED];
-const CUSTOMER_EMAIL = `${CUSTOMER}@example.invalid`;
-const UNVERIFIED_EMAIL = `${UNVERIFIED}@example.invalid`;
+const PHONE_TYPER = `it-t3-nsonline-p-${RUN}`;
+const OTHER_SALON_CUSTOMER = `it-t3-nsonline-s-${RUN}`;
+const TWO_CARDS_CUSTOMER = `it-t3-nsonline-d-${RUN}`;
+const RACE_CUSTOMER = `it-t3-nsonline-r-${RUN}`;
+const RACE_MIXED_CUSTOMER = `it-t3-nsonline-m-${RUN}`;
+const USERS = [
+  OWNER_A,
+  OWNER_B,
+  OWNER_C,
+  CUSTOMER,
+  UNVERIFIED,
+  PHONE_TYPER,
+  OTHER_SALON_CUSTOMER,
+  TWO_CARDS_CUSTOMER,
+  RACE_CUSTOMER,
+  RACE_MIXED_CUSTOMER,
+];
+const emailOf = (userId: string) => `${userId}@example.invalid`;
+const CUSTOMER_EMAIL = emailOf(CUSTOMER);
+const UNVERIFIED_EMAIL = emailOf(UNVERIFIED);
 
 const THRESHOLD = 2;
 
@@ -83,8 +107,7 @@ const PHONE_NO_CARD = "600300101";
 const PHONE_OTHER_SALON = "600300102";
 const PHONE_TWO_CARDS = "600300103";
 const PHONE_THRESHOLD_OFF = "600300104";
-const PHONE_RACE = "600300105";
-const PHONE_RACE_MIXED = "600300106";
+const PHONE_TYPED_BY_USER = "600300107";
 /** 8 cyfr: ani karta, ani wizyta nie mają klucza 9 cyfr. */
 const PHONE_UNREADABLE = "60030010";
 
@@ -172,15 +195,27 @@ async function appointmentCards(appointmentIds: string[]): Promise<(string | nul
   return rows.map((r) => r.clientId);
 }
 
-/** Czeka, aż `n` transakcji czeka na blokadę wiersza karty (FOR NO KEY UPDATE). */
-async function waitForBlockedCardLocks(n: number, timeoutMs = 10_000): Promise<void> {
+/**
+ * Czeka, aż `n` transakcji stoi za transakcją `holderPid` — wprost albo
+ * w kolejce za inną czekającą (`pg_blocking_pids`, łańcuch). Obserwator trzyma
+ * tylko wiersz karty, więc każda taka transakcja czeka na kartę.
+ *
+ * Nie po tekście zapytania: `pg_stat_activity.query` jest obcięte do
+ * `track_activity_query_size` (domyślnie 1024 bajty), a zapytanie o karty
+ * wizyty online jest dłuższe — końcówka `for no key update` w nim nie
+ * występuje i bariera nie widziała czekających. Druga czekająca stoi zaś
+ * zwykle za blokadą krotki pierwszej, nie za obserwatorem, stąd łańcuch.
+ */
+async function waitForWaitersBehind(holderPid: number, n: number, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const [row] = await h!.observer<{ n: number }[]>`
-      select count(*)::int as n
-      from pg_stat_activity
-      where wait_event_type = 'Lock'
-        and query ilike '%from "clients"%for no key update%'
+      with recursive chain(pid) as (
+        select a.pid from pg_stat_activity a where ${holderPid} = any(pg_blocking_pids(a.pid))
+        union
+        select a.pid from pg_stat_activity a join chain c on c.pid = any(pg_blocking_pids(a.pid))
+      )
+      select count(*)::int as n from chain
     `;
     if ((row?.n ?? 0) >= n) return;
     await new Promise((r) => setTimeout(r, 25));
@@ -195,9 +230,10 @@ async function waitForBlockedCardLocks(n: number, timeoutMs = 10_000): Promise<v
 async function raceNoShows(salonId: string, cardId: string, appointmentIds: [string, string]) {
   let calls: Promise<Awaited<ReturnType<typeof markNoShow>>[]> | null = null;
   await h!.observer.begin(async (tx) => {
+    const [holder] = await tx.unsafe<{ pid: number }[]>("select pg_backend_pid() as pid");
     await tx.unsafe("select id from clients where id = $1 for update", [cardId]);
     calls = Promise.all(appointmentIds.map((id) => markNoShow(salonId, id)));
-    await waitForBlockedCardLocks(2);
+    await waitForWaitersBehind(holder!.pid, 2);
   });
   return calls!;
 }
@@ -274,7 +310,7 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     }
   });
 
-  it("1: gość nie przyszedł dwa razy → jego karta zablokowana, wizyty dalej bez karty", async () => {
+  it("1: gość z numerem karty nie przyszedł do progu → licznik 2, karta BEZ blokady", async () => {
     const card = await insertClient(ids.salonA, { phone: "600 300 100" });
     const visits = [
       await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_GUEST}` }),
@@ -282,23 +318,20 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     ];
     const cardsBefore = await clientCount(ids.salonA);
 
-    const first = await markNoShow(ids.salonA, visits[0]!);
-    expect(first.status, JSON.stringify(first.body)).toBe(200);
-    expect(first.body.data).not.toHaveProperty("clientAutoBlocked");
-    expect(await noShowCount(ids.salonA, card)).toBe(1);
+    for (const visit of visits) {
+      const res = await markNoShow(ids.salonA, visit);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.data).not.toHaveProperty("clientAutoBlocked");
+    }
+
+    // Licznik pokazuje nieobecności gościa, ale numer nie zakłada blokady.
+    expect(await noShowCount(ids.salonA, card)).toBe(THRESHOLD);
     expect((await blockOf(card)).blockedAt).toBeNull();
-
-    const second = await markNoShow(ids.salonA, visits[1]!);
-    expect(second.status).toBe(200);
-    expect(second.body.data?.clientAutoBlocked).toBe(true);
-    expect(await blockOf(card)).toMatchObject({ blockedBy: "auto", blockedAt: expect.any(Date) });
-    expect(await noShowCount(ids.salonA, card)).toBe(2);
-
     expect(await appointmentCards(visits)).toEqual([null, null]);
     expect(await clientCount(ids.salonA)).toBe(cardsBefore);
   });
 
-  it("2: zalogowany nie przyszedł dwa razy → karta z jego e-mailem (inna wielkość liter, spacja) zablokowana", async () => {
+  it("2: zalogowany ze zweryfikowanym e-mailem po progu → karta (inna wielkość liter, spacja) zablokowana", async () => {
     const card = await insertClient(ids.salonA, { email: ` ${CUSTOMER_EMAIL.toUpperCase()}` });
     const visits = [
       await insertOnline(ids.salonA, { bookedByUserId: CUSTOMER }),
@@ -306,10 +339,13 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     ];
 
     expect((await markNoShow(ids.salonA, visits[0]!)).body.data).not.toHaveProperty("clientAutoBlocked");
+    expect(await noShowCount(ids.salonA, card)).toBe(1);
+    expect((await blockOf(card)).blockedAt).toBeNull();
+
     const second = await markNoShow(ids.salonA, visits[1]!);
     expect(second.status).toBe(200);
     expect(second.body.data?.clientAutoBlocked).toBe(true);
-    expect((await blockOf(card)).blockedBy).toBe("auto");
+    expect(await blockOf(card)).toMatchObject({ blockedBy: "auto", blockedAt: expect.any(Date) });
     expect(await noShowCount(ids.salonA, card)).toBe(2);
     expect(await appointmentCards(visits)).toEqual([null, null]);
   });
@@ -324,7 +360,20 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     expect(await noShowCount(ids.salonA, card)).toBe(0);
   });
 
-  it("3: numer bez karty → 200 bez blokady, żadna karta nie powstaje", async () => {
+  it("2c: zalogowany wpisał telefon karty, ale ma inny e-mail → licznik rośnie, karta bez blokady", async () => {
+    const card = await insertClient(ids.salonA, { phone: PHONE_TYPED_BY_USER, email: `inna-${RUN}@example.invalid` });
+    for (let i = 0; i < THRESHOLD; i++) {
+      const visit = await insertOnline(ids.salonA, {
+        bookedByUserId: PHONE_TYPER,
+        guestPhone: `+48${PHONE_TYPED_BY_USER}`,
+      });
+      expect((await markNoShow(ids.salonA, visit)).body.data).not.toHaveProperty("clientAutoBlocked");
+    }
+    expect(await noShowCount(ids.salonA, card)).toBe(THRESHOLD);
+    expect((await blockOf(card)).blockedAt).toBeNull();
+  });
+
+  it("3: brak karty → 200 bez blokady, żadna karta nie powstaje", async () => {
     const cardsBefore = await clientCount(ids.salonA);
     for (let i = 0; i < THRESHOLD; i++) {
       const visit = await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_NO_CARD}` });
@@ -335,29 +384,38 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     expect(await clientCount(ids.salonA)).toBe(cardsBefore);
   });
 
-  it("4: karta z tym numerem tylko w salonie B → nieobecności w A jej nie liczą", async () => {
-    const cardB = await insertClient(ids.salonB, { phone: `+48${PHONE_OTHER_SALON}` });
+  it("4: karta tylko w salonie B → nieobecności w A nie liczą się nigdzie", async () => {
+    const cardB = await insertClient(ids.salonB, {
+      phone: `+48${PHONE_OTHER_SALON}`,
+      email: emailOf(OTHER_SALON_CUSTOMER),
+    });
     for (let i = 0; i < THRESHOLD; i++) {
-      const visit = await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_OTHER_SALON}` });
-      expect((await markNoShow(ids.salonA, visit)).body.data).not.toHaveProperty("clientAutoBlocked");
+      for (const who of [{ guestPhone: `+48${PHONE_OTHER_SALON}` }, { bookedByUserId: OTHER_SALON_CUSTOMER }]) {
+        const visit = await insertOnline(ids.salonA, who);
+        expect((await markNoShow(ids.salonA, visit)).body.data).not.toHaveProperty("clientAutoBlocked");
+      }
     }
     expect((await blockOf(cardB)).blockedAt).toBeNull();
     expect(await noShowCount(ids.salonB, cardB)).toBe(0);
 
-    // Kontrola fałszywej zieleni: w salonie B ten sam numer się liczy.
+    // Kontrola fałszywej zieleni: w salonie B ten sam klient się liczy —
+    // telefon na liczniku, zweryfikowany e-mail także do progu.
+    await markNoShow(ids.salonB, await insertOnline(ids.salonB, { guestPhone: PHONE_OTHER_SALON }));
+    expect(await noShowCount(ids.salonB, cardB)).toBe(1);
+    expect((await blockOf(cardB)).blockedAt).toBeNull();
     for (let i = 0; i < THRESHOLD; i++) {
-      await markNoShow(ids.salonB, await insertOnline(ids.salonB, { guestPhone: PHONE_OTHER_SALON }));
+      await markNoShow(ids.salonB, await insertOnline(ids.salonB, { bookedByUserId: OTHER_SALON_CUSTOMER }));
     }
     expect((await blockOf(cardB)).blockedBy).toBe("auto");
-    expect(await noShowCount(ids.salonB, cardB)).toBe(THRESHOLD);
+    expect(await noShowCount(ids.salonB, cardB)).toBe(THRESHOLD + 1);
   });
 
-  it("5: dwie karty tego samego klienta (różne zapisy numeru) → nieobecności liczą się do obu, obie zablokowane", async () => {
-    const cardOne = await insertClient(ids.salonA, { phone: `0048 ${PHONE_TWO_CARDS}` });
-    const cardTwo = await insertClient(ids.salonA, { phone: `(+48) 600-300-103` });
+  it("5: dwie karty z e-mailem tego samego konta → nieobecności liczą się do obu, obie zablokowane", async () => {
+    const cardOne = await insertClient(ids.salonA, { email: emailOf(TWO_CARDS_CUSTOMER) });
+    const cardTwo = await insertClient(ids.salonA, { email: emailOf(TWO_CARDS_CUSTOMER).toUpperCase() });
     const visits = [
-      await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_TWO_CARDS}` }),
-      await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_TWO_CARDS}` }),
+      await insertOnline(ids.salonA, { bookedByUserId: TWO_CARDS_CUSTOMER }),
+      await insertOnline(ids.salonA, { bookedByUserId: TWO_CARDS_CUSTOMER }),
     ];
 
     await markNoShow(ids.salonA, visits[0]!);
@@ -367,6 +425,19 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     expect(second.body.data?.clientAutoBlocked).toBe(true);
     expect((await blockOf(cardOne)).blockedBy).toBe("auto");
     expect((await blockOf(cardTwo)).blockedBy).toBe("auto");
+  });
+
+  it("5b: dwie karty z tym samym numerem (różne zapisy) → licznik obu, obie bez blokady", async () => {
+    const cardOne = await insertClient(ids.salonA, { phone: `0048 ${PHONE_TWO_CARDS}` });
+    const cardTwo = await insertClient(ids.salonA, { phone: `(+48) 600-300-103` });
+    for (let i = 0; i < THRESHOLD; i++) {
+      const visit = await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_TWO_CARDS}` });
+      expect((await markNoShow(ids.salonA, visit)).body.data).not.toHaveProperty("clientAutoBlocked");
+    }
+    expect(await noShowCount(ids.salonA, cardOne)).toBe(THRESHOLD);
+    expect(await noShowCount(ids.salonA, cardTwo)).toBe(THRESHOLD);
+    expect((await blockOf(cardOne)).blockedAt).toBeNull();
+    expect((await blockOf(cardTwo)).blockedAt).toBeNull();
   });
 
   it("6: numer nieczytelny na karcie i wizycie → brak dopasowania", async () => {
@@ -389,11 +460,11 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     expect(await noShowCount(ids.salonC, card)).toBe(THRESHOLD + 1);
   });
 
-  it("8: dwie wizyty online tej samej karty oznaczane równolegle → jedna blokada albo 409 RETRY", async () => {
-    const card = await insertClient(ids.salonA, { phone: PHONE_RACE });
+  it("8: dwie wizyty online tej samej karty (po e-mailu) oznaczane równolegle → jedna blokada albo 409 RETRY", async () => {
+    const card = await insertClient(ids.salonA, { email: emailOf(RACE_CUSTOMER) });
     const visits: [string, string] = [
-      await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_RACE}` }),
-      await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_RACE}` }),
+      await insertOnline(ids.salonA, { bookedByUserId: RACE_CUSTOMER }),
+      await insertOnline(ids.salonA, { bookedByUserId: RACE_CUSTOMER }),
     ];
 
     const results = await raceNoShows(ids.salonA, card, visits);
@@ -401,11 +472,11 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     await expectSingleBlockOrRetry(ids.salonA, card, visits, results);
   });
 
-  it("8b: wizyta z kartą i wizyta online tego samego klienta równolegle → jedna blokada albo 409 RETRY", async () => {
-    const card = await insertClient(ids.salonA, { phone: PHONE_RACE_MIXED });
+  it("8b: wizyta z kartą i wizyta online po e-mailu tego samego klienta równolegle → jedna blokada albo 409 RETRY", async () => {
+    const card = await insertClient(ids.salonA, { email: emailOf(RACE_MIXED_CUSTOMER) });
     const visits: [string, string] = [
       await insertOnline(ids.salonA, { clientId: card }),
-      await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_RACE_MIXED}` }),
+      await insertOnline(ids.salonA, { bookedByUserId: RACE_MIXED_CUSTOMER }),
     ];
 
     const results = await raceNoShows(ids.salonA, card, visits);

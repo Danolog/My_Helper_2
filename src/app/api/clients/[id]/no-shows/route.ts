@@ -14,10 +14,12 @@ import { isValidUuid } from "@/lib/validations";
  * „Nie przyszedł” (status `no_show`) w salonie z sesji.
  *
  * Licznik nie jest zapisywany osobno: liczymy wizyty z tym statusem, więc
- * cofnięcie oznaczenia od razu zmniejsza wynik. Ten sam licznik co przy
- * automatycznej blokadzie (`countCardNoShows`): wizyty z tą kartą plus wizyty
- * online bez karty tego samego klienta (telefon wizyty albo zweryfikowany
- * e-mail konta równy danym karty).
+ * cofnięcie oznaczenia od razu zmniejsza wynik. Liczy `countCardNoShows`
+ * z regułą `"counter"`: wizyty z tą kartą plus wizyty online bez karty tego
+ * samego klienta (telefon wizyty albo zweryfikowany e-mail konta równy danym
+ * karty). Próg automatycznej blokady liczy to samo zapytanie z regułą
+ * `"autoBlock"` (bez dopasowań po telefonie), więc licznik może być wyższy
+ * niż liczba nieobecności, które blokują automatycznie.
  *
  * Kolejność: sesja (401) → kontekst salonu (404) → rola (403: kartoteka
  * klientów to właściciel i recepcja, jak GET /api/clients/[id]) → format id
@@ -60,7 +62,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .limit(1);
       if (!client) return null;
 
-      return { noShowCount: await countCardNoShows(tx, scopedSalonId, id) };
+      return { noShowCount: await countCardNoShows(tx, scopedSalonId, id, "counter") };
     });
 
     if (!result) {

@@ -9,7 +9,8 @@
  *   [wizyta], [update wizyty], [próg salonu], [karty FOR NO KEY UPDATE w kolejności id],
  *   potem dla każdej karty: [licznik no_show], [update karty RETURNING] (tylko po progu).
  * Wizyta z kartą: jedna karta, ta z wizyty. Wizyta online (bez karty): karty
- * salonu pasujące regułą „ten sam klient” — dopasowanie robi baza, więc tu
+ * salonu ze zweryfikowanym e-mailem konta rezerwującego (reguła blokady, bez
+ * telefonu; telefon liczy tylko licznik na karcie) — dopasowanie robi baza, więc tu
  * sprawdzamy kształt zapytań; działanie na danych dowodzi test pg
  * (__tests__/pg/no-show-online-auto-block.pg.test.ts).
  *
@@ -124,36 +125,35 @@ function clientUpdates() {
   return h.setArgs.filter((s) => "blockedAt" in s);
 }
 
-/** Klucz numeru (9 cyfr albo NULL) — to samo wyrażenie dla karty i wizyty. */
-function phoneKeySql(column: string): string {
-  const digits = `regexp_replace(coalesce(${column}, ''), '[^0-9]', '', 'g')`;
-  return `(case when ${digits} ~ '^[0-9]{9}$' then ${digits} when ${digits} ~ '^48[0-9]{9}$' then substr(${digits}, 3) when ${digits} ~ '^0048[0-9]{9}$' then substr(${digits}, 5) end)`;
-}
-
-/** Warunek „wizyta online i karta to ten sam klient” dla podanych kolumn. */
-function sameCustomerSql(card: string, appt: string, verifiedParam: number): string {
+/**
+ * Reguła blokady: zweryfikowany e-mail konta rezerwującego równy e-mailowi
+ * karty. Bez telefonu — numer z formularza nie wskazuje kart do blokady.
+ */
+function verifiedAccountSql(card: string, appt: string, verifiedParam: number): string {
   return (
-    `(${phoneKeySql(`${appt}."guest_phone"`)} = ${phoneKeySql(`${card}."phone"`)} or ` +
     `exists (select 1 from "user" "booking_account" where ("booking_account"."id" = ${appt}."booked_by_user_id" ` +
     `and "booking_account"."email_verified" = $${verifiedParam} ` +
-    `and lower(nullif(btrim("booking_account"."email"), '')) = lower(nullif(btrim(${card}."email"), '')))))`
+    `and lower(nullif(btrim("booking_account"."email"), '')) = lower(nullif(btrim(${card}."email"), ''))))`
   );
 }
 
-/** Licznik karty: jej wizyty no_show plus wizyty online tego samego klienta. */
+/**
+ * Próg blokady: wizyty no_show karty plus wizyty online tego samego klienta
+ * dopasowane TYLKO po zweryfikowanym e-mailu konta (bez guest_phone).
+ */
 const COUNT_WHERE_SQL =
   '("appointments"."salon_id" = $1 and "appointments"."status" = $2 and ("appointments"."client_id" = $3 or ' +
   '("appointments"."client_id" is null and exists (select 1 from "clients" "no_show_card" where ' +
   '("no_show_card"."id" = $4 and "no_show_card"."salon_id" = $5 and ' +
-  sameCustomerSql('"no_show_card"', '"appointments"', 6) +
+  verifiedAccountSql('"no_show_card"', '"appointments"', 6) +
   ')))))';
 const COUNT_WHERE_PARAMS = (clientId: string) => [SALON_A, "no_show", clientId, clientId, SALON_A, true];
 
-/** Karty wizyty online: wizyta bez karty, ten sam klient, salon z sesji. */
+/** Karty wizyty online do blokady: wizyta bez karty, zweryfikowany e-mail konta, salon z sesji. */
 const ONLINE_CARDS_WHERE_SQL =
   '(exists (select 1 from "appointments" "online_appointment" where ("online_appointment"."id" = $1 ' +
   'and "online_appointment"."salon_id" = $2 and "online_appointment"."client_id" is null and ' +
-  sameCustomerSql('"clients"', '"online_appointment"', 3) +
+  verifiedAccountSql('"clients"', '"online_appointment"', 3) +
   ')) and "clients"."salon_id" = $4)';
 
 /** Wizyta online (bez karty) i odpowiedzi bazy: próg, pasujące karty, licznik i UPDATE każdej. */
@@ -329,7 +329,7 @@ describe("wizyta online bez karty → karty salonu tego samego klienta", () => {
   const CARD_1 = "33333333-3333-4333-8333-333333333331";
   const CARD_2 = "33333333-3333-4333-8333-333333333332";
 
-  it("gość nie przyszedł, licznik dochodzi do progu → pasująca karta zablokowana", async () => {
+  it("zalogowany ze zweryfikowanym e-mailem dochodzi do progu → pasująca karta zablokowana", async () => {
     m.asOwnerOf(SALON_A);
     givenOnline({ threshold: 2, cards: [{ id: CARD_1, noShowCount: 2 }] });
 
@@ -357,7 +357,7 @@ describe("wizyta online bez karty → karty salonu tego samego klienta", () => {
     });
   });
 
-  it("karty szuka baza: telefon wizyty albo zweryfikowany e-mail konta, ten salon, kolejność id", async () => {
+  it("karty do blokady szuka baza: tylko zweryfikowany e-mail konta, ten salon, kolejność id", async () => {
     m.asOwnerOf(SALON_A);
     givenOnline({ threshold: 1, cards: [{ id: CARD_1, noShowCount: 1 }] });
 
@@ -372,12 +372,15 @@ describe("wizyta online bez karty → karty salonu tego samego klienta", () => {
     const countWhere = dialect.sqlToQuery(h.selectWheres[3] as SQL);
     expect(countWhere.sql).toBe(COUNT_WHERE_SQL);
     expect(countWhere.params).toEqual(COUNT_WHERE_PARAMS(CARD_1));
+    // Próg i wybór kart bez dopasowania po telefonie.
+    expect(cardsWhere.sql).not.toMatch(/guest_phone|"phone"/);
+    expect(countWhere.sql).not.toMatch(/guest_phone|"phone"/);
     const clientWrite = m.writes.filter((w) => w.op === "update")[1]!;
     const where = dialect.sqlToQuery(clientWrite.where as SQL);
     expect(where.params).toEqual([CARD_1, SALON_A]);
   });
 
-  it("zalogowany klient (karta po e-mailu konta) → ta sama ścieżka, karta zablokowana", async () => {
+  it("licznik ponad progiem → karta zablokowana, log bez e-maila i telefonu", async () => {
     m.asOwnerOf(SALON_A);
     givenOnline({ threshold: 3, cards: [{ id: CARD_2, noShowCount: 4 }] });
 
@@ -404,17 +407,18 @@ describe("wizyta online bez karty → karty salonu tego samego klienta", () => {
     expect(h.logger.info).toHaveBeenCalledTimes(1);
   });
 
-  it("numer nieczytelny albo z innego salonu → baza nie zwraca karty → bez blokady", async () => {
+  it("gość z numerem karty (sam telefon) → zapytanie o karty bez telefonu → bez blokady", async () => {
     m.asOwnerOf(SALON_A);
     givenOnline({ threshold: 1, cards: [] });
 
     expect((await call(POST)).status).toBe(200);
 
-    // Numer bez klucza 9 cyfr daje NULL, a NULL nie jest równy niczemu;
-    // karty innego salonu odcina jawny salon_id (i RLS). Na danych: test pg.
+    // Numer z formularza nikt nie sprawdził: ani wybór kart, ani próg nie
+    // porównują telefonu wizyty z numerem karty. Karty innego salonu odcina
+    // jawny salon_id (i RLS). Na danych: test pg.
     const cardsWhere = dialect.sqlToQuery(h.selectWheres[2] as SQL);
     expect(cardsWhere.params).not.toContain("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
-    expect(cardsWhere.sql).toContain(`${phoneKeySql('"online_appointment"."guest_phone"')} = `);
+    expect(cardsWhere.sql).not.toMatch(/guest_phone|"phone"/);
     expect(clientUpdates()).toEqual([]);
   });
 
