@@ -28,7 +28,11 @@ interface MockTx {
   insert: (...args: unknown[]) => ReturnType<typeof mockDbInsert>;
   update: (...args: unknown[]) => ReturnType<typeof mockDbUpdate>;
   execute: (...args: unknown[]) => Promise<undefined>;
+  /** Zagnieżdżona transakcja (savepoint) — ten sam obiekt; liczona w `savepoints`. */
+  transaction: (cb: (tx: MockTx) => Promise<unknown>) => Promise<unknown>;
 }
+
+const savepoints = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("@/lib/db", () => {
   // The tx object passed into db.transaction() reuses the same mock fns
@@ -39,6 +43,10 @@ vi.mock("@/lib/db", () => {
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
     execute: () => Promise.resolve(undefined),
+    transaction: async (cb) => {
+      savepoints.count++;
+      return cb(tx);
+    },
   };
   return {
     db: {
@@ -572,6 +580,58 @@ describe("POST /api/appointments/[id]/complete", () => {
     // Total selects: appointment(1) + treatment(1) + empPrice(1) + existingComm(1) + linkedProducts(1) + salon(1) = 6
     // If employee lookup had occurred, it would be 7.
     expect(mockDbSelect).toHaveBeenCalledTimes(6);
+  });
+
+  describe("commissionPercentage — liczba skończona 0–100", () => {
+    function completeWith(commissionPercentage: unknown) {
+      return completeAppointment(
+        createMockRequest(
+          `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+          { method: "POST", body: { commissionPercentage } }
+        ),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    it.each([["abc"], ["NaN"], ["Infinity"], [""], [-50], [-1], [100.01], [1000], ["1000"]])(
+      "%j → 400 z polskim komunikatem, bez operacji na bazie",
+      async (value) => {
+        const { status, body } = await parseResponse(await completeWith(value));
+
+        expect(status).toBe(400);
+        expect(JSON.stringify(body)).toContain("Prowizja musi byc liczba od 0 do 100");
+        expect(mockDbSelect).not.toHaveBeenCalled();
+        expect(mockDbInsert).not.toHaveBeenCalled();
+        expect(mockDbUpdate).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([
+      [0, "0.00", "0.00"],
+      ["0", "0.00", "0.00"],
+      [100, "100.00", "200.00"],
+      ["100", "100.00", "200.00"],
+    ])("%j → 200, prowizja zapisana jako %s%%", async (value, percentage, amount) => {
+      const appointment = makeAppointment({ status: "scheduled" });
+      const service = makeService({ basePrice: "200.00" });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      const commissionChain = chainMock([{ id: "comm-1", amount, percentage }]);
+      mockDbInsert.mockReturnValueOnce(commissionChain);
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+
+      const { status } = await parseResponse(await completeWith(value));
+
+      expect(status).toBe(200);
+      expect(commissionChain.values).toHaveBeenCalledWith(
+        expect.objectContaining({ percentage, amount })
+      );
+    });
   });
 
   it("should set commission to null when appointment has no employeeId", async () => {
@@ -1739,6 +1799,138 @@ describe("POST /api/appointments/[id]/complete", () => {
       expect(logged).not.toContain("params");
       expect(logged).not.toContain("Failed query");
       errorSpy.mockRestore();
+    });
+  });
+
+  describe("niski stan i punkty — najlepszy wysiłek w zagnieżdżonej transakcji", () => {
+    /** Łańcuch zapytania, które kończy się błędem bazy (SQL i parametry w treści). */
+    function failingChain() {
+      const chain: Record<string, unknown> = {};
+      for (const m of ["select", "from", "where", "limit", "values", "returning", "set", "leftJoin"]) {
+        chain[m] = vi.fn().mockReturnValue(chain);
+      }
+      chain.then = (_: unknown, reject: (err: Error) => void) =>
+        reject(
+          new Error("Failed query: insert into loyalty_points ... params: 4321.09", {
+            cause: Object.assign(new Error("boom"), { code: "XT101" }),
+          })
+        );
+      return chain;
+    }
+
+    function post(body: Record<string, unknown> = {}) {
+      return completeAppointment(
+        createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+          method: "POST",
+          body,
+        }),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    beforeEach(() => {
+      savepoints.count = 0;
+    });
+
+    it("błąd bazy w punktach → 200 z zakończeniem i płatnością; błąd w savepoincie, log bez treści zapytania", async () => {
+      loyaltyThaw.on = true;
+      const { logger } = await import("@/lib/logger");
+      const errorSpy = vi.spyOn(logger, "error");
+      const infoSpy = vi.spyOn(logger, "info");
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      const updated = { ...appointment, status: "completed", paidAmount: "150.00", paymentMethod: "cash" };
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService({ basePrice: "150.00" }) }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([updated]));
+      // Produkty usługi (brak), ustawienia salonu z programem, odczyt karty punktów (brak).
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(
+        chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: { loyalty: { enabled: true } } }])
+      );
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      // INSERT karty punktów kończy się błędem bazy.
+      mockDbInsert.mockReturnValueOnce(failingChain());
+
+      const { status, body } = await parseResponse(await post({ paidAmount: "150", paymentMethod: "cash" }));
+
+      expect(status).toBe(200);
+      expect((body as any).data.payment).toEqual({ paidAmount: "150.00", paymentMethod: "cash" });
+      expect((body as any).data.loyalty).toBeNull();
+      expect(savepoints.count).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith("Loyalty points error (non-blocking)", {
+        errorName: "Error",
+        errorCode: "XT101",
+      });
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("Failed query");
+      expect(infoSpy).toHaveBeenCalledWith("Appointment marked as completed", {
+        appointmentId: TEST_IDS.APPOINTMENT_UUID,
+      });
+      errorSpy.mockRestore();
+      infoSpy.mockRestore();
+    });
+
+    it("błąd bazy w alercie niskiego stanu → 200, alert pusty, zużycie zapisane; każdy blok we własnym savepoincie", async () => {
+      const { logger } = await import("@/lib/logger");
+      const errorSpy = vi.spyOn(logger, "error");
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(
+        chainMock([
+          {
+            linkId: "sp-1",
+            productId: TEST_IDS.PRODUCT_UUID,
+            defaultQuantity: "2",
+            productName: "Farba",
+            productQuantity: "3",
+            productUnit: "szt.",
+            productMinQuantity: "5",
+            productSalonId: TEST_IDS.SALON_UUID,
+          },
+        ])
+      );
+      mockDbUpdate.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([]));
+      // Odczyt powiadomień w alercie kończy się błędem bazy.
+      mockDbSelect.mockReturnValueOnce(failingChain());
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+
+      const { status, body } = await parseResponse(await post());
+
+      expect(status).toBe(200);
+      expect((body as any).data.stockDeductions).toHaveLength(1);
+      expect((body as any).data.stockDeductions[0].lowStockAlert).toBeNull();
+      // Alert niskiego stanu i punkty — dwa savepointy.
+      expect(savepoints.count).toBe(2);
+      expect(errorSpy).toHaveBeenCalledWith("Low stock check failed (non-blocking)", {
+        errorName: "Error",
+        errorCode: "XT101",
+      });
+      errorSpy.mockRestore();
+    });
+
+    it("błąd w głównej transakcji → 500 i bez logu „Appointment marked as completed”", async () => {
+      const { logger } = await import("@/lib/logger");
+      const infoSpy = vi.spyOn(logger, "info");
+      const appointment = makeAppointment({ status: "scheduled" });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ commissionRate: "50.00" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      // INSERT prowizji (poza savepointem) kończy się błędem.
+      mockDbInsert.mockReturnValueOnce(failingChain());
+
+      const { status } = await parseResponse(await post());
+
+      expect(status).toBe(500);
+      expect(infoSpy).not.toHaveBeenCalledWith("Appointment marked as completed", expect.anything());
+      infoSpy.mockRestore();
     });
   });
 });

@@ -19,6 +19,7 @@ vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { AppointmentCompletedError } from "@/lib/appointment-completion";
 import { logger } from "@/lib/logger";
 import {
   AppointmentMarkedNoShowError,
@@ -58,6 +59,16 @@ describe("cancelAppointmentInTx — stan po blokadzie wiersza", () => {
       AppointmentMarkedNoShowError
     );
     // Tylko krok 1 (płatności) przed blokadą; UPDATE wizyty nie zapadł.
+    expect(updates).toHaveLength(1);
+  });
+
+  it("wizyta completed (zakończenie weszło po odczycie w trasie) → błąd wycofujący transakcję, bez anulowania", async () => {
+    const { tx, updates } = fakeTx({ id: "appt-1", salonId: "salon-a", status: "completed" });
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1")).rejects.toBeInstanceOf(
+      AppointmentCompletedError
+    );
+    // Tylko krok 1 (płatności, wycofany razem z transakcją); UPDATE wizyty nie zapadł.
     expect(updates).toHaveLength(1);
   });
 

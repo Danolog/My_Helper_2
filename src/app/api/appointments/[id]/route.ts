@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
+import {
+  APPOINTMENT_COMPLETED_CODE,
+  APPOINTMENT_COMPLETED_MESSAGE,
+  AppointmentCompletedError,
+  COMPLETE_DEDICATED_ROUTE_CODE,
+  COMPLETE_DEDICATED_ROUTE_MESSAGE,
+  COMPLETED_STATUS,
+  completedAppointmentChangedFields,
+} from "@/lib/appointment-completion";
 import {
   appointmentConflictWhere,
   dbErrorCode,
@@ -66,6 +75,36 @@ function noShowCancelResponse() {
     },
     { status: 400 }
   );
+}
+
+/**
+ * Zmiana statusu wizyty zakończonej (PUT ze statusem, DELETE). Ta sama
+ * odpowiedź przed transakcją i po blokadzie wiersza / warunku w UPDATE.
+ */
+function completedFinalResponse() {
+  return NextResponse.json(
+    { success: false, code: APPOINTMENT_COMPLETED_CODE, error: APPOINTMENT_COMPLETED_MESSAGE },
+    { status: 409 }
+  );
+}
+
+/**
+ * Zapis samych notatek wizyty zakończonej. Tylko kolumna `notes` — termin,
+ * pracownik, usługa, klient, zadatek i status zostają bez zmian. Status
+ * wizyty zakończonej nie zmienia się już żadną trasą, więc UPDATE nie
+ * potrzebuje warunku statusu.
+ */
+async function updateCompletedNotes(salonId: string, id: string, notes: string | null) {
+  const [row] = await forSalon(salonId).raw((tx) =>
+    tx
+      .update(appointments)
+      .set({ notes })
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+      .returning()
+  );
+  // Tylko nazwa pola — treść notatki nie trafia do logów.
+  logger.info(`[Appointments API] Updating appointment ${id}`, { fields: ["notes"] });
+  return row ?? null;
 }
 
 // GET /api/appointments/[id] - Get a single appointment
@@ -209,6 +248,23 @@ export async function PUT(
       );
     }
 
+    // Wizyta zakończona ma ostateczny wynik: prowizja, zużycie materiałów
+    // i punkty policzone są dla jej terminu, pracownika, usługi i klienta.
+    // Zmienić można tylko notatki. Pole z body liczy się jako zmiana, gdy różni
+    // się od zapisanej wartości — cały obiekt z niezmienionymi polami przechodzi.
+    // Status wizyty zakończonej nie zmienia się już nigdzie, więc zapis samych
+    // notatek nie potrzebuje warunku statusu w UPDATE.
+    if (existing.status === COMPLETED_STATUS) {
+      if (completedAppointmentChangedFields(existing, parsed.data).length > 0) {
+        return completedFinalResponse();
+      }
+      return NextResponse.json({
+        success: true,
+        data: notes === undefined ? existing : await updateCompletedNotes(salonId, id, notes),
+        message: "Appointment rescheduled successfully",
+      });
+    }
+
     // „Nie przyszedł” zmienia wyłącznie /api/appointments/[id]/no-show (rola
     // właściciel/recepcja, dzień wizyty). Inaczej pracownik oznaczałby tu własną
     // wizytę, a licznik nieobecności klienta zależałby od dwóch tras.
@@ -222,6 +278,15 @@ export async function PUT(
           code: NO_SHOW_DEDICATED_ROUTE_CODE,
           error: "Oznaczenie „Nie przyszedł” zmienisz przyciskiem w szczegółach wizyty",
         },
+        { status: 400 }
+      );
+    }
+
+    // `completed` ustawia wyłącznie /api/appointments/[id]/complete — tam w tej
+    // samej transakcji zapisuje się płatność, prowizja i zużycie materiałów.
+    if (status === COMPLETED_STATUS) {
+      return NextResponse.json(
+        { success: false, code: COMPLETE_DEDICATED_ROUTE_CODE, error: COMPLETE_DEDICATED_ROUTE_MESSAGE },
         { status: 400 }
       );
     }
@@ -338,11 +403,35 @@ export async function PUT(
             .for("update")
         : [];
 
+      // Zapis czegokolwiek poza notatkami z warunkiem „nie zakończona” w samym
+      // UPDATE: odczyt `existing` jest sprzed transakcji, a zakończenie mogło
+      // wejść po nim (np. przeniesienie w kalendarzu równolegle z zakończeniem).
+      // UPDATE czeka na blokadę wiersza i sprawdza warunek ponownie.
+      const changesBeyondNotes = Object.keys(updateData).some((field) => field !== "notes");
       const [updatedAppointment] = await tx
         .update(appointments)
         .set(updateData)
-        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .where(
+          changesBeyondNotes
+            ? and(
+                eq(appointments.id, id),
+                eq(appointments.salonId, salonId),
+                ne(appointments.status, COMPLETED_STATUS)
+              )
+            : and(eq(appointments.id, id), eq(appointments.salonId, salonId))
+        )
         .returning();
+
+      if (!updatedAppointment && changesBeyondNotes) {
+        // Bieżący status z tej samej transakcji (READ COMMITTED widzi
+        // zatwierdzone zakończenie). Błąd wycofuje całą transakcję.
+        const [current] = await tx
+          .select({ status: appointments.status })
+          .from(appointments)
+          .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+          .limit(1);
+        if (current?.status === COMPLETED_STATUS) throw new AppointmentCompletedError();
+      }
 
       if (
         depositPaid !== undefined &&
@@ -388,6 +477,10 @@ export async function PUT(
       message: "Appointment rescheduled successfully",
     });
   } catch (error) {
+    // Zakończenie weszło między odczytem a zapisem statusu — nic nie zapisane.
+    if (error instanceof AppointmentCompletedError) {
+      return completedFinalResponse();
+    }
     // #171: równoległy zapis zajął termin (EXCLUDE w bazie: 23P01 albo 40P01
     // przy jego sprawdzaniu, przeniesienia „na krzyż”) — ta sama kolizja.
     if (isAppointmentSlotTaken(error)) {
@@ -466,6 +559,12 @@ export async function DELETE(
     // `cancelAppointmentInTx` (oznaczenie wstawione między odczytem a transakcją).
     if (appointment.status === NO_SHOW_STATUS) {
       return noShowCancelResponse();
+    }
+
+    // Wizyta zakończona: anulowanie zwróciłoby zadatek za wykonaną usługę.
+    // Po blokadzie wiersza sprawdza to ponownie `cancelAppointmentInTx`.
+    if (appointment.status === COMPLETED_STATUS) {
+      return completedFinalResponse();
     }
 
     // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
@@ -622,6 +721,10 @@ export async function DELETE(
     // anulowania jest wycofana, bez zwrotu, SMS-a i listy oczekujących.
     if (error instanceof AppointmentMarkedNoShowError) {
       return noShowCancelResponse();
+    }
+    // Zakończenie weszło po wczesnym sprawdzeniu — anulowanie wycofane w całości.
+    if (error instanceof AppointmentCompletedError) {
+      return completedFinalResponse();
     }
     logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, notInArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { validateBody, treatmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
@@ -13,22 +13,10 @@ import { treatmentHistory, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 /**
- * Statusy, których zapis zabiegu nie zmienia na `completed`. Ten sam zbiór co
- * w POST /api/appointments/[id]/complete: „Nie przyszedł” zmienia tylko trasa
- * oznaczenia, a zakończona i anulowana wizyta ma już ostateczny wynik.
+ * Zapis zabiegu NIE zmienia statusu wizyty. Wizytę zamyka wyłącznie
+ * POST /api/appointments/[id]/complete — tam zapisuje się płatność, prowizja
+ * i zużycie materiałów razem ze statusem.
  */
-const NOT_AUTO_COMPLETABLE_STATUSES = ["completed", "cancelled", NO_SHOW_STATUS];
-
-/**
- * Wizyta okazała się „Nie przyszedł” przy zapisie statusu (oznaczenie weszło
- * po odczycie). Rzucany w transakcji, żeby wycofać zapis zabiegu.
- */
-class TreatmentOnNoShowError extends Error {
-  constructor() {
-    super("Appointment marked as no-show before treatment was saved");
-    this.name = "TreatmentOnNoShowError";
-  }
-}
 
 /** Ta sama odpowiedź co w POST /api/appointments/[id]/complete. */
 function noShowConflictResponse() {
@@ -130,13 +118,13 @@ export async function POST(
       );
     }
 
-    // Zapis zabiegu kończy wizytę, a nieobecność nie może być naraz
-    // zrealizowaną usługą — najpierw cofnięcie oznaczenia (jak w /complete).
+    // Nieobecność nie może mieć zapisu wykonanego zabiegu — najpierw
+    // cofnięcie oznaczenia (ta sama odpowiedź co w /complete).
     if (appointment.status === NO_SHOW_STATUS) {
       return noShowConflictResponse();
     }
 
-    // Upsert rekordu zabiegu + auto-complete wizyty atomowo w transakcji RLS.
+    // Upsert rekordu zabiegu w transakcji RLS. Status wizyty bez zmian.
     const { treatment, existing } = await forSalon(salonId).raw(async (tx) => {
       // Check if treatment record already exists for this appointment
       const [existingRow] = await tx
@@ -178,40 +166,6 @@ export async function POST(
         logger.info(`[Treatment API] Created treatment record for appointment ${id}`);
       }
 
-      // If status is still "scheduled" or "confirmed", mark as "completed" automatically
-      if (appointment.status === "scheduled" || appointment.status === "confirmed") {
-        // Odczyt wyżej jest poza transakcją, a trasa „Nie przyszedł” zmienia
-        // status pod blokadą wiersza. UPDATE czeka na tę blokadę i sprawdza
-        // warunek statusu ponownie, więc nie nadpisze oznaczenia.
-        const [completed] = await tx
-          .update(appointments)
-          .set({ status: "completed" })
-          .where(
-            and(
-              eq(appointments.id, id),
-              eq(appointments.salonId, salonId),
-              notInArray(appointments.status, NOT_AUTO_COMPLETABLE_STATUSES)
-            )
-          )
-          .returning({ id: appointments.id });
-
-        if (completed) {
-          logger.info(`[Treatment API] Auto-marked appointment ${id} as completed`);
-        } else {
-          // Bieżący status z tej samej transakcji. „Nie przyszedł” → 409 i
-          // wycofanie zapisu zabiegu. Równoległe zakończenie albo anulowanie
-          // → zabieg zostaje zapisany jak przy wizycie już w tym stanie.
-          const [current] = await tx
-            .select({ status: appointments.status })
-            .from(appointments)
-            .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-            .limit(1);
-          if (current?.status === NO_SHOW_STATUS) {
-            throw new TreatmentOnNoShowError();
-          }
-        }
-      }
-
       return { treatment: row, existing: !!existingRow };
     });
 
@@ -221,9 +175,6 @@ export async function POST(
       message: existing ? "Treatment record updated" : "Treatment record created",
     }, { status: existing ? 200 : 201 });
   } catch (error) {
-    if (error instanceof TreatmentOnNoShowError) {
-      return noShowConflictResponse();
-    }
     logger.error("[Treatment API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to save treatment record" },
