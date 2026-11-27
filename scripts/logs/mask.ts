@@ -78,25 +78,29 @@ const SAFE_SEGMENT_RE = /^[A-Za-z0-9._~-]+$/;
 
 // --- Maskowanie treści komunikatu -------------------------------------------
 
-// Kolejność w maskText:
-// 1. Normalizacja NFKC (cyfry i litery pełnej szerokości → ASCII) i spłaszczenie
-//    znaków sterujących.
-// 2. Reguły sekretów na surowym tekście, jeszcze przed dekodowaniem %XX: dane
-//    logowania w URI, query, cookie, Bearer/Basic, JWT, klucze z prefiksem, pary
-//    klucz=wartość. Zakodowane `/ ? # spacja & ,` w haśle po zdekodowaniu stałyby
-//    się separatorami i reguła złapałaby tylko część sekretu.
-// 3. Dekodowanie %XX do stabilizacji (najwyżej MAX_DECODE_PASSES przebiegów).
-// 4. Ponowna normalizacja i pełny zestaw reguł na zdekodowanym tekście: znów
-//    sekrety, potem e-mail i identyfikatory, na końcu IP, telefony i liczby.
-// Dzięki temu reguła IP nie zostawi hasła z URI, a reguła liczb nie zostawi
-// prefiksu klucza.
+// Kolejność w maskText. Zasada: krok, który może wytworzyć separator
+// (`/ ? # & , ;` spacja), czyli NFKC, spłaszczenie znaków sterujących i
+// dekodowanie %XX, wykonuje się dopiero po zamaskowaniu sekretów w poprzedniej
+// postaci tekstu. Inaczej separator rozciąłby hasło i reguła złapałaby tylko
+// jego część.
+// 1. Usunięcie niewidocznych znaków formatu (\p{Cf}, np. U+200B, U+00AD), potem
+//    reguły sekretów na surowym tekście: dane logowania w URI, query, cookie,
+//    Bearer/Basic, JWT, klucze z prefiksem, pary klucz=wartość.
+// 2. NFKC (pełna szerokość → ASCII) i spłaszczenie znaków sterujących, potem
+//    znów reguły sekretów.
+// 3. Pojedynczy przebieg dekodowania %XX, a po nim kroki 1 i 2. Powtarzane do
+//    stabilizacji, najwyżej MAX_DECODE_PASSES razy; bez stabilizacji cały
+//    komunikat jest pomijany.
+// 4. Na końcu e-mail i identyfikatory, potem IP, telefony i liczby. Dzięki temu
+//    reguła IP nie zostawi hasła z URI, a reguła liczb nie zostawi prefiksu klucza.
 
 /** Zastępuje cały komunikat, gdy nie da się go bezpiecznie zdekodować. */
 export const OMITTED_MESSAGE = '[pominięty komunikat]';
 const MAX_DECODE_PASSES = 8;
 
 const PERCENT_RUN_RE = /(?:%[0-9A-Fa-f]{2})+/g;
-const PERCENT_SEQ_RE = /%[0-9A-Fa-f]{2}/;
+// Niewidoczne znaki formatu (spacja zerowej szerokości, łącznik miękki, ZWJ, BOM…).
+const FORMAT_CHAR_RE = /\p{Cf}/gu;
 // Pojedyncze poprawne sekwencje UTF-8 (ASCII, 2, 3 i 4 bajty) — do dekodowania
 // fragmentów ciągu, który jako całość jest błędnym UTF-8.
 const UTF8_SEQ_RE =
@@ -120,11 +124,15 @@ const PROVIDER_KEY_RE =
 // Wartość to kolejno: tekst w cudzysłowie (z \" w środku), tekst z cudzysłowem
 // otwierającym bez zamykającego, <wartość>, albo ciąg bez separatorów (cudzysłów
 // w środku dozwolony). Pomijamy tylko dokładne znaczniki maskowania ([token],
-// [cookie] itd.), żeby drugi przebieg nie zmienił już zamaskowanego tekstu.
+// [cookie] itd., także „Bearer [token]” i „Basic [token]”), żeby drugi przebieg
+// nie zmienił już zamaskowanego tekstu. Wartość zaczynająca się od „Bearer-”
+// czy „Basic.” jest maskowana jak każda inna.
 const KEY_VALUE_RE =
-  /(?<![\w.-])([\w.-]+)("?\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|["'][^\s,;&<>]*|<[^\s>]*>?|(?!Bearer\b|Basic\b|\[(?:token|cookie|dane|url|query|email|uuid|id|ip|telefon|liczba)\](?![^\s,;&<>]))[^\s,;&"'<>][^\s,;&<>]*)/g;
+  /(?<![\w.-])([\w.-]+)("?\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|["'][^\s,;&<>]*|<[^\s>]*>?|(?!(?:(?:Bearer|Basic) )?\[(?:token|cookie|dane|url|query|email|uuid|id|ip|telefon|liczba)\](?![^\s,;&<>]))[^\s,;&"'<>][^\s,;&<>]*)/g;
+// „code” tylko jako cały klucz albo po _ . - (otp_code, auth_code; także
+// status_code i exit_code — świadomie, wolimy zamaskować za dużo).
 const SECRET_KEY_NAME_RE =
-  /session|token(?!s)|passw(?:or)?d|pwd|secret|api[_-]?key|private[_-]?key|signature|authorization|cookie|credential|(?:^|[_.-])(?:sid|pass|pin|otp)$/i;
+  /session|token(?!s)|passw(?:or)?d|passphrase|pwd|secret|api[_-]?key|private[_-]?key|signature|authorization|cookie|credential|(?:^|[_.-])(?:sid|pass|pin|otp|code)$/i;
 const EMAIL_RE =
   /(?<![\p{L}\p{N}._%+-])[\p{L}\p{N}_.%+-]+(?:@|%40)[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.(?:\p{L}{2,}|xn--[\p{L}\p{N}-]+)/giu;
 const UUID_IN_TEXT_RE =
@@ -136,11 +144,11 @@ const LONG_ALNUM_RE = /(?<![A-Za-z0-9])[A-Za-z0-9]{20,}(?![A-Za-z0-9])/g;
 const IPV6_RUN_RE = /(?<![0-9a-f.:])[0-9a-f.:]+/gi;
 const IPV4_RE = /(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)/g;
 // Telefon: 9-15 cyfr przedzielanych tylko spacją, myślnikiem (także półpauzą),
-// kropką, ukośnikiem lub nawiasem. Nie zaczyna się na dacie (2026-11-27,
-// 27.11.2026, 2026/11/27), żeby „data godzina” nie była telefonem.
+// kropką, ukośnikiem, podkreślnikiem lub nawiasem. Nie zaczyna się na dacie
+// (2026-11-27, 27.11.2026, 2026/11/27), żeby „data godzina” nie była telefonem.
 const PHONE_RE =
-  /(?<![\d+])(?!\d{4}[./-]\d{2}[./-]\d{2}(?!\d)|\d{2}[./-]\d{2}[./-]\d{4}(?!\d))(?:\+|\(\+?)?\d(?:[\s()./‐-―−-]{0,3}\d){8,14}(?!\d)/g;
-const PHONE_SEPARATOR_RE = /[\s()./‐-―−-]/;
+  /(?<![\d+])(?!\d{4}[./-]\d{2}[./-]\d{2}(?!\d)|\d{2}[./-]\d{2}[./-]\d{4}(?!\d))(?:\+|\(\+?)?\d(?:[\s()./_‐-―−-]{0,3}\d){8,14}(?!\d)/g;
+const PHONE_SEPARATOR_RE = /[\s()./_‐-―−-]/;
 const LONG_DIGITS_RE = /\d{9,}/g;
 
 /** Przycina bardzo długi tekst przed maskowaniem, bez niepełnego ostatniego słowa. */
@@ -172,21 +180,6 @@ function decodeOnce(text: string): string {
   });
 }
 
-/**
- * Dekoduje %XX aż do stabilizacji, najwyżej MAX_DECODE_PASSES przebiegów.
- * Zwraca null, gdy po limicie tekst wciąż zmienia się przy dekodowaniu i ma
- * sekwencje %XX (wielokrotne kodowanie) — wtedy komunikat jest pomijany w całości.
- */
-function decodePercent(text: string): string | null {
-  let out = text;
-  for (let pass = 0; pass < MAX_DECODE_PASSES; pass++) {
-    const next = decodeOnce(out);
-    if (next === out) return out;
-    out = next;
-  }
-  return PERCENT_SEQ_RE.test(out) && decodeOnce(out) !== out ? null : out;
-}
-
 function isControlChar(code: number): boolean {
   return (
     code < 0x20 ||
@@ -205,6 +198,15 @@ function flattenControlChars(text: string): string {
     out += isControlChar(ch.codePointAt(0) ?? 0) ? ' ' : ch;
   }
   return out;
+}
+
+/**
+ * Usuwa niewidoczne znaki formatu (\p{Cf}). Znaki kierunku tekstu też należą do
+ * Cf, ale zostają dla flattenControlChars, który zamienia je na spację.
+ * Usunięcie tylko skleja tekst, więc nie tworzy separatora.
+ */
+function stripInvisible(text: string): string {
+  return text.replace(FORMAT_CHAR_RE, (ch) => (isControlChar(ch.codePointAt(0) ?? 0) ? ch : ''));
 }
 
 /**
@@ -270,11 +272,11 @@ function maskPhone(match: string): string {
 }
 
 /**
- * NFKC (pełna szerokość → ASCII), spłaszczenie znaków sterujących i ponowne
- * przycięcie, bo NFKC może wydłużyć tekst.
+ * NFKC (pełna szerokość → ASCII), spłaszczenie znaków sterujących, usunięcie
+ * znaków formatu i ponowne przycięcie, bo NFKC może wydłużyć tekst.
  */
 function normalizeText(text: string): string {
-  return capRawLength(flattenControlChars(text.normalize('NFKC')));
+  return capRawLength(stripInvisible(flattenControlChars(text.normalize('NFKC'))));
 }
 
 /** Reguły sekretów: dane logowania w URI, query, cookie, Bearer/Basic, JWT, klucze, klucz=wartość. */
@@ -293,12 +295,18 @@ function maskSecrets(text: string): string {
   );
 }
 
-/** Maskuje dane wrażliwe w tekście, bez obcinania do limitu wyjścia. */
-export function maskText(text: string): string {
-  // Sekrety najpierw na surowym tekście, dopiero potem dekodowanie %XX.
-  const decoded = decodePercent(maskSecrets(normalizeText(capRawLength(text))));
-  if (decoded === null) return OMITTED_MESSAGE;
-  return maskSecrets(normalizeText(decoded))
+/**
+ * Sekrety w bieżącej postaci tekstu, potem NFKC i spłaszczenie, potem znów
+ * sekrety. Normalizacja może wytworzyć separator (np. ／ → /), więc działa
+ * dopiero na tekście z zamaskowanymi sekretami.
+ */
+function maskSecretsAroundNormalize(text: string): string {
+  return maskSecrets(normalizeText(maskSecrets(stripInvisible(text))));
+}
+
+/** Reguły końcowe: e-mail, identyfikatory, IP, telefony, liczby. */
+function maskIdentifiers(text: string): string {
+  return text
     .replace(EMAIL_RE, '[email]')
     .replace(UUID_IN_TEXT_RE, '[uuid]')
     .replace(UUID_COMPACT_RE, '[uuid]')
@@ -307,6 +315,20 @@ export function maskText(text: string): string {
     .replace(IPV4_RE, '[ip]')
     .replace(PHONE_RE, maskPhone)
     .replace(LONG_DIGITS_RE, '[liczba]');
+}
+
+/** Maskuje dane wrażliwe w tekście, bez obcinania do limitu wyjścia. */
+export function maskText(text: string): string {
+  let current = maskSecretsAroundNormalize(capRawLength(text));
+  // Dekodowanie %XX po jednym przebiegu: każdy przebieg może odsłonić separator
+  // zakodowany o poziom głębiej, więc po każdym znów maskujemy sekrety.
+  for (let pass = 0; pass < MAX_DECODE_PASSES; pass++) {
+    const next = decodeOnce(current);
+    if (next === current) return maskIdentifiers(current);
+    current = maskSecretsAroundNormalize(next);
+  }
+  // Po limicie przebiegów tekst wciąż się dekoduje (wielokrotne kodowanie).
+  return decodeOnce(current) === current ? maskIdentifiers(current) : OMITTED_MESSAGE;
 }
 
 /** Obcina do `max` znaków (łącznie ze znakiem „…”). */
@@ -351,7 +373,8 @@ function maskSegment(segment: string): string {
 /** Ścieżka z requestUrl: bez schematu, hosta, query i fragmentu; UUID i liczby → :id. */
 export function sanitizePath(requestUrl: string): string | null {
   // Wiodące „//” (adres bez schematu) też oznacza host — usuwamy go razem z hostem.
-  const withoutHost = requestUrl.replace(/^(?:[a-z][a-z0-9+.-]*:)?\/\/[^/?#]*/i, '');
+  // Dodatkowe ukośniki („///host/x”) nie zostawiają hosta jako segmentu.
+  const withoutHost = requestUrl.replace(/^(?:[a-z][a-z0-9+.-]*:)?\/\/+[^/?#]*/i, '');
   const pathOnly = withoutHost.split(/[?#]/, 1)[0] ?? '';
   if (!pathOnly.startsWith('/')) return pathOnly === '' ? '/' : null;
   const masked = pathOnly.split('/').map(maskSegment).join('/');

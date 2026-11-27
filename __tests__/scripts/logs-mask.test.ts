@@ -453,6 +453,103 @@ describe('regresja: drobne wycieki z recenzji', () => {
   });
 });
 
+describe('regresja: sekrety maskowane po każdym przebiegu dekodowania', () => {
+  // [nazwa, wejście, oczekiwane wyjście]
+  it.each([
+    [
+      'DSN zakodowany w całości, %252F w haśle',
+      'postgresql%3A%2F%2Fapp%3Apa%252Fss%40db.example.com%2Fdb',
+      'postgresql://[dane]@db.example.com/db',
+    ],
+    [
+      'DSN zakodowany jako wartość klucza',
+      'dsn=postgresql%3A%2F%2Fapp%3Apa%252Fss%40db.example.com%2Fdb',
+      'dsn=postgresql://[dane]@db.example.com/db',
+    ],
+    [
+      'URI redis zakodowany w całości',
+      'redis%3A%2F%2Fdefault%3AAb%252FCd%40cache.example.com',
+      'redis://[dane]@cache.example.com',
+    ],
+    ['password z podwójnie zakodowaną spacją', 'password%3Dabc%2520def', 'password=[token]'],
+    [
+      'password w zakodowanym query',
+      'next=%2Flogin%3Fpassword%3Dabc%2520def',
+      'next=/login?[query]',
+    ],
+    ['Bearer z podwójnie zakodowaną spacją', 'Bearer%20abc%2520def', 'Bearer [token]'],
+    // Dekodowanie odsłania znak pełnej szerokości, który NFKC zmienia w separator.
+    ['password z zakodowanym ＆', 'password%3Dab%EF%BC%86cd', 'password=[token]'],
+    [
+      'DSN z zakodowanym ／ w haśle',
+      'postgresql%3A%2F%2Fapp%3Apa%EF%BC%8Fss%40db.example.com%2Fdb',
+      'postgresql://[dane]@db.example.com/db',
+    ],
+  ])('%s', (_name, input, expected) => {
+    expect(maskMessage(input)).toBe(expected);
+  });
+});
+
+describe('regresja: sekrety maskowane przed NFKC', () => {
+  // [nazwa, wejście, oczekiwane wyjście]
+  it.each([
+    ['／ w haśle URI', 'postgresql://app:pa／ss@db.example.com/db', 'postgresql://[dane]@db.example.com/db'],
+    ['﹖ w haśle URI', 'postgresql://app:pa﹖ss@db.example.com/db', 'postgresql://[dane]@db.example.com/db'],
+    ['＆ w password', 'password=ab＆cd', 'password=[token]'],
+    ['，w password', 'password=ab，cd', 'password=[token]'],
+    ['；w password', 'password=ab；cd', 'password=[token]'],
+    ['＜ w password', 'password=ab＜cd', 'password=[token]'],
+  ])('%s', (_name, input, expected) => {
+    expect(maskMessage(input)).toBe(expected);
+  });
+});
+
+describe('regresja: uwagi z trzeciej recenzji', () => {
+  // [nazwa, wejście, oczekiwane wyjście]
+  it.each([
+    // wartość zaczynająca się od Bearer/Basic bez spacji
+    ['password=Bearer-', 'password=Bearer-S3cret', 'password=[token]'],
+    ['password=Bearer.', 'password=Bearer.S3cret', 'password=[token]'],
+    ['password=Basic-', 'password=Basic-S3cret', 'password=[token]'],
+    ['password=Bearer z tokenem po spacji', 'password=Bearer S3cret', 'password=Bearer [token]'],
+    // niewidoczne znaki formatu (Cf)
+    ['ZWJ przed @', 'jan‍@example.com', '[email]'],
+    ['łącznik miękki w domenie', 'jan@exa­mple.com', '[email]'],
+    ['spacja zerowej szerokości w telefonie', 'tel 600​700​800', 'tel [telefon]'],
+    ['WORD JOINER w haśle', 'password=ab⁠cd', 'password=[token]'],
+    ['BOM przed e-mailem', '﻿jan@example.com', '[email]'],
+    ['zakodowana spacja zerowej szerokości', 'tel 600%E2%80%8B700%E2%80%8B800', 'tel [telefon]'],
+    // nazwy kluczy
+    ['klucz code', 'code=482913', 'code=[token]'],
+    ['klucz otp_code', 'otp_code=482913', 'otp_code=[token]'],
+    ['klucz pin_code', 'pin_code=1234', 'pin_code=[token]'],
+    ['klucz auth_code', 'auth_code=abc', 'auth_code=[token]'],
+    ['klucz passphrase', 'passphrase=abc', 'passphrase=[token]'],
+    ['klucz status_code (maskowany świadomie)', 'status_code=500', 'status_code=[token]'],
+    // telefon z podkreślnikami
+    ['telefon z podkreślnikami', 'tel 600_700_800', 'tel [telefon]'],
+  ])('%s', (_name, input, expected) => {
+    expect(maskMessage(input)).toBe(expected);
+  });
+
+  it('nagłówek Authorization z Bearer nadal daje Bearer [token]', () => {
+    expect(maskMessage('Authorization: Bearer abc123')).toBe('Authorization: Bearer [token]');
+  });
+
+  it('code tylko jako cały klucz albo po _ . -', () => {
+    expect(maskMessage('qrcode=abc barcode=xyz')).toBe('qrcode=abc barcode=xyz');
+  });
+
+  it.each([
+    ['trzy ukośniki przed hostem', '///example.com/x', '/x'],
+    ['cztery ukośniki przed hostem', '////example.com/x', '/x'],
+  ])('ścieżka: %s', (_name, input, expected) => {
+    const out = sanitizePath(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('example');
+  });
+});
+
 describe('kolejność reguł', () => {
   it('maskowanie IP nie zostawia hasła z URI', () => {
     const out = maskMessage('connect postgresql://app:S3cretPass@198.51.100.7:5432/db refused');
