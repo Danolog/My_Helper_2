@@ -17,6 +17,12 @@ export interface ClientData {
   healthDataConsentAt: string | null;
   /** Konto personelu, które zapisało zgodę. */
   healthDataConsentBy: string | null;
+  /** Blokada rezerwacji online (ISO); `null` = klient rezerwuje online. */
+  blockedAt: string | null;
+  /** `'auto'` (próg nieobecności) albo konto właściciela. */
+  blockedBy: string | null;
+  /** Notatka właściciela do blokady. */
+  blockNote: string | null;
   favoriteEmployeeId: string | null;
   birthday: string | null;
   requireDeposit: boolean | null;
