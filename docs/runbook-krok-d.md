@@ -1548,6 +1548,7 @@ Każdy z dwóch odczytów zwraca wyłącznie czas; sekret wynika z filtra. Proje
 wpisujemy dosłownie, bo zabezpieczenie odczytu logów odrzuca zmienne:
 
 ```bash
+set +x
 gcloud --project=<projekt> logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND protoPayload.resourceName:"/secrets/postgres-url/" AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp)'
 gcloud --project=<projekt> logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND protoPayload.resourceName:"/secrets/postgres-admin-password/" AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp)'
 ```
