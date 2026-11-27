@@ -33,6 +33,7 @@ interface MockTx {
 }
 
 const savepoints = vi.hoisted(() => ({ count: 0 }));
+const commit = vi.hoisted(() => ({ fails: false }));
 
 vi.mock("@/lib/db", () => {
   // The tx object passed into db.transaction() reuses the same mock fns
@@ -53,7 +54,12 @@ vi.mock("@/lib/db", () => {
       select: (...args: unknown[]) => mockDbSelect(...args),
       insert: (...args: unknown[]) => mockDbInsert(...args),
       update: (...args: unknown[]) => mockDbUpdate(...args),
-      transaction: async (cb: (tx: MockTx) => Promise<unknown>) => cb(tx),
+      // `commit.fails`: callback przeszedł, ale COMMIT kończy się błędem.
+      transaction: async (cb: (tx: MockTx) => Promise<unknown>) => {
+        const result = await cb(tx);
+        if (commit.fails) throw Object.assign(new Error("commit failed"), { code: "40001" });
+        return result;
+      },
     },
   };
 });
@@ -152,7 +158,7 @@ function chainMock(result: unknown[] = []) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   const methods = [
     "select", "from", "where", "leftJoin",
-    "limit", "orderBy",
+    "limit", "orderBy", "for",
     "insert", "values", "update", "set", "delete",
     "returning",
   ];
@@ -169,6 +175,14 @@ function chainMock(result: unknown[] = []) {
 
 import { POST as completeAppointment } from "@/app/api/appointments/[id]/complete/route";
 import {
+  APPOINTMENT_COMPLETED_CODE,
+  APPOINTMENT_COMPLETED_MESSAGE,
+  COMMISSION_RATE_INVALID_MESSAGE,
+  COMPLETE_ERROR_CODES,
+  SERVICE_PRICE_INVALID_MESSAGE,
+  commissionFor,
+} from "@/lib/appointment-completion";
+import {
   NO_SHOW_COMPLETE_BLOCKED_CODE,
   NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
   NO_SHOW_RESTORED_STATUS,
@@ -183,6 +197,7 @@ describe("POST /api/appointments/[id]/complete", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     loyaltyThaw.on = false;
+    commit.fails = false;
   });
 
   it("should return 200 when completing an appointment successfully", async () => {
@@ -258,7 +273,7 @@ describe("POST /api/appointments/[id]/complete", () => {
     expect(body.error).toContain("not found");
   });
 
-  it("should return 400 when appointment is already completed", async () => {
+  it("wizyta już zakończona → 409 APPOINTMENT_COMPLETED jak w PUT i DELETE, bez zapisów", async () => {
     const appointment = makeAppointment({ status: "completed" });
     const service = makeService();
 
@@ -275,9 +290,15 @@ describe("POST /api/appointments/[id]/complete", () => {
     const response = await completeAppointment(request, params);
     const { status, body } = await parseResponse(response);
 
-    expect(status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("zakonczona");
+    expect(status).toBe(409);
+    expect(body).toEqual({
+      success: false,
+      code: APPOINTMENT_COMPLETED_CODE,
+      error: APPOINTMENT_COMPLETED_MESSAGE,
+    });
+    expect(mockDbSelect).toHaveBeenCalledTimes(1);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
   it("should return 400 when appointment is cancelled", async () => {
@@ -299,7 +320,10 @@ describe("POST /api/appointments/[id]/complete", () => {
 
     expect(status).toBe(400);
     expect(body.success).toBe(false);
+    expect((body as any).code).toBe(COMPLETE_ERROR_CODES.appointmentCancelled);
     expect(body.error).toContain("anulowanej");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
   describe("wizyta „Nie przyszedł”", () => {
@@ -410,15 +434,15 @@ describe("POST /api/appointments/[id]/complete", () => {
     }
 
     it.each([
-      ["completed", "Wizyta jest juz zakonczona"],
-      ["cancelled", "Nie mozna zakonczyc anulowanej wizyty"],
-    ])("równolegle %s → 400 z tym samym komunikatem co przy odczycie, bez kodu no-show", async (current, error) => {
+      ["completed", 409, APPOINTMENT_COMPLETED_CODE, APPOINTMENT_COMPLETED_MESSAGE],
+      ["cancelled", 400, COMPLETE_ERROR_CODES.appointmentCancelled, "Nie mozna zakonczyc anulowanej wizyty"],
+    ])("równolegle %s → %i z tym samym kodem co przy odczycie", async (current, httpStatus, code, error) => {
       givenRaceWithCurrentRows([{ status: current }]);
 
       const { status, body } = await parseResponse(await completeRequest());
 
-      expect(status).toBe(400);
-      expect(body).toEqual({ success: false, error });
+      expect(status).toBe(httpStatus);
+      expect(body).toEqual({ success: false, code, error });
       expect(mockDbInsert).toHaveBeenCalledTimes(1);
       expect(mockDbUpdate).toHaveBeenCalledTimes(1);
     });
@@ -446,7 +470,7 @@ describe("POST /api/appointments/[id]/complete", () => {
 
   it("should return 500 when database throws", async () => {
     const errorChain: Record<string, unknown> = {};
-    const methods = ["select", "from", "where", "leftJoin", "limit"];
+    const methods = ["select", "from", "where", "leftJoin", "limit", "for"];
     for (const m of methods) {
       (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
     }
@@ -1450,9 +1474,9 @@ describe("POST /api/appointments/[id]/complete", () => {
     const response = await completeAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
     expect(response.status).toBe(200);
 
-    // Dwie transakcje forSalon: odczyt wizyty i transakcja zapisów.
+    // Jedna transakcja forSalon: odczyt wizyty pod blokadą jest jej pierwszą instrukcją.
     const roleSwitches = vi.mocked(sql.raw).mock.calls.filter(([q]) => /^set local role /.test(String(q)));
-    expect(roleSwitches).toHaveLength(2);
+    expect(roleSwitches).toHaveLength(1);
     // Aktualizacja statusu ma jawny filtr salonu z sesji.
     expect(vi.mocked(eq).mock.calls).toContainEqual(["appointments.salonId", TEST_IDS.SALON_UUID]);
     expect(vi.mocked(eq).mock.calls).toContainEqual(["salons.id", TEST_IDS.SALON_UUID]);
@@ -1930,6 +1954,478 @@ describe("POST /api/appointments/[id]/complete", () => {
 
       expect(status).toBe(500);
       expect(infoSpy).not.toHaveBeenCalledWith("Appointment marked as completed", expect.anything());
+      infoSpy.mockRestore();
+    });
+  });
+
+  describe("odczyt pod blokadą wiersza, cena i prowizja", () => {
+    const OTHER_EMPLOYEE = "77777777-7777-7777-7777-777777777777";
+    const OTHER_SERVICE = "88888888-8888-8888-8888-888888888888";
+
+    function post(body: Record<string, unknown> = {}) {
+      return completeAppointment(
+        createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+          method: "POST",
+          body,
+        }),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    /**
+     * Zakończenie z pracownikiem, bez stawki w body: odczyt pod blokadą,
+     * zabieg, UPDATE statusu, stawka pracownika, cena pracownika. Zwraca
+     * łańcuch odczytu pod blokadą; prowizja i dalsze kroki dopina test.
+     */
+    function givenUpToPrice(opts: {
+      appointment: Record<string, unknown>;
+      service: Record<string, unknown>;
+      commissionRate?: string | null;
+      employeePrice?: string | null;
+    }) {
+      const locked = chainMock([{ appointment: opts.appointment, service: opts.service }]);
+      mockDbSelect.mockReturnValueOnce(locked);
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...opts.appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ commissionRate: opts.commissionRate ?? "50.00" }]));
+      mockDbSelect.mockReturnValueOnce(
+        chainMock(opts.employeePrice != null ? [{ customPrice: opts.employeePrice }] : [])
+      );
+      return locked;
+    }
+
+    /** Po cenie: brak prowizji, INSERT prowizji, brak produktów, salon bez punktów. */
+    function thenCommissionSaved() {
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      const commissionChain = chainMock([{ id: "comm-1" }]);
+      mockDbInsert.mockReturnValueOnce(commissionChain);
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+      return commissionChain;
+    }
+
+    it("odczyt wizyty z usługą to FOR UPDATE OF appointments, pierwsza instrukcja transakcji", async () => {
+      const { sql } = await import("drizzle-orm");
+      const { appointments } = await import("@/lib/schema");
+      const locked = givenUpToPrice({
+        appointment: makeAppointment({ status: "scheduled" }),
+        service: makeService({ basePrice: "200.00" }),
+      });
+      thenCommissionSaved();
+
+      const response = await post();
+
+      expect(response.status).toBe(200);
+      const lockFor = locked.for!;
+      expect(lockFor).toHaveBeenCalledTimes(1);
+      expect(lockFor.mock.calls[0]?.[0]).toBe("update");
+      expect((lockFor.mock.calls[0]?.[1] as { of?: unknown })?.of).toBe(appointments);
+      expect(locked.leftJoin).toHaveBeenCalledTimes(1);
+      // Wejście w kontekst salonu (SET LOCAL ROLE) przed odczytem, odczyt przed pierwszym zapisem.
+      const roleOrder = vi.mocked(sql.raw).mock.invocationCallOrder[0]!;
+      const firstSelect = mockDbSelect.mock.invocationCallOrder[0]!;
+      expect(roleOrder).toBeLessThan(firstSelect);
+      expect(firstSelect).toBeLessThan(mockDbInsert.mock.invocationCallOrder[0]!);
+      // Jedyny odczyt wizyty — bez osobnego odczytu przed transakcją.
+      const lockedFields = mockDbSelect.mock.calls[0]?.[0] as { appointment?: unknown; service?: unknown };
+      expect(lockedFields.appointment).toBe(appointments);
+      expect(lockedFields.service).toBeDefined();
+      expect(mockDbSelect.mock.calls.filter((c) => (c[0] as { appointment?: unknown })?.appointment)).toHaveLength(1);
+    });
+
+    it("prowizja dla pracownika, usługi i ceny z odczytu pod blokadą", async () => {
+      const { eq } = await import("drizzle-orm");
+      givenUpToPrice({
+        appointment: makeAppointment({ status: "scheduled", employeeId: OTHER_EMPLOYEE, serviceId: OTHER_SERVICE }),
+        service: makeService({ id: OTHER_SERVICE, basePrice: "300.00" }),
+        commissionRate: "10.00",
+        employeePrice: "280.00",
+      });
+      const commissionChain = thenCommissionSaved();
+
+      const response = await post();
+
+      expect(response.status).toBe(200);
+      expect(commissionChain.values).toHaveBeenCalledWith({
+        employeeId: OTHER_EMPLOYEE,
+        appointmentId: TEST_IDS.APPOINTMENT_UUID,
+        amount: "28.00",
+        percentage: "10.00",
+      });
+      expect(vi.mocked(eq).mock.calls).toContainEqual(["employees.id", OTHER_EMPLOYEE]);
+      expect(vi.mocked(eq).mock.calls).toContainEqual(["employeeServicePrices.employeeId", OTHER_EMPLOYEE]);
+      expect(vi.mocked(eq).mock.calls).toContainEqual(["employeeServicePrices.serviceId", OTHER_SERVICE]);
+    });
+
+    it.each([
+      ["usługa ze złączenia NULL", null],
+      ["usługa ze złączenia sprzed przeniesienia", "stara"],
+    ])(
+      "%s (zmiana usługi zatwierdzona w czasie czekania na blokadę) → usługa czytana ponownie po id z wizyty, prowizja od niej",
+      async (_name, joined) => {
+        const { eq } = await import("drizzle-orm");
+        const serviceB = makeService({ id: OTHER_SERVICE, basePrice: "300.00" });
+        const locked = chainMock([
+          {
+            appointment: makeAppointment({ status: "scheduled", employeeId: OTHER_EMPLOYEE, serviceId: OTHER_SERVICE }),
+            service: joined === null ? null : makeService({ basePrice: "150.00" }),
+          },
+        ]);
+        mockDbSelect.mockReturnValueOnce(locked);
+        // Ponowny odczyt usługi po id z zablokowanej wizyty.
+        const reread = chainMock([serviceB]);
+        mockDbSelect.mockReturnValueOnce(reread);
+        mockDbSelect.mockReturnValueOnce(chainMock([]));
+        mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+        mockDbUpdate.mockReturnValueOnce(
+          chainMock([makeAppointment({ status: "completed", employeeId: OTHER_EMPLOYEE, serviceId: OTHER_SERVICE })])
+        );
+        mockDbSelect.mockReturnValueOnce(chainMock([{ commissionRate: "10.00" }]));
+        mockDbSelect.mockReturnValueOnce(chainMock([{ customPrice: "280.00" }]));
+        const commissionChain = thenCommissionSaved();
+
+        const response = await post();
+
+        expect(response.status).toBe(200);
+        expect(reread.for).not.toHaveBeenCalled();
+        expect(vi.mocked(eq).mock.calls).toContainEqual(["services.id", OTHER_SERVICE]);
+        expect(vi.mocked(eq).mock.calls).toContainEqual(["services.salonId", TEST_IDS.SALON_UUID]);
+        expect(commissionChain.values).toHaveBeenCalledWith({
+          employeeId: OTHER_EMPLOYEE,
+          appointmentId: TEST_IDS.APPOINTMENT_UUID,
+          amount: "28.00",
+          percentage: "10.00",
+        });
+        expect(vi.mocked(eq).mock.calls).toContainEqual(["employeeServicePrices.serviceId", OTHER_SERVICE]);
+      }
+    );
+
+    it("usługa ze złączenia zgodna z wizytą → bez ponownego odczytu usługi", async () => {
+      const { eq } = await import("drizzle-orm");
+      givenUpToPrice({
+        appointment: makeAppointment({ status: "scheduled" }),
+        service: makeService({ basePrice: "200.00" }),
+      });
+      thenCommissionSaved();
+
+      const response = await post();
+
+      expect(response.status).toBe(200);
+      // Złączenie woła eq(appointments.serviceId, services.id); ponowny odczyt — eq(services.id, …).
+      expect(vi.mocked(eq).mock.calls.filter((c) => (c[0] as unknown) === "services.id")).toHaveLength(0);
+    });
+
+    it("pracownik: wizyta pod blokadą należy do innego pracownika → 404 z kodem, bez zapisów", async () => {
+      const { getSalonContext } = await import("@/lib/salon-context");
+      vi.mocked(getSalonContext).mockResolvedValueOnce({
+        salonId: TEST_IDS.SALON_UUID,
+        role: "employee",
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        userId: "user-2",
+      } as never);
+      mockDbSelect.mockReturnValueOnce(
+        chainMock([{ appointment: makeAppointment({ employeeId: OTHER_EMPLOYEE }), service: makeService() }])
+      );
+
+      const { status, body } = await parseResponse(await post());
+
+      expect(status).toBe(404);
+      expect((body as any).code).toBe(COMPLETE_ERROR_CODES.appointmentNotFound);
+      expect(mockDbInsert).not.toHaveBeenCalled();
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["cena podstawowa 'NaN'", { basePrice: "NaN" }, null],
+      ["cena podstawowa 'Infinity'", { basePrice: "Infinity" }, null],
+      ["cena pracownika 'Infinity'", { basePrice: "200.00" }, "Infinity"],
+      ["cena pracownika 'NaN'", { basePrice: "200.00" }, "NaN"],
+      ["cena pracownika '-Infinity'", { basePrice: "200.00" }, "-Infinity"],
+    ])("%s → 409 SERVICE_PRICE_INVALID, bez prowizji i bez 500", async (_name, serviceOverrides, employeePrice) => {
+      givenUpToPrice({
+        appointment: makeAppointment({ status: "scheduled" }),
+        service: makeService(serviceOverrides),
+        employeePrice,
+      });
+
+      const { status, body } = await parseResponse(await post());
+
+      expect(status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: COMPLETE_ERROR_CODES.servicePriceInvalid,
+        error: SERVICE_PRICE_INVALID_MESSAGE,
+      });
+      // Tylko INSERT zabiegu (wycofany razem z transakcją); prowizja nie powstaje.
+      expect(mockDbInsert).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(body)).not.toContain("NaN");
+    });
+
+    it("stawka pracownika 'NaN' → 409 COMMISSION_RATE_INVALID, bez prowizji", async () => {
+      givenUpToPrice({
+        appointment: makeAppointment({ status: "scheduled" }),
+        service: makeService({ basePrice: "200.00" }),
+        commissionRate: "NaN",
+      });
+
+      const { status, body } = await parseResponse(await post());
+
+      expect(status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: COMPLETE_ERROR_CODES.commissionRateInvalid,
+        error: COMMISSION_RATE_INVALID_MESSAGE,
+      });
+      expect(mockDbInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("cena 'NaN' przy wizycie bez pracownika → 200 bez prowizji; punkty pominięte zamiast NaN", async () => {
+      loyaltyThaw.on = true;
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService({ basePrice: "NaN" }) }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(
+        chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: { loyalty: { enabled: true } } }])
+      );
+
+      const { status, body } = await parseResponse(await post());
+
+      expect(status).toBe(200);
+      expect((body as any).data.commission).toBeNull();
+      expect((body as any).data.loyalty).toBeNull();
+      // Tylko INSERT zabiegu: ani karty punktów, ani transakcji punktów.
+      expect(mockDbInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      [33.333, "1000.00", "33.33", "333.30"],
+      ["33.333", "1000.00", "33.33", "333.30"],
+      [12.5, "99.99", "12.50", "12.50"],
+      [0.01, "0.50", "0.01", "0.00"],
+    ])("stawka z body %j od ceny %s → zapis %s%% i kwota %s (stawka zaokrąglona przed liczeniem)", async (rate, price, percentage, amount) => {
+      const appointment = makeAppointment({ status: "scheduled" });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService({ basePrice: price }) }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      // Stawka z body: bez odczytu stawki pracownika; cena pracownika (brak).
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      const commissionChain = thenCommissionSaved();
+
+      const { status } = await parseResponse(await post({ commissionPercentage: rate }));
+
+      expect(status).toBe(200);
+      expect(commissionChain.values).toHaveBeenCalledWith(expect.objectContaining({ percentage, amount }));
+    });
+  });
+
+  describe("commissionFor — stawka do 2 miejsc, kwota w pełnych groszach", () => {
+    it.each([
+      [1000, 33.333, "333.30", "33.33"],
+      [200, 50, "100.00", "50.00"],
+      [99.99, 12.5, "12.50", "12.50"],
+      [150, 0, "0.00", "0.00"],
+      [150, 100, "150.00", "100.00"],
+      [0.1, 33.33, "0.03", "33.33"],
+      [99999999.99, 100, "99999999.99", "100.00"],
+      [19.99, 7.77, "1.55", "7.77"],
+    ])("cena %d, stawka %d → kwota %s, stawka %s", (price, rate, amount, percentage) => {
+      expect(commissionFor(price, rate)).toEqual({ amount, percentage });
+    });
+
+    it("kwota zgadza się z zapisaną stawką: cena × zapisana stawka, zaokrąglona do grosza", () => {
+      for (const [price, rate] of [[1000, 33.333], [77.77, 14.286], [12.34, 99.999], [5, 0.004]] as const) {
+        const { amount, percentage } = commissionFor(price, rate);
+        // Od kwoty liczonej z ZAPISANEJ stawki dzieli najwyżej pół grosza (zaokrąglenie).
+        expect(Math.abs(Number(amount) - (price * Number(percentage)) / 100)).toBeLessThanOrEqual(0.005 + 1e-9);
+        expect(percentage).toMatch(/^\d+\.\d{2}$/);
+        expect(amount).toMatch(/^\d+\.\d{2}$/);
+      }
+    });
+  });
+
+  describe("kody błędów 4xx", () => {
+    it("niepoprawny JSON → 400 INVALID_JSON, bez bazy", async () => {
+      const request = new Request(
+        `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{nie json" }
+      );
+
+      const { status, body } = await parseResponse(
+        await completeAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID))
+      );
+
+      expect(status).toBe(400);
+      expect((body as any).code).toBe(COMPLETE_ERROR_CODES.invalidJson);
+      expect(mockDbSelect).not.toHaveBeenCalled();
+    });
+
+    it("niepoprawny identyfikator → 400 INVALID_APPOINTMENT_ID, bez bazy", async () => {
+      const { status, body } = await parseResponse(
+        await completeAppointment(
+          createMockRequest("http://localhost:3000/api/appointments/abc/complete", { method: "POST", body: {} }),
+          createRouteParams("abc")
+        )
+      );
+
+      expect(status).toBe(400);
+      expect((body as any).code).toBe(COMPLETE_ERROR_CODES.invalidId);
+      expect(mockDbSelect).not.toHaveBeenCalled();
+    });
+
+    it("błąd walidacji → 400 VALIDATION_FAILED ze szczegółami pól", async () => {
+      const { status, body } = await parseResponse(
+        await completeAppointment(
+          createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+            method: "POST",
+            body: { commissionPercentage: 150 },
+          }),
+          createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+        )
+      );
+
+      expect(status).toBe(400);
+      expect((body as any).code).toBe(COMPLETE_ERROR_CODES.validationFailed);
+      expect((body as any).details.commissionPercentage).toEqual(expect.any(String));
+    });
+
+    it("brak salonu w sesji → 404 SALON_NOT_FOUND", async () => {
+      const { getSalonContext } = await import("@/lib/salon-context");
+      vi.mocked(getSalonContext).mockResolvedValueOnce(null as never);
+
+      const { status, body } = await parseResponse(
+        await completeAppointment(
+          createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+            method: "POST",
+            body: {},
+          }),
+          createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+        )
+      );
+
+      expect(status).toBe(404);
+      expect((body as any).code).toBe(COMPLETE_ERROR_CODES.salonNotFound);
+    });
+
+    it("brak wizyty → 404 APPOINTMENT_NOT_FOUND", async () => {
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+
+      const { status, body } = await parseResponse(
+        await completeAppointment(
+          createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+            method: "POST",
+            body: {},
+          }),
+          createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+        )
+      );
+
+      expect(status).toBe(404);
+      expect(body).toEqual({
+        success: false,
+        code: COMPLETE_ERROR_CODES.appointmentNotFound,
+        error: "Appointment not found",
+      });
+    });
+  });
+
+  describe("logi alertu niskiego stanu i punktów — po zatwierdzeniu, bez klienta i kwot", () => {
+    /** Bez pracownika; produkt spada poniżej minimum; program punktów włączony. */
+    function givenAlertAndPoints() {
+      loyaltyThaw.on = true;
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService({ basePrice: "4321.00" }) }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(
+        chainMock([
+          {
+            linkId: "sp-1",
+            productId: TEST_IDS.PRODUCT_UUID,
+            defaultQuantity: "2",
+            productName: "Farba",
+            productQuantity: "3",
+            productUnit: "szt.",
+            productMinQuantity: "5",
+            productSalonId: TEST_IDS.SALON_UUID,
+          },
+        ])
+      );
+      mockDbUpdate.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "notif-1" }]));
+      mockDbSelect.mockReturnValueOnce(
+        chainMock([
+          {
+            id: TEST_IDS.SALON_UUID,
+            settingsJson: { loyalty: { enabled: true, pointsPerCurrencyUnit: 1, currencyUnit: 1 } },
+          },
+        ])
+      );
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: "loyalty-1", points: 7 }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "lt-1" }]));
+    }
+
+    it("200 → oba logi po logu zakończenia, tylko id wizyty, produktu i liczba punktów", async () => {
+      const { logger } = await import("@/lib/logger");
+      const infoSpy = vi.spyOn(logger, "info");
+      givenAlertAndPoints();
+
+      const response = await completeAppointment(
+        createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+          method: "POST",
+          body: {},
+        }),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+
+      expect(response.status).toBe(200);
+      const messages = infoSpy.mock.calls.map((c) => c[0]);
+      const completedAt = messages.indexOf("Appointment marked as completed");
+      expect(completedAt).toBeGreaterThanOrEqual(0);
+      expect(messages.indexOf("Low stock alert notification sent")).toBeGreaterThan(completedAt);
+      expect(messages.indexOf("Loyalty points awarded")).toBeGreaterThan(completedAt);
+      expect(infoSpy).toHaveBeenCalledWith("Low stock alert notification sent", {
+        appointmentId: TEST_IDS.APPOINTMENT_UUID,
+        productId: TEST_IDS.PRODUCT_UUID,
+      });
+      expect(infoSpy).toHaveBeenCalledWith("Loyalty points awarded", {
+        appointmentId: TEST_IDS.APPOINTMENT_UUID,
+        pointsAwarded: 4321,
+      });
+      const logged = JSON.stringify(infoSpy.mock.calls);
+      expect(logged).not.toContain(TEST_IDS.CLIENT_UUID);
+      expect(logged).not.toContain("4328");
+      expect(logged).not.toContain("4321.00");
+      infoSpy.mockRestore();
+    });
+
+    it("COMMIT nie przeszedł → 500 i żadnego z tych logów", async () => {
+      const { logger } = await import("@/lib/logger");
+      const infoSpy = vi.spyOn(logger, "info");
+      givenAlertAndPoints();
+      commit.fails = true;
+
+      const response = await completeAppointment(
+        createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+          method: "POST",
+          body: {},
+        }),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+
+      expect(response.status).toBe(500);
+      const messages = infoSpy.mock.calls.map((c) => c[0]);
+      expect(messages).not.toContain("Low stock alert notification sent");
+      expect(messages).not.toContain("Loyalty points awarded");
+      expect(messages).not.toContain("Appointment marked as completed");
       infoSpy.mockRestore();
     });
   });

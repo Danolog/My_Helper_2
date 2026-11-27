@@ -21,6 +21,46 @@ export const APPOINTMENT_COMPLETED_CODE = "APPOINTMENT_COMPLETED";
 export const APPOINTMENT_COMPLETED_MESSAGE =
   "Zakończonej wizyty nie można zmienić. Możesz edytować tylko notatki.";
 
+/**
+ * Kody błędów POST /api/appointments/[id]/complete (pole `code` każdej
+ * odpowiedzi 4xx poza 401 z `requireAuth`). Wizyta zakończona: 409
+ * `APPOINTMENT_COMPLETED` jak w PUT i DELETE; „Nie przyszedł”: 409
+ * `APPOINTMENT_NO_SHOW` z `@/lib/no-show`.
+ */
+export const COMPLETE_ERROR_CODES = {
+  invalidJson: "INVALID_JSON",
+  invalidId: "INVALID_APPOINTMENT_ID",
+  validationFailed: "VALIDATION_FAILED",
+  salonNotFound: "SALON_NOT_FOUND",
+  appointmentNotFound: "APPOINTMENT_NOT_FOUND",
+  appointmentCancelled: "APPOINTMENT_CANCELLED",
+  servicePriceInvalid: "SERVICE_PRICE_INVALID",
+  commissionRateInvalid: "COMMISSION_RATE_INVALID",
+} as const;
+
+/** 409: cena usługi (podstawowa albo pracownika) nie jest liczbą skończoną. */
+export const SERVICE_PRICE_INVALID_MESSAGE =
+  "Cena usługi jest nieprawidłowa. Popraw cenę usługi i zakończ wizytę ponownie.";
+/** 409: domyślna stawka prowizji pracownika nie jest liczbą skończoną. */
+export const COMMISSION_RATE_INVALID_MESSAGE =
+  "Stawka prowizji pracownika jest nieprawidłowa. Popraw ją w danych pracownika i zakończ wizytę ponownie.";
+
+/**
+ * Prowizja od ceny usługi. Stawka zaokrąglona do 2 miejsc (precyzja kolumny
+ * `percentage`) PRZED liczeniem kwoty, więc kwota zgadza się z zapisaną stawką.
+ * Liczenie w groszach i setnych procenta na liczbach całkowitych; kwota
+ * zaokrąglona do pełnego grosza. Wejście musi być liczbą skończoną.
+ */
+export function commissionFor(price: number, ratePercent: number): { amount: string; percentage: string } {
+  const rateHundredths = Math.round(ratePercent * 100);
+  const priceCents = Math.round(price * 100);
+  const amountCents = Math.round((priceCents * rateHundredths) / 10_000);
+  return {
+    amount: (amountCents / 100).toFixed(2),
+    percentage: (rateHundredths / 100).toFixed(2),
+  };
+}
+
 /** Bieżące wartości wizyty, z którymi porównujemy pola z PUT. */
 export interface CompletedAppointmentCurrent {
   startTime: Date | string;

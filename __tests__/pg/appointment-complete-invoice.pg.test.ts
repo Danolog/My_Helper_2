@@ -220,7 +220,7 @@ suite("complete i invoice wizyty pod rolą aplikacji — prawdziwy Postgres (#19
       const res = await parseResponse(await complete(appt, { notes: "it-a3 salon B" }));
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ success: false, error: "Appointment not found" });
+      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Appointment not found" });
       expect(await statusOf(appt)).toBe("scheduled");
       expect(await productQty(ids.productA)).toBe(qtyBefore);
       const db = h!.db;

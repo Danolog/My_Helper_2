@@ -330,7 +330,10 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
       const res = await parseResponse(await complete(apptB, { paidAmount: "50.00", paymentMethod: "cash" }));
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ success: false, error: "Appointment not found" });
+      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Appointment not found" });
+      // Cudza wizyta i nieistniejąca: ta sama odpowiedź, bez śladu istnienia wizyty B.
+      const missing = await parseResponse(await complete(randomUUID(), { paidAmount: "50.00", paymentMethod: "cash" }));
+      expect({ status: missing.status, body: missing.body }).toEqual({ status: res.status, body: res.body });
       expect(await rowOf(apptB)).toEqual({ status: "scheduled", paidAmount: null, paymentMethod: null });
       expect(await h!.db.select().from(treatmentHistory).where(eq(treatmentHistory.appointmentId, apptB))).toHaveLength(0);
     });
