@@ -32,6 +32,24 @@ describe("hasNoShowDayArrived", () => {
     expect(hasNoShowDayArrived(start, NOW)).toBe(expected);
   });
 
+  describe("granica dnia w Warszawie: wizyta 28.11 o 00:30 (27.11 23:30 UTC)", () => {
+    const START = "2026-11-27T23:30:00.000Z";
+
+    it("27.11 23:59:59 w Warszawie (ten sam dzień w UTC co wizyta) → jeszcze nie", () => {
+      expect(hasNoShowDayArrived(START, new Date("2026-11-27T22:59:59.999Z"))).toBe(false);
+    });
+
+    it("27.11 23:40 UTC to już 28.11 w Warszawie, po godzinie wizyty → tak", () => {
+      expect(hasNoShowDayArrived(START, new Date("2026-11-27T23:40:00.000Z"))).toBe(true);
+    });
+
+    it("28.11 00:00 w Warszawie, przed godziną wizyty → tak (cały dzień, bez godziny)", () => {
+      const midnight = new Date("2026-11-27T23:00:00.000Z");
+      expect(hasNoShowDayArrived(START, midnight)).toBe(true);
+      expect(canMarkNoShow({ role: "owner", status: "scheduled", startTime: START }, midnight)).toBe(true);
+    });
+  });
+
   it("niepoprawna data → false", () => {
     expect(hasNoShowDayArrived("nie-data", NOW)).toBe(false);
   });
