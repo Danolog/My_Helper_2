@@ -3,6 +3,7 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
+import { NO_SHOW_STATUS } from "@/lib/no-show";
 import { refundAppointmentDeposits, selectSucceededDepositsInTx } from "@/lib/refund";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { appointments } from "@/lib/schema";
@@ -16,10 +17,24 @@ import { notifyWaitingList } from "@/lib/waiting-list";
 // Salon nigdy nie pochodzi z żądania. Skutki uboczne (zwrot, zatrzymanie
 // zadatku, lista oczekujących) dopiero po zapisie, który zwrócił wiersz.
 
-/** Stany, z których klient nie anuluje wizyty (sprawdzane też w samym zapisie). */
-const FINAL_STATUSES = ["cancelled", "completed"];
+/**
+ * Stany, z których klient nie anuluje wizyty (sprawdzane też w samym zapisie).
+ * `no_show`: anulowanie wyzerowałoby nieobecność na karcie klienta — zmienia
+ * ją tylko salon na trasie oznaczenia „Nie przyszedł”.
+ */
+const FINAL_STATUSES = ["cancelled", "completed", NO_SHOW_STATUS];
 
 const NOT_FOUND = { success: false, error: "Appointment not found" } as const;
+
+/**
+ * Wizyta oznaczona przez salon jako nieobecność. Komunikat celowo nie mówi
+ * o oznaczeniu — klient dostaje tę samą informację co przy innym stanie,
+ * którego nie zmieni sam.
+ */
+const NOT_CANCELLABLE = {
+  success: false,
+  error: "Tej wizyty nie można już anulować. Skontaktuj się z salonem.",
+} as const;
 
 /**
  * Wpłacony zadatek bez płatności `succeeded` w MyHelper (np. BLIK na telefon
@@ -75,6 +90,10 @@ export async function GET(
         { success: false, error: "Nie mozna anulowac zakonczonej wizyty" },
         { status: 400 }
       );
+    }
+
+    if (appointment.status === NO_SHOW_STATUS) {
+      return NextResponse.json(NOT_CANCELLABLE, { status: 400 });
     }
 
     // Calculate time difference for cancellation policy
@@ -175,6 +194,13 @@ export async function POST(
         { success: false, error: "Nie mozna anulowac zakonczonej wizyty" },
         { status: 400 }
       );
+    }
+
+    // Oznaczenie „Nie przyszedł” może zapaść rano w dniu wizyty, więc wizyta
+    // bywa jeszcze w przyszłości. Ten sam stan wyklucza też warunek w UPDATE
+    // (FINAL_STATUSES), gdyby oznaczenie weszło po tym odczycie.
+    if (appointment.status === NO_SHOW_STATUS) {
+      return NextResponse.json(NOT_CANCELLABLE, { status: 400 });
     }
 
     // Check if appointment is in the past
