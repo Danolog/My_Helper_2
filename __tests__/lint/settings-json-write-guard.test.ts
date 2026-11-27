@@ -32,6 +32,7 @@ const EXPECTED_WRITES: Record<string, number> = {
   "src/app/api/salons/[id]/birthday-settings/route.ts": 1,
   "src/app/api/salons/[id]/loyalty-settings/route.ts": 1,
   "src/app/api/salons/[id]/modules/route.ts": 1,
+  "src/app/api/salons/[id]/no-show-settings/route.ts": 1,
   "src/app/api/salons/[id]/notification-type-settings/route.ts": 1,
   "src/app/api/salons/[id]/we-miss-you-settings/route.ts": 1,
 };
@@ -43,7 +44,7 @@ const EXPECTED_WRITES: Record<string, number> = {
  */
 const ALLOWED_EXCEPTIONS: Record<string, string> = {};
 
-const EXPECTED_TOTAL = 6;
+const EXPECTED_TOTAL = 7;
 
 interface Write {
   file: string;

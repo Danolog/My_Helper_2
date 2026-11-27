@@ -12,6 +12,7 @@ import {
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { appointments } from "@/lib/schema";
+import { applyNoShowAutoBlock, type NoShowAutoBlockOutcome } from "@/lib/server/client-auto-block";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
@@ -33,13 +34,21 @@ import { isValidUuid } from "@/lib/validations";
  *
  * Ślad audytu: log `info` z salonId, appointmentId, userId, rolą i nowym
  * statusem — bez danych klienta.
+ *
+ * Automatyczna blokada rezerwacji online: po nowym oznaczeniu (POST z zapisem)
+ * w tej samej transakcji `applyNoShowAutoBlock` — gdy licznik karty klienta
+ * dojdzie do progu salonu, karta dostaje blokadę `blocked_by = 'auto'`
+ * (osobny log `info`). Odpowiedź trasy się nie zmienia. Kolejność blokad
+ * wierszy: wizyta, potem karta klienta. Usuwanie karty bierze je odwrotnie
+ * (karta, potem wizyty); zakleszczenie rozstrzyga baza (40P01) i jedna
+ * z transakcji się wycofuje (tu: 500, nic nie zapisane).
  */
 
 type NoShowOutcome =
   | { kind: "not_found" }
   | { kind: "wrong_status" }
   | { kind: "too_early" }
-  | { kind: "ok"; changed: boolean };
+  | { kind: "ok"; changed: boolean; autoBlock: { clientId: string; result: NoShowAutoBlockOutcome } | null };
 
 const WRONG_STATUS_MESSAGE: Record<"POST" | "DELETE", string> = {
   POST: "„Nie przyszedł” można oznaczyć tylko przy wizycie zaplanowanej lub potwierdzonej",
@@ -94,6 +103,7 @@ async function changeNoShow(
           id: appointments.id,
           status: appointments.status,
           startTime: appointments.startTime,
+          clientId: appointments.clientId,
         })
         .from(appointments)
         .where(and(eq(appointments.id, id), eq(appointments.salonId, scopedSalonId)))
@@ -103,12 +113,14 @@ async function changeNoShow(
 
       if (markAsNoShow) {
         // Idempotencja: powtórne kliknięcie nie zapisuje i nie zmienia updatedAt.
-        if (appointment.status === NO_SHOW_STATUS) return { kind: "ok", changed: false };
+        if (appointment.status === NO_SHOW_STATUS) return { kind: "ok", changed: false, autoBlock: null };
         if (!NO_SHOW_MARKABLE_STATUSES.includes(appointment.status)) return { kind: "wrong_status" };
         if (!hasNoShowDayArrived(appointment.startTime)) return { kind: "too_early" };
       } else {
         // Cofnięcie już cofniętego (wizyta znów zaplanowana/potwierdzona) — bez zapisu.
-        if (NO_SHOW_MARKABLE_STATUSES.includes(appointment.status)) return { kind: "ok", changed: false };
+        if (NO_SHOW_MARKABLE_STATUSES.includes(appointment.status)) {
+          return { kind: "ok", changed: false, autoBlock: null };
+        }
         if (appointment.status !== NO_SHOW_STATUS) return { kind: "wrong_status" };
       }
 
@@ -116,7 +128,17 @@ async function changeNoShow(
         .update(appointments)
         .set({ status: targetStatus, updatedAt: new Date() })
         .where(and(eq(appointments.id, id), eq(appointments.salonId, scopedSalonId)));
-      return { kind: "ok", changed: true };
+
+      // Próg automatycznej blokady rezerwacji online — w tej samej transakcji,
+      // więc blokada i oznaczenie zapisują się razem albo wcale. Tylko przy
+      // nowym oznaczeniu wizyty z kartą klienta (gość bez karty nie ma czego
+      // blokować). Cofnięcie (DELETE) blokady nie zdejmuje.
+      const clientId = appointment.clientId;
+      const autoBlock =
+        markAsNoShow && clientId
+          ? { clientId, result: await applyNoShowAutoBlock(tx, scopedSalonId, clientId) }
+          : null;
+      return { kind: "ok", changed: true, autoBlock };
     });
 
     switch (outcome.kind) {
@@ -144,6 +166,16 @@ async function changeNoShow(
       noShow: markAsNoShow,
       changed: outcome.changed,
     });
+    if (outcome.autoBlock?.result.kind === "blocked") {
+      // Bez danych klienta: id karty, próg i licznik wystarczą do śladu.
+      logger.info("[AppointmentNoShow API] Online booking auto-blocked", {
+        salonId: scopedSalonId,
+        appointmentId: id,
+        clientId: outcome.autoBlock.clientId,
+        threshold: outcome.autoBlock.result.threshold,
+        noShowCount: outcome.autoBlock.result.noShowCount,
+      });
+    }
 
     return NextResponse.json({
       success: true,

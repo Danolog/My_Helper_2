@@ -259,11 +259,11 @@ describe("zakres salonu i blokada wiersza", () => {
     expect(h.forUpdate).toEqual(["update"]);
   });
 
-  it("odczyt z jawną listą kolumn — bez danych klienta", async () => {
+  it("odczyt z jawną listą kolumn — bez danych klienta (samo id karty do progu blokady)", async () => {
     m.asOwnerOf(SALON_A);
     givenAppointment();
     expect((await call(POST)).status).toBe(200);
-    expect(Object.keys(h.selectColumns[0] ?? {}).sort()).toEqual(["id", "startTime", "status"]);
+    expect(Object.keys(h.selectColumns[0] ?? {}).sort()).toEqual(["clientId", "id", "startTime", "status"]);
   });
 });
 

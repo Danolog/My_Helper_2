@@ -12,6 +12,7 @@ import {
   isValidPushEndpoint,
 } from "@/lib/push-subscription";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
+import { CLIENT_BLOCK_NOTE_MAX_LENGTH } from "@/lib/client-block";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 import { salonSlugProblem, salonSlugProblemMessage } from "@/lib/salon-slug";
@@ -782,6 +783,35 @@ export const weMissYouSettingsSchema = z.object({
   includeBookingLink: z.boolean().optional(),
   autoSend: z.boolean().optional(),
 });
+
+/**
+ * Próg automatycznej blokady rezerwacji online: liczba nieobecności (1–3)
+ * albo null (wyłączona). Strict: literówka w kluczu to 400, a nie cichy zapis.
+ */
+export const noShowSettingsSchema = z
+  .object({
+    // Lista jak NO_SHOW_AUTO_BLOCK_THRESHOLDS w src/lib/client-block.ts
+    // (test schematu pilnuje zgodności).
+    noShowAutoBlockThreshold: z.union([z.null(), z.literal(1), z.literal(2), z.literal(3)], {
+      message: "Próg musi być pusty albo równy 1, 2 lub 3",
+    }),
+  })
+  .strict();
+
+/**
+ * Notatka do ręcznej blokady rezerwacji online (opcjonalna). Same spacje
+ * i pusty tekst = brak notatki. Ciało żądania może być puste (`{}`).
+ */
+export const clientBlockSchema = z
+  .object({
+    note: absentAsUndefined(
+      z
+        .string()
+        .trim()
+        .max(CLIENT_BLOCK_NOTE_MAX_LENGTH, `Notatka może mieć maks. ${CLIENT_BLOCK_NOTE_MAX_LENGTH} znaków`)
+    ),
+  })
+  .strict();
 
 // ==========================================
 // Service Sub-resource Schemas
