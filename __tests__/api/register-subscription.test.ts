@@ -545,11 +545,12 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
     expect(status).toBe(200);
     expect(opLog).toEqual([
       "select:subscriptionPlans",
+      // Wolny adres `/s/<slug>` z wyjścia systemowego PRZED otwarciem transakcji:
+      // wyjście bierze własne połączenie z puli, transakcja nie trzyma dwóch naraz.
+      "pick:slug:salon-anna",
       "tx:start",
       "lock_timeout",
       "select:salons",
-      // Wolny adres `/s/<slug>` z wyjścia systemowego przed zapisem nowego salonu.
-      "pick:slug:salon-anna",
       "insert:salons",
       // Adres bieżący w rejestrze adresów (klucz główny slug), ta sama transakcja.
       "insert:salonSlugHistory",
@@ -664,25 +665,37 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ slug: "salon-anna-3" }));
   });
 
-  it("istniejący salon konta: bez wyboru adresu i bez zmiany sluga", async () => {
+  it("istniejący salon konta: adres wybrany przed transakcją zostaje niewykorzystany, slug bez zmian", async () => {
     tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
 
     const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
-    expect(mockPickFreeSalonSlug).not.toHaveBeenCalled();
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(1);
     expect(mockInsertValues).not.toHaveBeenCalledWith(expect.objectContaining({ slug: expect.anything() }));
+    expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 
-  it("błąd wyjścia systemowego przy wyborze adresu → 500, transakcja wycofana, bez zapisu salonu", async () => {
+  it("wybór adresu przed otwarciem transakcji (bez drugiego połączenia z puli w otwartej transakcji)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(opLog.indexOf("pick:slug:salon-anna")).toBeGreaterThanOrEqual(0);
+    expect(opLog.indexOf("pick:slug:salon-anna")).toBeLessThan(opLog.indexOf("tx:start"));
+    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(1);
+  });
+
+  it("błąd wyjścia systemowego przy wyborze adresu → 500, transakcja nieotwarta, bez zapisu salonu", async () => {
     tableRows = { subscriptionPlans: [PLAN_BASIC] };
     mockPickFreeSalonSlug.mockRejectedValueOnce(new Error("db down"));
 
     const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(500);
-    expect(opLog).toContain("rollback");
-    expect(mockInsert).not.toHaveBeenCalledWith("salons");
+    expect(opLog).not.toContain("tx:start");
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it("równoległa rejestracja zajęła adres (23505 na salons_slug_uq) → cała transakcja od nowa, 200", async () => {
@@ -695,11 +708,11 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
-    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(2);
-    // Każda próba wybiera adres od nowa (stan zajętości po równoległym zapisie).
+    // Każda próba: najpierw wybór adresu od nowa (stan zajętości po równoległym
+    // zapisie) poza transakcją, potem jedna nowa transakcja.
     expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(2);
-    expect(opLog).toContain("rollback");
-    expect(opLog.at(-1)).toBe("commit");
+    expect(opLog.filter((op) => op === "pick:slug:salon-anna" || op === "tx:start" || op === "rollback" || op === "commit"))
+      .toEqual(["pick:slug:salon-anna", "tx:start", "rollback", "pick:slug:salon-anna", "tx:start", "commit"]);
   });
 
   it("nowy salon zapisuje adres bieżący w rejestrze adresów (slug, salonId, bez retiredAt)", async () => {
@@ -730,9 +743,9 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
-    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(2);
     expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(2);
-    expect(opLog.at(-1)).toBe("commit");
+    expect(opLog.filter((op) => op === "pick:slug:salon-anna" || op === "tx:start" || op === "rollback" || op === "commit"))
+      .toEqual(["pick:slug:salon-anna", "tx:start", "rollback", "pick:slug:salon-anna", "tx:start", "commit"]);
   });
 
   it("konflikt adresu w każdej próbie → 503 LOCK_BUSY (nie 409 „salon ma subskrypcję”)", async () => {
@@ -757,6 +770,16 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     expect(status).toBe(503);
     expect(body.code).toBe("LOCK_BUSY");
     expect(opLog.filter((op) => op === "tx:start")).toHaveLength(3);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(3);
+    // Limit 3 prób: każda z wyborem adresu przed własną transakcją.
+    expect(opLog.filter((op) => op.startsWith("pick:slug:") || op === "tx:start")).toEqual([
+      "pick:slug:salon-anna",
+      "tx:start",
+      "pick:slug:salon-anna",
+      "tx:start",
+      "pick:slug:salon-anna",
+      "tx:start",
+    ]);
     expect(opLog.at(-1)).toBe("rollback");
   });
 });
@@ -842,10 +865,10 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
     expect(status).toBe(200);
     expect(opLog).toEqual([
       "select:subscriptionPlans",
+      "pick:slug:salon-anna",
       "tx:start",
       "lock_timeout",
       "select:salons",
-      "pick:slug:salon-anna",
       "insert:salons",
       "insert:salonSlugHistory",
       `lock:salon:${SALON_A}`,
@@ -870,6 +893,9 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
     expect(status).toBe(200);
     expect(opLog).toEqual([
       "select:subscriptionPlans",
+      // Adres wybierany przed transakcją, zanim wiadomo, czy konto ma salon;
+      // dla istniejącego salonu zostaje niewykorzystany.
+      "pick:slug:salon-anna",
       "tx:start",
       "lock_timeout",
       "select:salons",

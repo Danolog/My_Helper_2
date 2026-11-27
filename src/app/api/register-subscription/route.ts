@@ -154,77 +154,83 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const name = `Salon ${account.name || "Nowy"}`;
     let result: { exists: true } | { salonId: string; subscription: SubscriptionRow };
     try {
-      result = await withSlugConflictRetry(() => db.transaction(async (tx) => {
-        await setSubscriptionLockTimeout(tx);
+      result = await withSlugConflictRetry(async () => {
+        // Krótki adres `/s/<slug>` z nazwy: pierwszy wolny z `base`, `base-2`…
+        // Zajęte adresy należą do innych salonów, więc czyta je wyjście
+        // systemowe (tylko kolumna slug). Wybór PRZED otwarciem transakcji:
+        // wyjście bierze własne połączenie z tej samej puli, a wołane w otwartej
+        // transakcji trzymałoby dwa naraz — kilka równoległych rejestracji
+        // mogłoby zająć całą pulę i czekać na siebie nawzajem. Wynik nie jest
+        // rezerwacją: wyścig o ten sam adres kończy się 23505 na salons_slug_uq
+        // albo salon_slug_history_pkey, a ponowienie wybiera adres od nowa.
+        // Dla istniejącego salonu konta adres zostaje niewykorzystany.
+        const slug = await pickFreeSalonSlug(slugFromSalonName(name));
+        return db.transaction(async (tx) => {
+          await setSubscriptionLockTimeout(tx);
 
-        // Salon konta z sesji (jeden na konto — salons_owner_id_uq).
-        const [salon] = await tx
-          .select({ id: salons.id })
-          .from(salons)
-          .where(eq(salons.ownerId, account.id))
-          .limit(1);
+          // Salon konta z sesji (jeden na konto — salons_owner_id_uq).
+          const [salon] = await tx
+            .select({ id: salons.id })
+            .from(salons)
+            .where(eq(salons.ownerId, account.id))
+            .limit(1);
 
-        let salonId = salon?.id;
-        if (!salonId) {
-          const name = `Salon ${account.name || "Nowy"}`;
-          // Krótki adres `/s/<slug>` z nazwy: pierwszy wolny z `base`, `base-2`…
-          // Zajęte adresy należą do innych salonów, więc czyta je wyjście
-          // systemowe (tylko kolumna slug). Wyścig dwóch rejestracji o ten sam
-          // adres kończy się 23505 na salons_slug_uq — wtedy cała transakcja jest
-          // ponawiana niżej i adres wybierany od nowa.
-          const slug = await pickFreeSalonSlug(slugFromSalonName(name));
-          const [newSalon] = await tx
-            .insert(salons)
+          let salonId = salon?.id;
+          if (!salonId) {
+            const [newSalon] = await tx
+              .insert(salons)
+              .values({
+                name,
+                email: account.email,
+                ownerId: account.id,
+                slug,
+              })
+              .returning({ id: salons.id });
+            if (!newSalon) throw new Error("Register subscription: salon insert returned no row");
+            salonId = newSalon.id;
+            // Adres bieżący w rejestrze adresów: klucz główny `slug` odrzuca adres,
+            // który inny salon ma albo miał (także porzucony równolegle po
+            // wyborze wyżej) — 23505 i ponowienie jak przy salons_slug_uq. Zapis
+            // w tej samej transakcji co salon (surowe tx jak reszta transakcji).
+            await tx.insert(salonSlugHistory).values({ slug, salonId });
+          }
+
+          await lockSalonSubscriptions(tx, salonId);
+
+          // Dowolny wiersz (także canceled) = bez drugiego triala.
+          const [existingSub] = await tx
+            .select({ id: salonSubscriptions.id })
+            .from(salonSubscriptions)
+            .where(eq(salonSubscriptions.salonId, salonId))
+            .limit(1);
+          if (existingSub) return { exists: true } as const;
+
+          const trialEnd = new Date();
+          trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
+
+          const [subscription] = await tx
+            .insert(salonSubscriptions)
             .values({
-              name,
-              email: account.email,
-              ownerId: account.id,
-              slug,
+              salonId,
+              planId: plan.id,
+              status: "trialing",
+              trialEndsAt: trialEnd,
+              currentPeriodStart: new Date(),
+              currentPeriodEnd: trialEnd,
             })
-            .returning({ id: salons.id });
-          if (!newSalon) throw new Error("Register subscription: salon insert returned no row");
-          salonId = newSalon.id;
-          // Adres bieżący w rejestrze adresów: klucz główny `slug` odrzuca adres,
-          // który inny salon ma albo miał (także porzucony równolegle po
-          // odczycie wyżej) — 23505 i ponowienie jak przy salons_slug_uq. Zapis
-          // w tej samej transakcji co salon (surowe tx jak reszta transakcji).
-          await tx.insert(salonSlugHistory).values({ slug, salonId });
-        }
+            .returning();
+          if (!subscription) throw new Error("Register subscription: subscription insert returned no row");
 
-        await lockSalonSubscriptions(tx, salonId);
-
-        // Dowolny wiersz (także canceled) = bez drugiego triala.
-        const [existingSub] = await tx
-          .select({ id: salonSubscriptions.id })
-          .from(salonSubscriptions)
-          .where(eq(salonSubscriptions.salonId, salonId))
-          .limit(1);
-        if (existingSub) return { exists: true } as const;
-
-        const trialEnd = new Date();
-        trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
-
-        const [subscription] = await tx
-          .insert(salonSubscriptions)
-          .values({
-            salonId,
-            planId: plan.id,
-            status: "trialing",
-            trialEndsAt: trialEnd,
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: trialEnd,
-          })
-          .returning();
-        if (!subscription) throw new Error("Register subscription: subscription insert returned no row");
-
-        // Dowód akceptacji w tej samej transakcji co salon i trial: błąd zapisu cofa całość.
-        if (legal.acceptance) {
-          await recordLegalAcceptances(tx, { salonId, userId: account.id, acceptance: legal.acceptance });
-        }
-        return { salonId, subscription };
-      }));
+          // Dowód akceptacji w tej samej transakcji co salon i trial: błąd zapisu cofa całość.
+          if (legal.acceptance) {
+            await recordLegalAcceptances(tx, { salonId, userId: account.id, acceptance: legal.acceptance });
+          }
+          return { salonId, subscription };
+        });
+      });
     } catch (error) {
       // Adres salonu wciąż zajmowany równolegle po wszystkich próbach — jak
       // blokada: nic nie zapisano, klient może ponowić.
