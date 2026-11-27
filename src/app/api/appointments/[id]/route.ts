@@ -11,6 +11,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { recordDepositStatusEvent, type DepositStatusEventActor } from "@/lib/deposit-status-events";
 import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } from "@/lib/features";
 import { logger } from "@/lib/logger";
+import { NO_SHOW_DEDICATED_ROUTE_CODE, NO_SHOW_STATUS } from "@/lib/no-show";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
 import {
   buildSalonCancellationSms,
@@ -187,6 +188,23 @@ export async function PUT(
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
+      );
+    }
+
+    // „Nie przyszedł” zmienia wyłącznie /api/appointments/[id]/no-show (rola
+    // właściciel/recepcja, dzień wizyty). Inaczej pracownik oznaczałby tu własną
+    // wizytę, a licznik nieobecności klienta zależałby od dwóch tras.
+    if (
+      status === NO_SHOW_STATUS ||
+      (existing.status === NO_SHOW_STATUS && status != null)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: NO_SHOW_DEDICATED_ROUTE_CODE,
+          error: "Oznaczenie „Nie przyszedł” zmienisz przyciskiem w szczegółach wizyty",
+        },
+        { status: 400 }
       );
     }
 
@@ -422,6 +440,19 @@ export async function DELETE(
     if (appointment.status === "cancelled") {
       return NextResponse.json(
         { success: false, error: "Wizyta jest juz anulowana" },
+        { status: 400 }
+      );
+    }
+
+    // Anulowanie po fakcie zatarłoby nieobecność klienta (licznik na karcie).
+    // Pomyłkę cofa się na trasie „Nie przyszedł”, potem można anulować.
+    if (appointment.status === NO_SHOW_STATUS) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: NO_SHOW_DEDICATED_ROUTE_CODE,
+          error: "Najpierw cofnij oznaczenie „Nie przyszedł” w szczegółach wizyty",
+        },
         { status: 400 }
       );
     }
