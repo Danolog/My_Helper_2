@@ -29,6 +29,11 @@ const h = vi.hoisted(() => ({
   set: vi.fn(),
   updated: [] as Record<string, unknown>[],
   cancelInTx: vi.fn(),
+  buildSms: vi.fn(),
+  expireSessions: vi.fn(),
+  notifyWaitingList: vi.fn(),
+  /** Atrapa błędu z `cancelAppointmentInTx`: wizyta `no_show` po blokadzie wiersza. */
+  NoShowError: class AppointmentMarkedNoShowError extends Error {},
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -69,11 +74,12 @@ vi.mock("@/lib/server/repository", () => {
 vi.mock("@/lib/deposit-status-events", () => ({ recordDepositStatusEvent: vi.fn() }));
 vi.mock("@/lib/refund", () => ({ refundAppointmentDeposits: vi.fn() }));
 vi.mock("@/lib/salon-cancellation", () => ({
-  buildSalonCancellationSms: vi.fn(),
+  AppointmentMarkedNoShowError: h.NoShowError,
+  buildSalonCancellationSms: (...a: unknown[]) => h.buildSms(...a),
   cancelAppointmentInTx: (...a: unknown[]) => h.cancelInTx(...a),
-  expireCheckoutSessions: vi.fn(),
+  expireCheckoutSessions: (...a: unknown[]) => h.expireSessions(...a),
 }));
-vi.mock("@/lib/waiting-list", () => ({ notifyWaitingList: vi.fn() }));
+vi.mock("@/lib/waiting-list", () => ({ notifyWaitingList: (...a: unknown[]) => h.notifyWaitingList(...a) }));
 vi.mock("@/lib/logger", () => ({ logger: h.logger }));
 
 import { DELETE, PUT } from "@/app/api/appointments/[id]/route";
@@ -202,5 +208,47 @@ describe("DELETE /api/appointments/[id] — anulowanie wizyty oznaczonej", () =>
     expect(body.code).toBe(NO_SHOW_DEDICATED_ROUTE_CODE);
     expect(body.error).toMatch(/Najpierw cofnij/);
     expect(h.cancelInTx).not.toHaveBeenCalled();
+  });
+
+  it("oznaczenie weszło po odczycie (no_show po blokadzie wiersza) → ten sam 400, bez skutków anulowania", async () => {
+    h.selectRows = [
+      {
+        appointment: makeAppointment({ id: APPOINTMENT, salonId: SALON, employeeId: EMPLOYEE, status: "scheduled" }),
+        client: null,
+        employee: null,
+        service: null,
+      },
+    ];
+    h.cancelInTx.mockRejectedValue(new h.NoShowError());
+
+    const { status, body } = await parseResponse<Err>(await del());
+
+    expect(status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      code: NO_SHOW_DEDICATED_ROUTE_CODE,
+      error: "Najpierw cofnij oznaczenie „Nie przyszedł” w szczegółach wizyty",
+    });
+    expect(h.cancelInTx).toHaveBeenCalledWith(expect.anything(), SALON, APPOINTMENT);
+    expect(h.expireSessions).not.toHaveBeenCalled();
+    expect(h.buildSms).not.toHaveBeenCalled();
+    expect(h.notifyWaitingList).not.toHaveBeenCalled();
+    expect(h.logger.error).not.toHaveBeenCalled();
+  });
+
+  it("kontrola: inny błąd transakcji anulowania → 500", async () => {
+    h.selectRows = [
+      {
+        appointment: makeAppointment({ id: APPOINTMENT, salonId: SALON, employeeId: EMPLOYEE, status: "scheduled" }),
+        client: null,
+        employee: null,
+        service: null,
+      },
+    ];
+    h.cancelInTx.mockRejectedValue(new Error("db down"));
+
+    const res = await del();
+
+    expect(res.status).toBe(500);
   });
 });

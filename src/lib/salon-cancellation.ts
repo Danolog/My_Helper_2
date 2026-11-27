@@ -19,6 +19,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { logger } from "@/lib/logger";
+import { NO_SHOW_STATUS } from "@/lib/no-show";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { appointments, depositPayments } from "@/lib/schema";
 import type { DbTx } from "@/lib/server/repository";
@@ -45,6 +46,17 @@ export type SalonCancelTxResult =
     };
 
 /**
+ * Wizyta oznaczona „Nie przyszedł” (stan po blokadzie wiersza). Rzucany
+ * w transakcji, żeby wycofać wszystkie jej zapisy; trasa mapuje go na 400.
+ */
+export class AppointmentMarkedNoShowError extends Error {
+  constructor() {
+    super("Appointment is marked as no-show");
+    this.name = "AppointmentMarkedNoShowError";
+  }
+}
+
+/**
  * Transakcja anulowania. `tx` to klient z kontekstem RLS salonu
  * (`forSalon(salonId).raw`), stąd jawne `eq(salonId)` w każdym warunku.
  *
@@ -52,7 +64,8 @@ export type SalonCancelTxResult =
  * (`pending → failed`) zostaje zatwierdzony. Świadomie — anulowana wizyta
  * nie powinna mieć płatności `pending`; jeśli klient mimo to zapłaci,
  * webhook zapisze wpłatę i ją zwróci (#70). Dla obcej wizyty krok 1 nic
- * nie zmienia (warunek `salonId`).
+ * nie zmienia (warunek `salonId`). Wizyta `no_show` po blokadzie rzuca
+ * `AppointmentMarkedNoShowError` i wycofuje całą transakcję.
  */
 export async function cancelAppointmentInTx(
   tx: Tx,
@@ -78,6 +91,12 @@ export async function cancelAppointmentInTx(
     .for("update");
   if (!current) return { notFound: true };
   if (current.status === "cancelled") return { alreadyCancelled: true };
+  // Trasa DELETE sprawdza `no_show` już na odczycie przed transakcją, ale
+  // oznaczenie mogło wejść między tym odczytem a blokadą. Anulowanie
+  // nadpisałoby nieobecność, więc decyzja zapada ponownie na stanie po blokadzie.
+  // Błąd, a nie wynik: wizyta zostaje, więc krok 1 (`pending → failed`) też
+  // musi zostać wycofany.
+  if (current.status === NO_SHOW_STATUS) throw new AppointmentMarkedNoShowError();
 
   const paidMethods = await tx
     .select({ paymentMethod: depositPayments.paymentMethod })

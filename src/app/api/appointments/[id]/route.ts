@@ -14,6 +14,7 @@ import { logger } from "@/lib/logger";
 import { NO_SHOW_DEDICATED_ROUTE_CODE, NO_SHOW_STATUS } from "@/lib/no-show";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
 import {
+  AppointmentMarkedNoShowError,
   buildSalonCancellationSms,
   cancelAppointmentInTx,
   expireCheckoutSessions,
@@ -48,6 +49,23 @@ function isForeignForEmployee(
 function mayBePositiveDepositAmount(amount: string | null | undefined): boolean {
   if (amount === null || amount === undefined) return false;
   return !(Number(amount) <= 0);
+}
+
+/**
+ * DELETE wizyty oznaczonej „Nie przyszedł”: anulowanie po fakcie zatarłoby
+ * nieobecność klienta (licznik na karcie). Pomyłkę cofa się na trasie
+ * „Nie przyszedł”, potem można anulować. Ta sama odpowiedź przed transakcją
+ * i po blokadzie wiersza.
+ */
+function noShowCancelResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      code: NO_SHOW_DEDICATED_ROUTE_CODE,
+      error: "Najpierw cofnij oznaczenie „Nie przyszedł” w szczegółach wizyty",
+    },
+    { status: 400 }
+  );
 }
 
 // GET /api/appointments/[id] - Get a single appointment
@@ -444,17 +462,10 @@ export async function DELETE(
       );
     }
 
-    // Anulowanie po fakcie zatarłoby nieobecność klienta (licznik na karcie).
-    // Pomyłkę cofa się na trasie „Nie przyszedł”, potem można anulować.
+    // Wczesne sprawdzenie; po blokadzie wiersza sprawdza je ponownie
+    // `cancelAppointmentInTx` (oznaczenie wstawione między odczytem a transakcją).
     if (appointment.status === NO_SHOW_STATUS) {
-      return NextResponse.json(
-        {
-          success: false,
-          code: NO_SHOW_DEDICATED_ROUTE_CODE,
-          error: "Najpierw cofnij oznaczenie „Nie przyszedł” w szczegółach wizyty",
-        },
-        { status: 400 }
-      );
+      return noShowCancelResponse();
     }
 
     // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
@@ -607,6 +618,11 @@ export async function DELETE(
       },
     });
   } catch (error) {
+    // Oznaczenie „Nie przyszedł” weszło po wczesnym sprawdzeniu: transakcja
+    // anulowania jest wycofana, bez zwrotu, SMS-a i listy oczekujących.
+    if (error instanceof AppointmentMarkedNoShowError) {
+      return noShowCancelResponse();
+    }
     logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to cancel appointment" },
