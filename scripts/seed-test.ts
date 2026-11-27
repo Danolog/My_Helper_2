@@ -260,13 +260,7 @@ async function seed() {
     })
     .onConflictDoUpdate({
       target: salons.id,
-      set: {
-        name: "Beauty Studio Demo",
-        phone: "+48 000 600 704",
-        ownerId: OWNER_USER_ID,
-        settingsJson: seedModules,
-        slug: SALON_SLUG,
-      },
+      set: { name: "Beauty Studio Demo", phone: "+48 000 600 704", ownerId: OWNER_USER_ID, settingsJson: seedModules, slug: SALON_SLUG },
     });
 
   console.log("[seed-test] Created salon: Beauty Studio Demo");
@@ -594,13 +588,7 @@ async function seed() {
     })
     .onConflictDoUpdate({
       target: salons.id,
-      set: {
-        name: "Salon Po Okresie Probnym",
-        phone: null,
-        address: null,
-        ownerId: TRIAL_EXPIRED_OWNER_USER_ID,
-        slug: TRIAL_EXPIRED_SALON_SLUG,
-      },
+      set: { name: "Salon Po Okresie Probnym", phone: null, address: null, ownerId: TRIAL_EXPIRED_OWNER_USER_ID, slug: TRIAL_EXPIRED_SALON_SLUG },
     });
 
   console.log("[seed-test] Created trial-expired owner + salon");
