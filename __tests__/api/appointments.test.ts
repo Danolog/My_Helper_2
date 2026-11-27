@@ -184,6 +184,8 @@ vi.mock("drizzle-orm", () => ({
   lt: vi.fn((...args: unknown[]) => ({ type: "lt", args })),
   gt: vi.fn((...args: unknown[]) => ({ type: "gt", args })),
   isNotNull: vi.fn((...args: unknown[]) => ({ type: "isNotNull", args })),
+  // PUT: warunek „nie zakończona” w UPDATE zmieniającym coś poza notatkami.
+  ne: vi.fn((...args: unknown[]) => ({ type: "ne", args })),
   // sql`...` (set_config) + sql.raw (SET LOCAL ROLE) — oba używa forSalon.
   sql: Object.assign(
     vi.fn((...args: unknown[]) => ({ type: "sql", args })),

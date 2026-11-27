@@ -113,13 +113,13 @@ export function ClientHistoryTab({ clientId }: ClientHistoryTabProps) {
       const data = await res.json();
       if (data.success) {
         toast.success("Karta zabiegu zostala zapisana");
-        // Update the visit history with the new treatment data
+        // Zapis karty zabiegu nie zamyka wizyty: status zostaje taki, jak w bazie.
+        // Zakonczenie wizyty idzie wylacznie przez osobna akcje "Zakoncz wizyte".
         setVisitHistory((prev) =>
           prev.map((apt) =>
             apt.id === appointmentId
               ? {
                   ...apt,
-                  status: apt.status === "scheduled" || apt.status === "confirmed" ? "completed" : apt.status,
                   treatment: {
                     id: data.data.id,
                     recipe: data.data.recipe,

@@ -77,6 +77,14 @@ const ROLLBACK_SEEN_CODE = "XT001";
 const ROLLBACK_UNSEEN_CODE = "XT002";
 let slot = 0;
 
+/** DDL w krótkiej transakcji z `lock_timeout`: bez czekania w nieskończoność na blokadę tabeli. */
+async function ddl(statements: string[]) {
+  await h!.db.transaction(async (tx) => {
+    await tx.execute(sql.raw("set local lock_timeout = '5s'"));
+    for (const s of statements) await tx.execute(sql.raw(s));
+  });
+}
+
 /** Wizyta salonu (rola migracji); każda w osobnym terminie. */
 async function appointment(salon: "A" | "B"): Promise<string> {
   const start = new Date(Date.UTC(2097, 4, 1, 8) + slot++ * 3_600_000);
@@ -176,8 +184,8 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
     // Inne wizyty, także z równoległych testów, nie są dotknięte.
     ids.rollbackAppt = await appointment("A");
     if (!/^[0-9a-f-]{36}$/.test(ids.rollbackAppt)) throw new Error("nieoczekiwany format id wizyty");
-    await db.execute(
-      sql.raw(`
+    await ddl([
+      `
         create function ${ROLLBACK_FN}() returns trigger language plpgsql as $fn$
         begin
           if new.appointment_id = '${ids.rollbackAppt}'::uuid then
@@ -195,21 +203,24 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
           return new;
         end
         $fn$
-      `)
-    );
-    await db.execute(
-      sql.raw(
-        `create trigger ${ROLLBACK_TRIGGER} before insert on public.employee_commissions ` +
-          `for each row execute function ${ROLLBACK_FN}()`
-      )
-    );
+      `,
+      `create trigger ${ROLLBACK_TRIGGER} before insert on public.employee_commissions ` +
+        `for each row execute function ${ROLLBACK_FN}()`,
+    ]);
   });
 
   afterAll(async () => {
     if (!h) return;
     try {
-      await h.db.execute(sql.raw(`drop trigger if exists ${ROLLBACK_TRIGGER} on public.employee_commissions`));
-      await h.db.execute(sql.raw(`drop function if exists ${ROLLBACK_FN}()`));
+      // Sprzątanie triggera osobno: jego błąd nie może zostawić danych testu.
+      try {
+        await ddl([
+          `drop trigger if exists ${ROLLBACK_TRIGGER} on public.employee_commissions`,
+          `drop function if exists ${ROLLBACK_FN}()`,
+        ]);
+      } catch (e) {
+        mocks.warn("trigger cleanup failed", e);
+      }
       for (const s of [ids.salonA, ids.salonB]) if (s) await h.db.delete(salons).where(eq(salons.id, s));
       await h.db.delete(user).where(inArray(user.id, [OWNER_A, OWNER_B]));
     } finally {

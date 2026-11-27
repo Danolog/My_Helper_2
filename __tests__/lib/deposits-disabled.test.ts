@@ -124,4 +124,15 @@ describe("zadatek wyłączony — każdy egzekutor pyta flagę", () => {
     expect(gateBlock).toContain("code: DEPOSITS_DISABLED_CODE");
     expect(gateBlock).toMatch(/DEPOSITS_DISABLED_MESSAGE\s*\},\s*\{\s*status:\s*409\s*\}/);
   });
+
+  it("PUT /api/appointments/[id]: zapis przed bramką (wizyta zakończona) zmienia tylko notatki, nie zadatek", () => {
+    const code = source(APPOINTMENT_ID_ROUTE);
+    const helper = code.slice(
+      code.indexOf("async function updateCompletedNotes"),
+      code.indexOf("export async function GET")
+    );
+    expect(helper).toContain(".update(appointments)");
+    expect(helper).toMatch(/\.set\(\{ notes \}\)/);
+    expect(helper).not.toContain("deposit");
+  });
 });

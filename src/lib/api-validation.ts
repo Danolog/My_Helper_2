@@ -457,6 +457,26 @@ const paidAmountField = z
   });
 
 /**
+ * Prowizja przy zakończeniu wizyty: liczba skończona od 0 do 100, wynik jako
+ * number. Tekst nie-liczbowy („abc”), pusty, NaN i Infinity dają 400 —
+ * bez tego `parseFloat` dawał NaN, a kolumna `numeric(5,2)` przyjmuje 'NaN'
+ * (zapis z 200), wartość ponad 100 przepełniała kolumnę (500), a ujemna
+ * zapisywała się z 200.
+ */
+const COMMISSION_PERCENTAGE_MESSAGE = "Prowizja musi byc liczba od 0 do 100";
+const commissionPercentageField = z
+  .union([z.string(), z.number()], { message: COMMISSION_PERCENTAGE_MESSAGE })
+  .transform((val, ctx) => {
+    const num =
+      typeof val === "number" ? val : val.trim() === "" ? Number.NaN : Number(val.trim());
+    if (!Number.isFinite(num) || num < 0 || num > 100) {
+      ctx.addIssue({ code: "custom", message: COMMISSION_PERCENTAGE_MESSAGE });
+      return z.NEVER;
+    }
+    return num;
+  });
+
+/**
  * Schema for POST /api/appointments/[id]/complete — complete an appointment.
  *
  * `paidAmount` i `paymentMethod` idą parą: oba albo żadne (null = brak).
@@ -468,7 +488,7 @@ export const completeAppointmentSchema = z
     recipe: z.string().nullable().optional(),
     techniques: z.string().nullable().optional(),
     notes: z.string().nullable().optional(),
-    commissionPercentage: z.union([z.string(), z.number()]).nullable().optional(),
+    commissionPercentage: commissionPercentageField.nullable().optional(),
     paidAmount: paidAmountField.nullable().optional(),
     paymentMethod: z
       .enum(APPOINTMENT_PAYMENT_METHODS, {

@@ -18,6 +18,7 @@ import {
   POLISH_MOBILE_PREFIXES,
   loyaltyRedeemSchema,
   invoiceSchema,
+  completeAppointmentSchema,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1144,5 +1145,34 @@ describe("invoiceSchema — kontrakt okna wystawienia dokumentu w panelu", () =>
     const result = validateBody(invoiceSchema, { ...panelReceipt, ...patch });
     expect(result).not.toBeNull();
     expect(result!.details[field]).toBeDefined();
+  });
+});
+
+describe("completeAppointmentSchema — commissionPercentage", () => {
+  it.each([["abc"], ["NaN"], ["Infinity"], [""], ["  "], [Number.NaN], [-50], [-1], [-0.01], [100.01], [1000], ["1000"], [true]])(
+    "%j → błąd z polskim komunikatem",
+    (value) => {
+      const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).toContain("Prowizja musi byc liczba od 0 do 100");
+    }
+  );
+
+  it.each([
+    [0, 0],
+    ["0", 0],
+    [100, 100],
+    ["100", 100],
+    [" 33.5 ", 33.5],
+  ])("%j → liczba %d", (value, expected) => {
+    const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
+    expect(result.success).toBe(true);
+    expect(result.data?.commissionPercentage).toBe(expected);
+  });
+
+  it.each([[null], [undefined]])("%j → bez prowizji z body", (value) => {
+    const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
+    expect(result.success).toBe(true);
+    expect(result.data?.commissionPercentage ?? null).toBeNull();
   });
 });

@@ -206,13 +206,12 @@ describe("PUT /api/appointments/[id] — status `completed` tylko przez /complet
     expectNothingWritten();
   });
 
-  it("wizyta zakończona, status completed → ten sam 400 (bez zapisu)", async () => {
+  it("wizyta zakończona, status completed (bez zmiany) → 200 bez zapisu", async () => {
     givenExisting("completed");
 
-    const { status, body } = await parseResponse<Err>(await put({ status: "completed" }));
+    const { status } = await parseResponse<Err>(await put({ status: "completed" }));
 
-    expect(status).toBe(400);
-    expect(body.code).toBe(COMPLETE_DEDICATED_ROUTE_CODE);
+    expect(status).toBe(200);
     expectNothingWritten();
   });
 
@@ -274,6 +273,12 @@ describe("PUT /api/appointments/[id] — wyjście ze statusu `completed` zakazan
     expect(vi.mocked(ne)).not.toHaveBeenCalled();
   });
 
+  it("komunikat 409 po polsku: tylko notatki", () => {
+    expect(APPOINTMENT_COMPLETED_MESSAGE).toBe(
+      "Zakończonej wizyty nie można zmienić. Możesz edytować tylko notatki."
+    );
+  });
+
   it("zmiana statusu: UPDATE ma warunek status <> completed", async () => {
     const res = await put({ status: "confirmed" });
 
@@ -312,6 +317,128 @@ describe("PUT /api/appointments/[id] — wyjście ze statusu `completed` zakazan
     const res = await put({ status: "confirmed" });
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe("PUT /api/appointments/[id] — wizyta zakończona przyjmuje tylko notatki", () => {
+  const OTHER_EMPLOYEE = "33333333-3333-4333-8333-333333333333";
+  const OTHER_ID = "44444444-4444-4444-8444-444444444444";
+
+  beforeEach(() => {
+    givenExisting("completed");
+  });
+
+  it.each([
+    ["startTime (przeniesienie w kalendarzu)", { startTime: "2026-04-01T12:00:00.000Z" }],
+    ["endTime", { endTime: "2026-04-01T11:30:00.000Z" }],
+    [
+      "termin i pracownik jak z kalendarza",
+      { startTime: "2026-04-02T10:00:00.000Z", endTime: "2026-04-02T11:00:00.000Z", employeeId: OTHER_EMPLOYEE },
+    ],
+    ["employeeId", { employeeId: OTHER_EMPLOYEE }],
+    ["serviceId", { serviceId: OTHER_ID }],
+    ["serviceId → null", { serviceId: null }],
+    ["clientId", { clientId: OTHER_ID }],
+    ["clientId → null", { clientId: null }],
+    ["depositAmount", { depositAmount: "50.00" }],
+    ["depositPaid", { depositPaid: true }],
+    ["status", { status: "confirmed" }],
+    ["notatka razem ze zmianą terminu", { notes: "x", startTime: "2026-04-01T12:00:00.000Z" }],
+  ])("%s → 409 APPOINTMENT_COMPLETED, nic nie zapisane", async (_name, body) => {
+    const { status, body: res } = await parseResponse<Err>(await put(body));
+
+    expect(status).toBe(409);
+    expect(res).toEqual({
+      success: false,
+      code: APPOINTMENT_COMPLETED_CODE,
+      error: "Zakończonej wizyty nie można zmienić. Możesz edytować tylko notatki.",
+    });
+    expectNothingWritten();
+    expect(h.refs).not.toHaveBeenCalled();
+  });
+
+  it("cały obiekt z niezmienionymi polami + nowa notatka → 200, zapis tylko notatek, bez warunku statusu", async () => {
+    const res = await put({
+      startTime: "2026-04-01T10:00:00.000Z",
+      endTime: "2026-04-01T11:00:00.000Z",
+      employeeId: EMPLOYEE,
+      clientId: TEST_IDS.CLIENT_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+      status: "completed",
+      depositAmount: null,
+      depositPaid: false,
+      notes: "Nowa notatka",
+    });
+
+    expect(res.status).toBe(200);
+    expect(h.set).toHaveBeenCalledTimes(1);
+    expect(h.set.mock.calls[0]![0]).toEqual({ notes: "Nowa notatka" });
+    expect(vi.mocked(ne)).not.toHaveBeenCalled();
+  });
+
+  it("kwota zadatku w innym zapisie tej samej liczby (50 = 50.00) nie jest zmianą", async () => {
+    h.findOne.mockResolvedValue(
+      makeAppointment({ id: APPOINTMENT, salonId: SALON, employeeId: EMPLOYEE, status: "completed", depositAmount: "50.00" })
+    );
+
+    const res = await put({ depositAmount: "50", notes: "ok" });
+
+    expect(res.status).toBe(200);
+    expect(h.set.mock.calls[0]![0]).toEqual({ notes: "ok" });
+  });
+
+  it("notatka null (wyczyszczenie) → 200", async () => {
+    const res = await put({ notes: null });
+
+    expect(res.status).toBe(200);
+    expect(h.set.mock.calls[0]![0]).toEqual({ notes: null });
+  });
+
+  it("pole zadatku od pracownika → nadal 403 (bramka roli przed wizytą)", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const res = await put({ depositPaid: true });
+
+    expect(res.status).toBe(403);
+    expectNothingWritten();
+  });
+
+  it("status no_show na wizycie zakończonej → 409 APPOINTMENT_COMPLETED", async () => {
+    const { status, body } = await parseResponse<Err>(await put({ status: "no_show" }));
+
+    expect(status).toBe(409);
+    expect(body.code).toBe(APPOINTMENT_COMPLETED_CODE);
+    expectNothingWritten();
+  });
+});
+
+describe("PUT /api/appointments/[id] — przeniesienie równolegle z zakończeniem", () => {
+  it("UPDATE terminu ma warunek status <> completed", async () => {
+    const res = await put({ startTime: "2026-04-01T12:00:00.000Z", endTime: "2026-04-01T13:00:00.000Z" });
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(ne)).toHaveBeenCalledWith(appointments.status, "completed");
+  });
+
+  it("zakończenie weszło przed UPDATE terminu → 409, czytelny komunikat dla toastu", async () => {
+    // 1) kolizje, 2) blokady czasu, 3) ponowny odczyt statusu po UPDATE bez wiersza.
+    h.selectResults = [[], [], [{ status: "completed" }]];
+    h.updated = [];
+
+    const { status, body } = await parseResponse<Err>(
+      await put({ startTime: "2026-04-01T12:00:00.000Z", endTime: "2026-04-01T13:00:00.000Z", employeeId: EMPLOYEE })
+    );
+
+    expect(status).toBe(409);
+    expect(body.code).toBe(APPOINTMENT_COMPLETED_CODE);
+    expect(body.error).toBe(APPOINTMENT_COMPLETED_MESSAGE);
+  });
+
+  it("sama notatka na wizycie niezakończonej → UPDATE bez warunku statusu", async () => {
+    const res = await put({ notes: "abc" });
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(ne)).not.toHaveBeenCalled();
   });
 });
 

@@ -7,8 +7,17 @@
  *   przerwałby całą transakcję, COMMIT by ją wycofał, a trasa oddałaby 200
  *   z płatnością, której nie ma. Log błędu bez treści zapytania, log zakończenia
  *   po zatwierdzeniu;
+ * - błąd bazy w bloku alertu niskiego stanu (testowy trigger na INSERT
+ *   powiadomienia o testowym produkcie) → 200; zakończenie, płatność, odjęty
+ *   stan produktu i wiersz zużycia materiału są w bazie, powiadomienia brak;
  * - PUT zmieniający status wizyty zakończonej → 409, DELETE (anulowanie) → 409;
  *   wiersz bez zmian (status, płatność, `updated_at`);
+ * - PUT zmieniający termin wizyty zakończonej → 409, wiersz bez zmian; cały
+ *   obiekt z niezmienionymi polami i nową notatką → 200, zapisana tylko notatka;
+ * - `cancelAppointmentInTx` (ścieżka DELETE po blokadzie wiersza) na wizycie
+ *   zakończonej z płatnością zadatku `pending` → `AppointmentCompletedError`;
+ *   płatność nadal `pending`, wiersz wizyty bez zmian (krok `pending → failed`
+ *   wycofany razem z transakcją);
  * - PUT ze statusem `completed` → 400 z polskim komunikatem, wiersz bez zmian.
  *
  * Moduł lojalności jest zamrożony w rejestrze (`hardOff`) — `resolveModules`
@@ -22,12 +31,32 @@
  * pracownik, usługa, klient, wizyty w 2096. Salon usuwany w `afterAll` (kaskada).
  */
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as completeRoute from "@/app/api/appointments/[id]/complete/route";
 import * as appointmentRoute from "@/app/api/appointments/[id]/route";
-import { APPOINTMENT_COMPLETED_CODE, COMPLETE_DEDICATED_ROUTE_CODE } from "@/lib/appointment-completion";
-import { appointments, clients, employees, loyaltyPoints, services, salons, treatmentHistory, user } from "@/lib/schema";
+import {
+  APPOINTMENT_COMPLETED_CODE,
+  AppointmentCompletedError,
+  COMPLETE_DEDICATED_ROUTE_CODE,
+} from "@/lib/appointment-completion";
+import { cancelAppointmentInTx } from "@/lib/salon-cancellation";
+import {
+  appointmentMaterials,
+  appointments,
+  clients,
+  depositPayments,
+  employees,
+  loyaltyPoints,
+  notifications,
+  products,
+  serviceProducts,
+  services,
+  salons,
+  treatmentHistory,
+  user,
+} from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { createMockRequest, createRouteParams, parseResponse } from "../api/helpers";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
@@ -81,12 +110,17 @@ const suite = h ? describe : describe.skip;
 
 const RUN = randomUUID().slice(0, 8);
 const OWNER_A = `it-t3-best-a-${RUN}`;
-const ids = { salonA: "", empA: "", serviceA: "", clientA: "" };
+const ids = { salonA: "", empA: "", serviceA: "", clientA: "", serviceStock: "", productStock: "" };
 /** Testowy trigger (nazwy z przebiegu, żeby nie kolidować z innym uruchomieniem). */
 const LOYALTY_FN = `it_t3_best_fail_${RUN.replace(/[^0-9a-f]/g, "")}`;
 const LOYALTY_TRIGGER = `${LOYALTY_FN}_trg`;
 /** SQLSTATE triggera — potwierdza, że błąd padł właśnie w bloku punktów. */
 const LOYALTY_FAIL_CODE = "XT201";
+/** Trigger na powiadomieniu o niskim stanie testowego produktu. */
+const STOCK_FN = `it_t3_best_stock_${RUN.replace(/[^0-9a-f]/g, "")}`;
+const STOCK_TRIGGER = `${STOCK_FN}_trg`;
+/** SQLSTATE triggera — potwierdza, że błąd padł właśnie w bloku alertu. */
+const STOCK_FAIL_CODE = "XT202";
 let slot = 0;
 
 /** DDL w krótkiej transakcji z `lock_timeout`: bez czekania w nieskończoność na blokadę tabeli. */
@@ -192,6 +226,36 @@ suite("zamknięcie wizyty — savepointy i jedna droga statusu, prawdziwy Postgr
       `create trigger ${LOYALTY_TRIGGER} before insert on public.loyalty_points ` +
         `for each row execute function ${LOYALTY_FN}()`,
     ]);
+
+    // Osobna usługa z produktem poniżej minimum: zakończenie odejmuje stan
+    // i próbuje zapisać alert. Inne testy pliku używają usługi bez produktów.
+    const [ss] = await db
+      .insert(services)
+      .values({ salonId: ids.salonA, name: "IT best usługa z produktem", basePrice: "100.00", baseDuration: 30 })
+      .returning({ id: services.id });
+    ids.serviceStock = ss!.id;
+    const [p] = await db
+      .insert(products)
+      .values({ salonId: ids.salonA, name: "IT best farba", quantity: "5", minQuantity: "10", unit: "ml" })
+      .returning({ id: products.id });
+    ids.productStock = p!.id;
+    if (!/^[0-9a-f-]{36}$/.test(ids.productStock)) throw new Error("nieoczekiwany format id produktu");
+    await db.insert(serviceProducts).values({ serviceId: ids.serviceStock, productId: ids.productStock, defaultQuantity: "2" });
+
+    // Testowy trigger: INSERT powiadomienia systemowego o tym produkcie kończy się
+    // błędem bazy. Powiadomienia o innych produktach nie są dotknięte.
+    await ddl([
+      `create function ${STOCK_FN}() returns trigger language plpgsql as $fn$
+       begin
+         if new.type = 'system' and new.message like '%[product:${ids.productStock}]%' then
+           raise exception 'it-t3 best: wymuszony błąd alertu' using errcode = '${STOCK_FAIL_CODE}';
+         end if;
+         return new;
+       end
+       $fn$`,
+      `create trigger ${STOCK_TRIGGER} before insert on public.notifications ` +
+        `for each row execute function ${STOCK_FN}()`,
+    ]);
   });
 
   afterAll(async () => {
@@ -205,6 +269,14 @@ suite("zamknięcie wizyty — savepointy i jedna droga statusu, prawdziwy Postgr
         ]);
       } catch (e) {
         mocks.warn("trigger cleanup failed", e);
+      }
+      try {
+        await ddl([
+          `drop trigger if exists ${STOCK_TRIGGER} on public.notifications`,
+          `drop function if exists ${STOCK_FN}()`,
+        ]);
+      } catch (e) {
+        mocks.warn("stock trigger cleanup failed", e);
       }
       if (ids.salonA) await h.db.delete(salons).where(eq(salons.id, ids.salonA));
       await h.db.delete(user).where(inArray(user.id, [OWNER_A]));
@@ -244,6 +316,148 @@ suite("zamknięcie wizyty — savepointy i jedna droga statusu, prawdziwy Postgr
     expect(JSON.stringify(mocks.error.mock.calls)).not.toContain("insert into");
     expect(mocks.error).not.toHaveBeenCalledWith("Failed to complete appointment", expect.anything());
     expect(mocks.info).toHaveBeenCalledWith("Appointment marked as completed", { appointmentId: appt });
+  });
+
+  it("błąd bazy w bloku alertu niskiego stanu → 200; zakończenie, płatność, stan produktu i zużycie w bazie", async () => {
+    const appt = await appointment({ serviceId: ids.serviceStock });
+
+    const res = await parseResponse<Body>(
+      await complete(appt, { paidAmount: "100", paymentMethod: "card", commissionPercentage: 0 })
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const deductions = res.body.data?.stockDeductions as Array<Record<string, unknown>>;
+    expect(deductions).toHaveLength(1);
+    expect(deductions[0]).toMatchObject({ productId: ids.productStock, newQuantity: 3, lowStockAlert: null });
+    // Zatwierdzone w bazie — nie tylko w odpowiedzi.
+    expect(await rowOf(appt)).toMatchObject({ status: "completed", paidAmount: "100.00", paymentMethod: "card" });
+    const [product] = await h!.db
+      .select({ quantity: products.quantity })
+      .from(products)
+      .where(eq(products.id, ids.productStock));
+    expect(product!.quantity).toBe("3.00");
+    const materials = await h!.db
+      .select({ productId: appointmentMaterials.productId, quantityUsed: appointmentMaterials.quantityUsed })
+      .from(appointmentMaterials)
+      .where(eq(appointmentMaterials.appointmentId, appt));
+    expect(materials).toEqual([{ productId: ids.productStock, quantityUsed: "2.00" }]);
+    // Powiadomienie wycofane razem z savepointem.
+    const alerts = await h!.db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.salonId, ids.salonA),
+          like(notifications.message, `%[product:${ids.productStock}]%`)
+        )
+      );
+    expect(alerts).toHaveLength(0);
+    // Błąd padł w bloku alertu (kod triggera), log bez treści zapytania.
+    expect(mocks.error).toHaveBeenCalledWith("Low stock check failed (non-blocking)", {
+      errorName: expect.any(String),
+      errorCode: STOCK_FAIL_CODE,
+    });
+    expect(JSON.stringify(mocks.error.mock.calls)).not.toContain("insert into");
+    expect(mocks.error).not.toHaveBeenCalledWith("Failed to complete appointment", expect.anything());
+    expect(mocks.info).toHaveBeenCalledWith("Appointment marked as completed", { appointmentId: appt });
+  });
+
+  it("cancelAppointmentInTx na wizycie zakończonej z płatnością pending → AppointmentCompletedError, nic nie zmienione", async () => {
+    const appt = await appointment({ status: "completed", paidAmount: "80.00", paymentMethod: "card", depositAmount: "20.00" });
+    const [payment] = await h!.db
+      .insert(depositPayments)
+      .values({ salonId: ids.salonA, appointmentId: appt, amount: "20.00", paymentMethod: "blik", status: "pending" })
+      .returning({ id: depositPayments.id });
+    const before = await rowOf(appt);
+
+    await expect(
+      forSalon(ids.salonA).raw((tx) => cancelAppointmentInTx(tx, ids.salonA, appt))
+    ).rejects.toBeInstanceOf(AppointmentCompletedError);
+
+    expect(await rowOf(appt)).toEqual(before);
+    const [after] = await h!.db
+      .select({ status: depositPayments.status })
+      .from(depositPayments)
+      .where(eq(depositPayments.id, payment!.id));
+    expect(after!.status).toBe("pending");
+  });
+
+  it("DELETE trasą na wizycie zakończonej z płatnością pending → 409, płatność i wiersz bez zmian", async () => {
+    const appt = await appointment({ status: "completed", paidAmount: "80.00", paymentMethod: "card", depositAmount: "20.00" });
+    const [payment] = await h!.db
+      .insert(depositPayments)
+      .values({ salonId: ids.salonA, appointmentId: appt, amount: "20.00", paymentMethod: "blik", status: "pending" })
+      .returning({ id: depositPayments.id });
+    const before = await rowOf(appt);
+
+    const res = await parseResponse<Body>(await del(appt));
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.code).toBe(APPOINTMENT_COMPLETED_CODE);
+    expect(await rowOf(appt)).toEqual(before);
+    const [after] = await h!.db
+      .select({ status: depositPayments.status })
+      .from(depositPayments)
+      .where(eq(depositPayments.id, payment!.id));
+    expect(after!.status).toBe("pending");
+    expect(mocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("PUT zmieniający termin wizyty zakończonej → 409 z komunikatem o notatkach, wiersz bez zmian", async () => {
+    const appt = await appointment({ status: "completed", paidAmount: "80.00", paymentMethod: "card" });
+    const [beforeSlot] = await h!.db
+      .select({ startTime: appointments.startTime, endTime: appointments.endTime, employeeId: appointments.employeeId })
+      .from(appointments)
+      .where(eq(appointments.id, appt));
+    const before = await rowOf(appt);
+    const moved = new Date(beforeSlot!.startTime.getTime() + 86_400_000);
+
+    const res = await parseResponse<Body>(
+      await put(appt, {
+        startTime: moved.toISOString(),
+        endTime: new Date(moved.getTime() + 1_800_000).toISOString(),
+        employeeId: ids.empA,
+      })
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      code: APPOINTMENT_COMPLETED_CODE,
+      error: "Zakończonej wizyty nie można zmienić. Możesz edytować tylko notatki.",
+    });
+    expect(await rowOf(appt)).toEqual(before);
+    const [afterSlot] = await h!.db
+      .select({ startTime: appointments.startTime, endTime: appointments.endTime, employeeId: appointments.employeeId })
+      .from(appointments)
+      .where(eq(appointments.id, appt));
+    expect(afterSlot).toEqual(beforeSlot);
+  });
+
+  it("PUT całego obiektu z niezmienionymi polami i nową notatką na wizycie zakończonej → 200, zapisana tylko notatka", async () => {
+    const appt = await appointment({ status: "completed", paidAmount: "80.00", paymentMethod: "card" });
+    const [current] = await h!.db
+      .select({ startTime: appointments.startTime, endTime: appointments.endTime })
+      .from(appointments)
+      .where(eq(appointments.id, appt));
+
+    const res = await parseResponse<Body>(
+      await put(appt, {
+        startTime: current!.startTime.toISOString(),
+        endTime: current!.endTime.toISOString(),
+        employeeId: ids.empA,
+        serviceId: ids.serviceA,
+        clientId: null,
+        notes: "it-best notatka po wizycie",
+      })
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const [row] = await h!.db
+      .select({ notes: appointments.notes, status: appointments.status, startTime: appointments.startTime })
+      .from(appointments)
+      .where(eq(appointments.id, appt));
+    expect(row).toEqual({ notes: "it-best notatka po wizycie", status: "completed", startTime: current!.startTime });
   });
 
   it.each(["scheduled", "confirmed", "cancelled"])(

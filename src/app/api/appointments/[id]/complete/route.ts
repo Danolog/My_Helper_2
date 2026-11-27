@@ -328,7 +328,8 @@ export async function POST(
       // Determine commission percentage: use provided value, or employee's default, or fallback
       let commPct = DEFAULT_COMMISSION_RATE;
       if (commissionPercentage !== undefined && commissionPercentage !== null) {
-        commPct = parseFloat(String(commissionPercentage));
+        // Schemat zwraca liczbę skończoną z zakresu 0–100.
+        commPct = commissionPercentage;
       } else if (appointment.employeeId) {
         // Look up employee's default commission rate
         const [emp] = await tx

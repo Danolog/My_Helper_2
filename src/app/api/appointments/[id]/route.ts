@@ -8,6 +8,7 @@ import {
   COMPLETE_DEDICATED_ROUTE_CODE,
   COMPLETE_DEDICATED_ROUTE_MESSAGE,
   COMPLETED_STATUS,
+  completedAppointmentChangedFields,
 } from "@/lib/appointment-completion";
 import {
   appointmentConflictWhere,
@@ -85,6 +86,25 @@ function completedFinalResponse() {
     { success: false, code: APPOINTMENT_COMPLETED_CODE, error: APPOINTMENT_COMPLETED_MESSAGE },
     { status: 409 }
   );
+}
+
+/**
+ * Zapis samych notatek wizyty zakończonej. Tylko kolumna `notes` — termin,
+ * pracownik, usługa, klient, zadatek i status zostają bez zmian. Status
+ * wizyty zakończonej nie zmienia się już żadną trasą, więc UPDATE nie
+ * potrzebuje warunku statusu.
+ */
+async function updateCompletedNotes(salonId: string, id: string, notes: string | null) {
+  const [row] = await forSalon(salonId).raw((tx) =>
+    tx
+      .update(appointments)
+      .set({ notes })
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+      .returning()
+  );
+  // Tylko nazwa pola — treść notatki nie trafia do logów.
+  logger.info(`[Appointments API] Updating appointment ${id}`, { fields: ["notes"] });
+  return row ?? null;
 }
 
 // GET /api/appointments/[id] - Get a single appointment
@@ -228,6 +248,23 @@ export async function PUT(
       );
     }
 
+    // Wizyta zakończona ma ostateczny wynik: prowizja, zużycie materiałów
+    // i punkty policzone są dla jej terminu, pracownika, usługi i klienta.
+    // Zmienić można tylko notatki. Pole z body liczy się jako zmiana, gdy różni
+    // się od zapisanej wartości — cały obiekt z niezmienionymi polami przechodzi.
+    // Status wizyty zakończonej nie zmienia się już nigdzie, więc zapis samych
+    // notatek nie potrzebuje warunku statusu w UPDATE.
+    if (existing.status === COMPLETED_STATUS) {
+      if (completedAppointmentChangedFields(existing, parsed.data).length > 0) {
+        return completedFinalResponse();
+      }
+      return NextResponse.json({
+        success: true,
+        data: notes === undefined ? existing : await updateCompletedNotes(salonId, id, notes),
+        message: "Appointment rescheduled successfully",
+      });
+    }
+
     // „Nie przyszedł” zmienia wyłącznie /api/appointments/[id]/no-show (rola
     // właściciel/recepcja, dzień wizyty). Inaczej pracownik oznaczałby tu własną
     // wizytę, a licznik nieobecności klienta zależałby od dwóch tras.
@@ -252,12 +289,6 @@ export async function PUT(
         { success: false, code: COMPLETE_DEDICATED_ROUTE_CODE, error: COMPLETE_DEDICATED_ROUTE_MESSAGE },
         { status: 400 }
       );
-    }
-
-    // Wizyta zakończona ma ostateczny wynik: bez przywrócenia i anulowania.
-    // Edycja innych pól (notatka) działa jak dotąd.
-    if (existing.status === COMPLETED_STATUS && status != null) {
-      return completedFinalResponse();
     }
 
     // P1 (audyt bezpieczeństwa): klient, pracownik i usluga z body musza nalezec do salonu
@@ -372,15 +403,16 @@ export async function PUT(
             .for("update")
         : [];
 
-      // Zmiana statusu z warunkiem „nie zakończona” w samym UPDATE: odczyt
-      // `existing` jest sprzed transakcji, a zakończenie mogło wejść po nim.
+      // Zapis czegokolwiek poza notatkami z warunkiem „nie zakończona” w samym
+      // UPDATE: odczyt `existing` jest sprzed transakcji, a zakończenie mogło
+      // wejść po nim (np. przeniesienie w kalendarzu równolegle z zakończeniem).
       // UPDATE czeka na blokadę wiersza i sprawdza warunek ponownie.
-      const changesStatus = updateData.status !== undefined;
+      const changesBeyondNotes = Object.keys(updateData).some((field) => field !== "notes");
       const [updatedAppointment] = await tx
         .update(appointments)
         .set(updateData)
         .where(
-          changesStatus
+          changesBeyondNotes
             ? and(
                 eq(appointments.id, id),
                 eq(appointments.salonId, salonId),
@@ -390,7 +422,7 @@ export async function PUT(
         )
         .returning();
 
-      if (!updatedAppointment && changesStatus) {
+      if (!updatedAppointment && changesBeyondNotes) {
         // Bieżący status z tej samej transakcji (READ COMMITTED widzi
         // zatwierdzone zakończenie). Błąd wycofuje całą transakcję.
         const [current] = await tx
