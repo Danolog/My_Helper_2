@@ -149,7 +149,7 @@ describe("200: blokada", () => {
     m.asOwnerOf(SALON_A);
     m.txRows.push([{ blockedAt: NOW, blockedBy: "owner-a", blockNote: null }]);
 
-    expect((await call(POST, { body })).status).toBe(200);
+    expect((await call(POST, body === undefined ? {} : { body })).status).toBe(200);
     expect(h.setArgs[0]!.blockNote).toBeNull();
   });
 

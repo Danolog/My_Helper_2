@@ -111,7 +111,9 @@ export function NoShowAutoBlockCard({ salonId }: NoShowAutoBlockCardProps) {
         ) : (
           <div className="flex items-center gap-2">
             <Select
-              value={state.status === "ready" ? (state.threshold === null ? OFF_VALUE : String(state.threshold)) : undefined}
+              {...(state.status === "ready"
+                ? { value: state.threshold === null ? OFF_VALUE : String(state.threshold) }
+                : {})}
               onValueChange={handleChange}
               disabled={state.status !== "ready" || saving}
             >
