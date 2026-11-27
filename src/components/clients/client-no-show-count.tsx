@@ -9,12 +9,20 @@ interface ClientNoShowCountProps {
 }
 
 /** Stan licznika: przy błędzie pobierania licznik się nie pokazuje (karta działa dalej). */
-type CountState = { status: "loading" } | { status: "ready"; count: number } | { status: "error" };
+type CountState =
+  | { status: "loading" }
+  | { status: "ready"; count: number; phoneOnlyCount: number }
+  | { status: "error" };
 
 /**
  * Liczba wizyt klienta oznaczonych „Nie przyszedł” (GET /api/clients/[id]/no-shows).
  * Wartość liczy serwer przy każdym wejściu na kartę, więc cofnięcie oznaczenia
  * przy wizycie od razu ją zmniejsza.
+ *
+ * Pod licznikiem jedna linia, gdy część nieobecności pochodzi z rezerwacji
+ * dopasowanych tylko po numerze telefonu: tych automatyczna blokada nie liczy,
+ * więc bez tej linii właściciel widzi „3” i nie wie, czemu klient nie jest
+ * zablokowany.
  */
 export function ClientNoShowCount({ clientId }: ClientNoShowCountProps) {
   const [state, setState] = useState<CountState>({ status: "loading" });
@@ -24,13 +32,19 @@ export function ClientNoShowCount({ clientId }: ClientNoShowCountProps) {
     (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/no-shows`, { signal: controller.signal });
-        const data = (await res.json()) as { success?: boolean; data?: { noShowCount?: unknown } };
+        const data = (await res.json()) as {
+          success?: boolean;
+          data?: { noShowCount?: unknown; phoneOnlyCount?: unknown };
+        };
         const count = data?.data?.noShowCount;
         if (!res.ok || data?.success !== true || typeof count !== "number") {
           setState({ status: "error" });
           return;
         }
-        setState({ status: "ready", count });
+        // Brak pola albo zła wartość = bez linii: sam licznik dalej się pokazuje.
+        const phoneOnly = data.data?.phoneOnlyCount;
+        const phoneOnlyCount = typeof phoneOnly === "number" && phoneOnly > 0 ? phoneOnly : 0;
+        setState({ status: "ready", count, phoneOnlyCount });
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") return;
         setState({ status: "error" });
@@ -43,15 +57,22 @@ export function ClientNoShowCount({ clientId }: ClientNoShowCountProps) {
 
   const hasNoShows = state.count > 0;
   return (
-    <div
-      className={`flex items-center gap-2 mb-6 text-sm ${hasNoShows ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}`}
-      data-testid="client-no-show-count"
-    >
-      <UserX className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span>
-        {NO_SHOW_LABEL}: <strong data-testid="client-no-show-count-value">{state.count}</strong>{" "}
-        {visitsWord(state.count)}
-      </span>
+    <div className="mb-6 text-sm" data-testid="client-no-show-count">
+      <div
+        className={`flex items-center gap-2 ${hasNoShows ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}`}
+      >
+        <UserX className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          {NO_SHOW_LABEL}: <strong data-testid="client-no-show-count-value">{state.count}</strong>{" "}
+          {visitsWord(state.count)}
+        </span>
+      </div>
+      {state.phoneOnlyCount > 0 && (
+        <p className="mt-1 pl-6 text-muted-foreground" data-testid="client-no-show-phone-only">
+          W tym {state.phoneOnlyCount} z rezerwacji dopasowanych tylko po numerze telefonu — te nie liczą się do
+          automatycznej blokady.
+        </p>
+      )}
     </div>
   );
 }

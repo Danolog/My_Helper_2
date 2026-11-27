@@ -16,6 +16,7 @@ import type { SQL } from "drizzle-orm";
 const h = await vi.hoisted(async () => {
   const m = (await import("./salon-staff-harness")).createSalonStaffMocks();
   const selectWheres: unknown[] = [];
+  const selectFields: unknown[] = [];
   const state = { failDb: false, transactions: 0 };
 
   type Tx = Parameters<Parameters<typeof m.db.transaction>[0]>[0];
@@ -28,7 +29,8 @@ const h = await vi.hoisted(async () => {
         m.db.transaction((tx) =>
           fn({
             ...tx,
-            select: () => {
+            select: (fields?: unknown) => {
+              selectFields.push(fields);
               const chain = tx.select() as Chain;
               chain.where = (w: unknown) => {
                 selectWheres.push(w);
@@ -43,7 +45,7 @@ const h = await vi.hoisted(async () => {
   };
 
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-  return { m, selectWheres, state, db, logger };
+  return { m, selectWheres, selectFields, state, db, logger };
 });
 
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
@@ -70,6 +72,7 @@ function rendered(where: unknown) {
 beforeEach(() => {
   m.reset();
   h.selectWheres.length = 0;
+  h.selectFields.length = 0;
   h.state.failDb = false;
   h.state.transactions = 0;
   vi.clearAllMocks();
@@ -79,34 +82,78 @@ beforeEach(() => {
 describe("200", () => {
   it("właściciel: liczba wizyt no_show klienta", async () => {
     m.asOwnerOf(SALON_A);
-    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 2 }]);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 2, autoBlockCount: 2 }]);
 
     const res = await call();
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true, data: { clientId: CLIENT_ID, noShowCount: 2 } });
+    expect(await res.json()).toEqual({
+      success: true,
+      data: { clientId: CLIENT_ID, noShowCount: 2, phoneOnlyCount: 0 },
+    });
     expect(m.rlsSalonIds()).toEqual([SALON_A]);
   });
 
-  it("recepcja → 200; licznik z bazy jako napis (bigint) zamieniony na liczbę", async () => {
+  it("recepcja → 200; liczby z bazy jako napisy (bigint) zamienione na liczby", async () => {
     m.asStaffOf(SALON_A, "receptionist");
-    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: "3" }]);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: "3", autoBlockCount: "1" }]);
 
     const res = await call();
 
     expect(res.status).toBe(200);
-    expect((await res.json()).data.noShowCount).toBe(3);
+    const { data } = await res.json();
+    expect(data.noShowCount).toBe(3);
+    expect(data.phoneOnlyCount).toBe(2);
   });
 
-  it("klient bez nieobecności → 0", async () => {
+  it("klient bez nieobecności → 0 i 0", async () => {
     m.asOwnerOf(SALON_A);
-    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 0 }]);
-    expect((await (await call()).json()).data.noShowCount).toBe(0);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 0, autoBlockCount: 0 }]);
+    const { data } = await (await call()).json();
+    expect(data.noShowCount).toBe(0);
+    expect(data.phoneOnlyCount).toBe(0);
+  });
+
+  it("phoneOnlyCount: nieobecności licznika, których nie liczy blokada", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 4, autoBlockCount: 1 }]);
+    expect((await (await call()).json()).data).toEqual({ clientId: CLIENT_ID, noShowCount: 4, phoneOnlyCount: 3 });
+  });
+
+  it("brak dopasowań po samym telefonie (wszystko liczy blokada) → phoneOnlyCount 0", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 3, autoBlockCount: 3 }]);
+    expect((await (await call()).json()).data.phoneOnlyCount).toBe(0);
+  });
+
+  it("brak wiersza wyniku → 0 i 0", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: CLIENT_ID }], []);
+    const { data } = await (await call()).json();
+    expect(data).toEqual({ clientId: CLIENT_ID, noShowCount: 0, phoneOnlyCount: 0 });
+  });
+
+  it("phoneOnlyCount w tym samym zapytaniu: filter z regułą blokady (karta albo e-mail, bez telefonu)", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 1, autoBlockCount: 0 }]);
+
+    expect((await call()).status).toBe(200);
+
+    // Druga lista kolumn (pierwsza to karta): licznik i filter reguły "autoBlock".
+    expect(h.selectFields).toHaveLength(2);
+    const fields = h.selectFields[1] as { autoBlockCount: SQL };
+    const filter = dialect.sqlToQuery(fields.autoBlockCount);
+    expect(filter.sql.startsWith('count(*) filter (where ("appointments"."client_id" = $1 or ')).toBe(true);
+    expect(filter.sql).toContain('"booking_account"."id" = "appointments"."booked_by_user_id"');
+    // Wizyta pasująca i po telefonie, i po e-mailu spełnia filter, więc nie
+    // trafia do różnicy — telefonu w filtrze nie ma wcale.
+    expect(filter.sql).not.toContain("guest_phone");
+    expect(filter.params).toEqual([CLIENT_ID, CLIENT_ID, SALON_A, true]);
   });
 
   it("karta i licznik z jawnym eq(salonId); licznik tylko status no_show", async () => {
     m.asOwnerOf(SALON_A);
-    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 1 }]);
+    m.txRows.push([{ id: CLIENT_ID }], [{ noShowCount: 1, autoBlockCount: 1 }]);
 
     expect((await call()).status).toBe(200);
 
@@ -115,7 +162,7 @@ describe("200", () => {
     expect(clientWhere.sql).toBe('("clients"."id" = $1 and "clients"."salon_id" = $2)');
     expect(clientWhere.params).toEqual([CLIENT_ID, SALON_A]);
 
-    // countCardNoShows z regułą licznika: wizyty karty plus wizyty online tego
+    // countCardNoShowsForCounter z regułą licznika: wizyty karty plus wizyty online tego
     // samego klienta po telefonie ALBO po zweryfikowanym e-mailu konta. Próg
     // blokady (appointments-no-show-auto-block.test.ts) telefonu nie bierze.
     const countWhere = rendered(h.selectWheres[1]);

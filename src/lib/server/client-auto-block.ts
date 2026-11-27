@@ -53,12 +53,26 @@ export function noShowAutoBlockThresholdColumn() {
   return sql<unknown>`${salons.settingsJson} -> 'noShowAutoBlockThreshold'`;
 }
 
+/** Wizyta należy do karty `clientId`: ma tę kartę albo jest wizytą online tego klienta według `match`. */
+function appointmentOfCard(salonId: string, clientId: string, match: OnlineNoShowMatch) {
+  return or(eq(appointments.clientId, clientId), onlineAppointmentOfCard(salonId, clientId, match))!;
+}
+
+/** Nieobecności karty `clientId` w salonie według reguły `match` (warunek WHERE). */
+function cardNoShowsWhere(salonId: string, clientId: string, match: OnlineNoShowMatch) {
+  return and(
+    eq(appointments.salonId, salonId),
+    eq(appointments.status, NO_SHOW_STATUS),
+    appointmentOfCard(salonId, clientId, match)
+  );
+}
+
 /**
  * Liczba nieobecności karty `clientId` w salonie: wizyty z tą kartą plus
  * wizyty online tego samego klienta (bez karty) według reguły `match` —
  * `"counter"` dla licznika „Nie przyszedł” na karcie klienta (telefon albo
  * zweryfikowany e-mail), `"autoBlock"` dla progu blokady (sam zweryfikowany
- * e-mail). Jedno zapytanie dla obu, różni je tylko reguła.
+ * e-mail). Ten sam warunek co `countCardNoShowsForCounter`, różni je tylko reguła.
  */
 export async function countCardNoShows(
   tx: DbTx,
@@ -69,14 +83,37 @@ export async function countCardNoShows(
   const [row] = await tx
     .select({ noShowCount: count() })
     .from(appointments)
-    .where(
-      and(
-        eq(appointments.salonId, salonId),
-        eq(appointments.status, NO_SHOW_STATUS),
-        or(eq(appointments.clientId, clientId), onlineAppointmentOfCard(salonId, clientId, match))
-      )
-    );
+    .where(cardNoShowsWhere(salonId, clientId, match));
   return Number(row?.noShowCount ?? 0);
+}
+
+/** Licznik na karcie: wszystkie nieobecności i te, które nie liczą się do automatycznej blokady. */
+export type CardNoShowCounter = { noShowCount: number; phoneOnlyCount: number };
+
+/**
+ * Licznik „Nie przyszedł” na karcie w jednym zapytaniu: wszystkie nieobecności
+ * według reguły `"counter"` i, przez `filter`, te z nich, które spełniają też
+ * regułę `"autoBlock"`. Reguła `"autoBlock"` jest częścią `"counter"` (wizyta
+ * z kartą albo zweryfikowany e-mail konta), więc różnica to dokładnie wizyty
+ * online dopasowane po telefonie, a NIE po zweryfikowanym e-mailu — wizyta
+ * pasująca na oba sposoby nie trafia do `phoneOnlyCount`. Jedno zapytanie =
+ * jeden obraz danych, więc różnica nie wychodzi ujemna.
+ */
+export async function countCardNoShowsForCounter(
+  tx: DbTx,
+  salonId: string,
+  clientId: string
+): Promise<CardNoShowCounter> {
+  const [row] = await tx
+    .select({
+      noShowCount: count(),
+      autoBlockCount: sql<number>`count(*) filter (where ${appointmentOfCard(salonId, clientId, "autoBlock")})`,
+    })
+    .from(appointments)
+    .where(cardNoShowsWhere(salonId, clientId, "counter"));
+  const noShowCount = Number(row?.noShowCount ?? 0);
+  const autoBlockCount = Number(row?.autoBlockCount ?? 0);
+  return { noShowCount, phoneOnlyCount: Math.max(0, noShowCount - autoBlockCount) };
 }
 
 /** Wizyta oznaczana „Nie przyszedł”: id i karta (null = wizyta online). */
