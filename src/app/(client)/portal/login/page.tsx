@@ -11,7 +11,7 @@ import {
 import { clientHomePath, isModuleFrozen } from "@/lib/features"
 import { isGoogleAuthConfigured } from "@/lib/google-auth"
 import { clientAccountLegalNotice } from "@/lib/legal/documents"
-import { hasActiveSession } from "@/lib/session"
+import { getOptionalSession } from "@/lib/session"
 
 /**
  * Validate returnTo URL to prevent open redirects.
@@ -28,11 +28,14 @@ export default async function ClientLoginPage({
 }: {
   searchParams: Promise<{ reset?: string; returnTo?: string }>
 }) {
-  const isLoggedIn = await hasActiveSession()
+  // Sesja sprawdzona w bazie, nie sama obecność ciasteczka. Ciasteczko z
+  // nieważnym podpisem (np. po zmianie sekretu) zostaje w przeglądarce, a strony
+  // portalu widzą brak sesji i kierują tutaj — odesłanie na `returnTo` dałoby pętlę.
+  const session = await getOptionalSession()
 
   const { reset, returnTo } = await searchParams
 
-  if (isLoggedIn) {
+  if (session) {
     redirect(isSafeReturnTo(returnTo))
   }
 

@@ -23,7 +23,8 @@ const h = vi.hoisted(() => ({
     error: null as { status?: number } | null,
     refetch: vi.fn<(params?: { query?: Record<string, unknown> }) => Promise<void>>(async () => {}),
   },
-  hasActiveSession: vi.fn(async () => false),
+  // Sesja serwerowa sprawdzona w bazie; `null` = brak ważnej sesji.
+  getOptionalSession: vi.fn(async (): Promise<{ user: { id: string } } | null> => null),
   redirect: vi.fn((url: string) => {
     throw new Error(`NEXT_REDIRECT:${url}`);
   }),
@@ -37,8 +38,10 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth-client", () => ({ useSession: () => h.session }));
 vi.mock("@/lib/api-client", () => ({ mutationFetch: vi.fn() }));
-vi.mock("@/lib/session", () => ({ hasActiveSession: h.hasActiveSession }));
-vi.mock("@/components/auth/sign-in-button", () => ({ SignInButton: () => null }));
+vi.mock("@/lib/session", () => ({ getOptionalSession: h.getOptionalSession }));
+vi.mock("@/components/auth/sign-in-button", () => ({
+  SignInButton: () => <div data-testid="sign-in-form" />,
+}));
 
 /** Adres przekierowania rozłożony na ścieżkę i `returnTo`. */
 function parsePush(call: unknown): { pathname: string; returnTo: string | null } {
@@ -51,7 +54,7 @@ beforeEach(() => {
   h.session.isPending = false;
   h.session.error = null;
   h.session.refetch.mockImplementation(async () => {});
-  h.hasActiveSession.mockResolvedValue(false);
+  h.getOptionalSession.mockResolvedValue(null);
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => new Response(JSON.stringify({ success: true, data: [] }), { status: 200 })),
@@ -281,7 +284,7 @@ describe("/portal przy zamrożonym katalogu", () => {
 
 describe("/portal/login: returnTo z przekierowania przechodzi walidację", () => {
   it("zalogowany klient wraca na /appointments", async () => {
-    h.hasActiveSession.mockResolvedValue(true);
+    h.getOptionalSession.mockResolvedValue({ user: { id: "client-user" } });
     const { default: ClientLoginPage } = await import("@/app/(client)/portal/login/page");
     const { returnTo } = parsePush(clientLoginPath("/appointments"));
 
@@ -294,11 +297,49 @@ describe("/portal/login: returnTo z przekierowania przechodzi walidację", () =>
   });
 
   it("adres spoza domeny (//) wraca na stronę domową klienta", async () => {
-    h.hasActiveSession.mockResolvedValue(true);
+    h.getOptionalSession.mockResolvedValue({ user: { id: "client-user" } });
     const { default: ClientLoginPage } = await import("@/app/(client)/portal/login/page");
 
     await expect(
       ClientLoginPage({ searchParams: Promise.resolve({ returnTo: "//evil.example" }) }),
     ).rejects.toThrow("NEXT_REDIRECT:/appointments");
+  });
+});
+
+describe("/portal/login: ciasteczko jest, ważnej sesji nie ma (np. nieważny podpis)", () => {
+  // Serwer przy złym podpisie zwraca brak sesji i nie kasuje ciasteczka. Strona
+  // portalu kieruje tu z `returnTo`; odesłanie z powrotem tworzyłoby pętlę.
+  it("bez przekierowania, widać formularz logowania", async () => {
+    h.getOptionalSession.mockResolvedValue(null);
+    const { default: ClientLoginPage } = await import("@/app/(client)/portal/login/page");
+
+    const page = await ClientLoginPage({
+      searchParams: Promise.resolve({ returnTo: "/appointments" }),
+    });
+    render(page);
+
+    expect(h.getOptionalSession).toHaveBeenCalledTimes(1);
+    expect(h.redirect).not.toHaveBeenCalled();
+    screen.getByText("Konto klienta");
+    screen.getByTestId("sign-in-form");
+  });
+
+  it("bez returnTo też bez przekierowania na stronę domową klienta", async () => {
+    const { default: ClientLoginPage } = await import("@/app/(client)/portal/login/page");
+
+    render(await ClientLoginPage({ searchParams: Promise.resolve({}) }));
+
+    expect(h.redirect).not.toHaveBeenCalled();
+    screen.getByTestId("sign-in-form");
+  });
+
+  it("ważna sesja nadal przekierowuje na returnTo", async () => {
+    h.getOptionalSession.mockResolvedValue({ user: { id: "client-user" } });
+    const { default: ClientLoginPage } = await import("@/app/(client)/portal/login/page");
+
+    await expect(
+      ClientLoginPage({ searchParams: Promise.resolve({ returnTo: "/favorites" }) }),
+    ).rejects.toThrow("NEXT_REDIRECT:/favorites");
+    expect(h.redirect).toHaveBeenCalledTimes(1);
   });
 });
