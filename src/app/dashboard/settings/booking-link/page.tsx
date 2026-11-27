@@ -18,6 +18,7 @@ import {
   salonSlugProblem,
   salonSlugProblemMessage,
 } from "@/lib/salon-slug";
+import { BookingLinkQr } from "./_components/BookingLinkQr";
 
 interface SalonLinkData {
   id: string;
@@ -216,20 +217,23 @@ function BookingLinkSettingsInner() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {shortUrl ? (
-            <div className="flex gap-2">
-              <Input
-                readOnly
-                value={shortUrl}
-                aria-label="Link do rezerwacji"
-                data-testid="booking-link-url"
-                onFocus={(e) => e.currentTarget.select()}
-              />
-              <Button type="button" variant="outline" onClick={handleCopy} data-testid="booking-link-copy">
-                {copied ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
-                {copied ? "Skopiowano" : "Kopiuj"}
-              </Button>
-            </div>
+          {shortUrl && salon.slug ? (
+            <>
+              <div className="flex gap-2">
+                <Input
+                  readOnly
+                  value={shortUrl}
+                  aria-label="Link do rezerwacji"
+                  data-testid="booking-link-url"
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <Button type="button" variant="outline" onClick={handleCopy} data-testid="booking-link-copy">
+                  {copied ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
+                  {copied ? "Skopiowano" : "Kopiuj"}
+                </Button>
+              </div>
+              <BookingLinkQr url={shortUrl} slug={salon.slug} />
+            </>
           ) : (
             <p className="text-sm text-muted-foreground">
               Salon nie ma jeszcze adresu. Wpisz go poniżej i zapisz.
