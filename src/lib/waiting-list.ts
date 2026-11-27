@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { eq, and, asc, gt, isNull, isNotNull, or } from "drizzle-orm";
 import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
+import { onlineBookingUnavailableMessage, ONLINE_BOOKING_UNAVAILABLE_CODE } from "@/lib/client-block";
 import {
   checkBookingWithoutDeposit,
   DEPOSIT_CHECK_UNAVAILABLE_MESSAGE,
@@ -606,6 +607,8 @@ export async function notifyWaitingList(
 interface AcceptResult {
   success: boolean;
   message: string;
+  /** Odmowa z powodu blokady rezerwacji online karty klienta — trasa odpowiada 403. */
+  code?: typeof ONLINE_BOOKING_UNAVAILABLE_CODE;
   appointmentId?: string;
   oldStartTime?: Date;
   newStartTime?: Date;
@@ -624,6 +627,11 @@ interface AcceptResult {
  *
  * Moduł listy oczekujących wyłączony w salonie (albo błąd odczytu ustawień)
  * = odmowa „Oferta nie jest już aktualna”, bez odczytu wpisu i bez zapisów.
+ *
+ * Karta klienta wpisu z blokadą rezerwacji online (`clients.blocked_at`) =
+ * odmowa NOWEJ wizyty z kodem ONLINE_BOOKING_UNAVAILABLE (trasa: 403, ten sam
+ * komunikat co przy rezerwacji online), bez zapisu, wpis nierozstrzygnięty.
+ * Przeniesienie istniejącej wizyty zostaje dozwolone — nie tworzy rezerwacji.
  */
 export async function acceptEarlierSlot(
   waitingListId: string,
@@ -763,6 +771,33 @@ export async function acceptEarlierSlot(
     return { success: false, message };
   };
 
+  // Blokada rezerwacji online karty wpisu: odczyt tuż przed utworzeniem nowej
+  // wizyty, przez tę samą bramę salonu, z jawnym warunkiem id karty i salonu.
+  // Telefon salonu tylko przy blokadzie — do komunikatu dla klienta.
+  const onlineBookingBlockRefusal = async (): Promise<AcceptResult | null> => {
+    const [card] = await gate.raw((tx) =>
+      tx
+        .select({ blockedAt: clients.blockedAt })
+        .from(clients)
+        .where(and(eq(clients.id, entry.clientId), eq(clients.salonId, salonId)))
+        .limit(1)
+    );
+    if (!card?.blockedAt) return null;
+    const [salon] = await gate.raw((tx) =>
+      tx.select({ phone: salons.phone }).from(salons).where(eq(salons.id, salonId)).limit(1)
+    );
+    logger.info("Waiting list offer refused: client online booking blocked", { waitingListId, salonId });
+    return {
+      success: false,
+      code: ONLINE_BOOKING_UNAVAILABLE_CODE,
+      message: onlineBookingUnavailableMessage(salon?.phone),
+    };
+  };
+
+  /** Odmowa nowej wizyty: najpierw blokada karty, potem zadatek (#63). */
+  const newAppointmentRefusal = async (): Promise<AcceptResult | null> =>
+    (await onlineBookingBlockRefusal()) ?? (await depositBlocksNewAppointment());
+
   // 7. Move existing appointment or create a new one
   // #171: każdy zapis poniżej to jedno polecenie; jeśli równoległy zapis
   // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01, albo 40P01
@@ -847,20 +882,20 @@ export async function acceptEarlierSlot(
             });
             return { success: false, message: "Oferta nie jest już aktualna" };
           }
-          const blocked = await depositBlocksNewAppointment();
-          if (blocked) return blocked;
+          const refused = await newAppointmentRefusal();
+          if (refused) return refused;
           appointmentId = await insertNewAppointment();
         }
       } else {
         // Existing appointment was cancelled or missing – create new
-        const blocked = await depositBlocksNewAppointment();
-        if (blocked) return blocked;
+        const refused = await newAppointmentRefusal();
+        if (refused) return refused;
         appointmentId = await insertNewAppointment();
       }
     } else {
       // No existing appointment – create new
-      const blocked = await depositBlocksNewAppointment();
-      if (blocked) return blocked;
+      const refused = await newAppointmentRefusal();
+      if (refused) return refused;
       appointmentId = await insertNewAppointment();
     }
   } catch (error) {

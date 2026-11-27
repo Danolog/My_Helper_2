@@ -18,6 +18,8 @@
  *    - niezablokowana karta z tym samym numerem → brak dopasowania;
  *    - RLS: w kontekście salonu A karta salonu B jest niewidoczna nawet bez
  *      warunku `salon_id` w zapytaniu.
+ * d) To samo sprawdzenie po zweryfikowanym e-mailu konta (dołączenie do listy
+ *    oczekujących): zablokowana karta z tym e-mailem w innym salonie nie blokuje.
  *
  * Mocki: tylko logger. `@/lib/db` → pula testu, `forSalon` prawdziwe.
  * Dane: użytkownicy `it-t3-oblock-…` (prefiks z notatki sprzątania w pg-harness.ts);
@@ -281,6 +283,35 @@ suite("blokada rezerwacji online (migracja 0019), prawdziwy Postgres", () => {
         tx.select({ id: clients.id }).from(clients).where(eq(clients.id, ids.clientB))
       );
       expect(visibleInB).toEqual([{ id: ids.clientB }]);
+    });
+  });
+
+  describe("d) zalogowany klient po e-mailu (dołączenie do listy oczekujących)", () => {
+    const email = `it-t3-oblock-klient-${RUN}@example.invalid`;
+    const account = { email, emailVerified: true };
+
+    beforeAll(async () => {
+      // Ten sam e-mail: karta zablokowana w salonie B, karta bez blokady w salonie A.
+      await insertClient(ids.salonB, { email, ...blocked(OWNER_B) });
+      await insertClient(ids.salonA, { email });
+    });
+
+    it("zablokowana karta z tym e-mailem tylko w innym salonie → brak blokady w salonie A", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: account })).toEqual({ blocked: false });
+    });
+
+    it("w salonie B ta sama karta blokuje (dopasowanie po e-mailu)", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonB, sessionUser: account })).toEqual({
+        blocked: true,
+        salonPhone: null,
+        matchedBy: "email",
+      });
+    });
+
+    it("niezweryfikowany e-mail nie dopasowuje karty", async () => {
+      expect(
+        await findOnlineBookingBlock({ salonId: ids.salonB, sessionUser: { email, emailVerified: false } })
+      ).toEqual({ blocked: false });
     });
   });
 });

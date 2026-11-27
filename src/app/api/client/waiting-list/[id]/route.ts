@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { ONLINE_BOOKING_UNAVAILABLE_CODE } from "@/lib/client-block";
 import { verifiedClientMatchEmail } from "@/lib/client-match";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 import { db } from "@/lib/db";
@@ -91,6 +92,14 @@ export async function POST(
         );
         logger.info(`[Client WaitingList API] POST [id]: Accept result for ${id}`,
           { result: acceptResult as unknown as Record<string, unknown> });
+        // Karta z blokadą rezerwacji online: ten sam 403 i komunikat co
+        // onlineBookingBlockResponse przy rezerwacji w portalu.
+        if (acceptResult.code === ONLINE_BOOKING_UNAVAILABLE_CODE) {
+          return NextResponse.json(
+            { success: false, code: acceptResult.code, error: acceptResult.message },
+            { status: 403 }
+          );
+        }
         return NextResponse.json({
           success: acceptResult.success,
           message: acceptResult.message,
