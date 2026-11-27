@@ -13,7 +13,9 @@
  *
  * Dowody (próg salonu A = 2):
  * 1. gość z numerem karty nie przyszedł dwa razy → licznik 2, karta BEZ
- *    blokady; wizyty nadal bez karty, żadna karta nie powstała;
+ *    blokady; wizyty nadal bez karty, żadna karta nie powstała; phoneOnlyCount 2;
+ * 1b. phoneOnlyCount: wizyta z kartą, wizyta konta po e-mailu z numerem karty
+ *    i wizyta gościa po numerze → „tylko po telefonie” liczy wyłącznie gościa;
  * 2. zalogowany ze zweryfikowanym e-mailem (e-mail karty innej wielkości
  *    liter, ze spacją) → karta zablokowana ('auto'), licznik 2;
  * 2b. konto z niezweryfikowanym e-mailem → licznik 0, bez blokady;
@@ -83,7 +85,9 @@ const OTHER_SALON_CUSTOMER = `it-t3-nsonline-s-${RUN}`;
 const TWO_CARDS_CUSTOMER = `it-t3-nsonline-d-${RUN}`;
 const RACE_CUSTOMER = `it-t3-nsonline-r-${RUN}`;
 const RACE_MIXED_CUSTOMER = `it-t3-nsonline-m-${RUN}`;
+const PHONE_AND_EMAIL_CUSTOMER = `it-t3-nsonline-e-${RUN}`;
 const USERS = [
+  PHONE_AND_EMAIL_CUSTOMER,
   OWNER_A,
   OWNER_B,
   OWNER_C,
@@ -108,6 +112,7 @@ const PHONE_OTHER_SALON = "600300102";
 const PHONE_TWO_CARDS = "600300103";
 const PHONE_THRESHOLD_OFF = "600300104";
 const PHONE_TYPED_BY_USER = "600300107";
+const PHONE_AND_EMAIL = "600300108";
 /** 8 cyfr: ani karta, ani wizyta nie mają klucza 9 cyfr. */
 const PHONE_UNREADABLE = "60030010";
 
@@ -165,13 +170,19 @@ async function markNoShow(salonId: string, appointmentId: string) {
   );
 }
 
-async function noShowCount(salonId: string, clientId: string): Promise<number> {
+async function noShowCounter(salonId: string, clientId: string): Promise<{ noShowCount: number; phoneOnlyCount: number }> {
   ctl.salonId = salonId;
-  const res = await parseResponse<{ data: { noShowCount: number } }>(
+  const res = await parseResponse<{ data: { noShowCount: number; phoneOnlyCount: number } }>(
     await noShowsRoute.GET(new Request(`http://localhost/api/clients/${clientId}/no-shows`), createRouteParams(clientId))
   );
   expect(res.status).toBe(200);
-  return res.body.data.noShowCount;
+  // Odpowiedz trasy zawiera tez clientId; testy porownuja tylko liczniki.
+  const { noShowCount, phoneOnlyCount } = res.body.data;
+  return { noShowCount, phoneOnlyCount };
+}
+
+async function noShowCount(salonId: string, clientId: string): Promise<number> {
+  return (await noShowCounter(salonId, clientId)).noShowCount;
 }
 
 async function blockOf(clientId: string) {
@@ -329,6 +340,37 @@ suite("nieobecności wizyt online w automatycznej blokadzie, prawdziwy Postgres"
     expect((await blockOf(card)).blockedAt).toBeNull();
     expect(await appointmentCards(visits)).toEqual([null, null]);
     expect(await clientCount(ids.salonA)).toBe(cardsBefore);
+    // Obie nieobecności tylko po telefonie — tyle pokazuje linia pod licznikiem.
+    expect((await noShowCounter(ids.salonA, card)).phoneOnlyCount).toBe(THRESHOLD);
+  });
+
+  it("1b: phoneOnlyCount — wizyta po telefonie i e-mailu naraz nie jest „tylko po telefonie”", async () => {
+    const card = await insertClient(ids.salonA, {
+      phone: PHONE_AND_EMAIL,
+      email: emailOf(PHONE_AND_EMAIL_CUSTOMER),
+    });
+    // Wizyta z kartą, wizyta konta (zweryfikowany e-mail karty) z numerem karty
+    // i wizyta gościa z numerem karty: tylko ostatnia jest „tylko po telefonie”.
+    const visits = [
+      await insertOnline(ids.salonA, { clientId: card }),
+      await insertOnline(ids.salonA, {
+        bookedByUserId: PHONE_AND_EMAIL_CUSTOMER,
+        guestPhone: `+48${PHONE_AND_EMAIL}`,
+      }),
+      await insertOnline(ids.salonA, { guestPhone: `+48${PHONE_AND_EMAIL}` }),
+    ];
+    expect(await noShowCounter(ids.salonA, card)).toEqual({ noShowCount: 0, phoneOnlyCount: 0 });
+
+    // Kolejność: najpierw gość, żeby karta nie przekroczyła progu przed końcem.
+    await markNoShow(ids.salonA, visits[2]!);
+    expect(await noShowCounter(ids.salonA, card)).toEqual({ noShowCount: 1, phoneOnlyCount: 1 });
+    await markNoShow(ids.salonA, visits[1]!);
+    expect(await noShowCounter(ids.salonA, card)).toEqual({ noShowCount: 2, phoneOnlyCount: 1 });
+    expect((await blockOf(card)).blockedAt).toBeNull();
+    // Wizyta z kartą dochodzi do progu (2 bez telefonu) → blokada, linia bez zmian.
+    const third = await markNoShow(ids.salonA, visits[0]!);
+    expect(third.body.data?.clientAutoBlocked).toBe(true);
+    expect(await noShowCounter(ids.salonA, card)).toEqual({ noShowCount: 3, phoneOnlyCount: 1 });
   });
 
   it("2: zalogowany ze zweryfikowanym e-mailem po progu → karta (inna wielkość liter, spacja) zablokowana", async () => {
