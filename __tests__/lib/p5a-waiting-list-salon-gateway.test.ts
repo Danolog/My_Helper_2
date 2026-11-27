@@ -187,12 +187,12 @@ describe("acceptEarlierSlot: salon z tokenu, zapisy przez forSalon", () => {
     h.tx.select
       .mockReturnValueOnce(createChainMock([entry()]))
       .mockReturnValueOnce(createChainMock([]))
-      .mockReturnValueOnce(createChainMock([{ blockedAt: null }]));
+      .mockReturnValueOnce(createChainMock([])); // blokada rezerwacji online: brak trafienia
 
     const res = await acceptEarlierSlot("wl-A", "tok-A");
 
     expect(res).toMatchObject({ success: true, appointmentId: "new-row" });
-    // odczyt wpisu, kolizja, blokada karty, insert wizyty, accepted, notyfikacja
+    // odczyt wpisu, kolizja, blokada rezerwacji online, insert wizyty, accepted, notyfikacja
     expect(h.gate.salonIds).toEqual([SALON_A, SALON_A, SALON_A, SALON_A, SALON_A, SALON_A]);
     expect(h.tx.insert).toHaveBeenCalledTimes(2);
     expect(h.tx.update).toHaveBeenCalledTimes(1);
@@ -217,7 +217,7 @@ describe("acceptEarlierSlot: salon z tokenu, zapisy przez forSalon", () => {
     h.tx.select
       .mockReturnValueOnce(createChainMock([entry()]))
       .mockReturnValueOnce(createChainMock([]))
-      .mockReturnValueOnce(createChainMock([{ blockedAt: null }]));
+      .mockReturnValueOnce(createChainMock([])); // blokada rezerwacji online: brak trafienia
 
     const res = await acceptEarlierSlot("wl-A", "tok-A");
 
@@ -382,19 +382,25 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
     expect(w.inserted).toEqual([expect.objectContaining({ salonId: SALON_A })]); // notyfikacja
   });
 
-  it("accept, nowa wizyta: odczyt blokady karty, insert wizyty i notyfikacji oraz zadatek z salonem z tokenu", async () => {
+  it("accept, nowa wizyta: odczyt blokady, insert wizyty i notyfikacji oraz zadatek z salonem z tokenu", async () => {
     const w = recordWrites();
-    const cardRead = createChainMock([{ blockedAt: null }]);
+    // Puste trafienie findOnlineBookingBlock: brak zablokowanej karty tego klienta.
+    const blockRead = createChainMock([]);
     h.tx.select
       .mockReturnValueOnce(createChainMock([entry({ salonId: OTHER })]))
       .mockReturnValueOnce(createChainMock([]))
-      .mockReturnValueOnce(cardRead);
+      .mockReturnValueOnce(blockRead);
 
     const res = await acceptEarlierSlot("wl-A", "tok-A");
 
     expect(res.success).toBe(true);
-    expect(salonCond(cardRead, "clients", SALON_A), "blokada karty: salon z tokenu").toBe(true);
-    expect(salonCond(cardRead, "clients", OTHER), "blokada karty: nie entry.salonId").toBe(false);
+    expect(salonCond(blockRead, "clients", SALON_A), "blokada: karty salonu z tokenu").toBe(true);
+    expect(salonCond(blockRead, "clients", OTHER), "blokada: nie entry.salonId").toBe(false);
+    // Karta wpisu w podzapytaniu „ten sam klient” też z jawnym salonem z tokenu.
+    expect(salonCond(blockRead, "linked_card", SALON_A), "blokada: karta wpisu w salonie z tokenu").toBe(true);
+    expect(salonCond(blockRead, "linked_card", OTHER), "blokada: karta wpisu nie z entry.salonId").toBe(false);
+    const blockWhere = (blockRead.where as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(render(blockWhere).params, "blokada: karta wpisu").toContain("client-A");
     expect(w.inserted).toEqual([
       expect.objectContaining({ salonId: SALON_A, status: "scheduled" }),
       expect.objectContaining({ salonId: SALON_A, type: "system" }),

@@ -158,7 +158,7 @@ describe("acceptEarlierSlot: termin w wierszu potwierdzenia w Europe/Warsaw przy
         ])
       )
       .mockReturnValueOnce(createChainMock([])) // kolizja: brak
-      .mockReturnValueOnce(createChainMock([{ blockedAt: null }])); // karta klienta bez blokady
+      .mockReturnValueOnce(createChainMock([])); // blokada rezerwacji online: brak zablokowanej karty
     const inserted: Record<string, unknown>[] = [];
     h.tx.insert.mockImplementation(() => {
       const chain = createChainMock([{ id: "apt-new" }]);

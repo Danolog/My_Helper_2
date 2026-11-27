@@ -1,18 +1,23 @@
 /**
- * acceptEarlierSlot (lista oczekujących) — karta klienta z blokadą rezerwacji
- * online: NOWA wizyta nie powstaje (kod ONLINE_BOOKING_UNAVAILABLE, trasa 403),
- * przeniesienie istniejącej wizyty przechodzi. Odczyt blokady przez bramę
- * salonu z jawnym warunkiem id karty i salonu (renderowany dialektem Postgresa).
+ * acceptEarlierSlot (lista oczekujących) — klient z blokadą rezerwacji online:
+ * NOWA wizyta nie powstaje (kod ONLINE_BOOKING_UNAVAILABLE, trasa 403),
+ * przeniesienie istniejącej wizyty przechodzi. Blokadę sprawdza ta sama
+ * reguła co portal: findOnlineBookingBlock z kartą wpisu (karta wpisu albo
+ * inna karta salonu z tym samym e-mailem lub numerem). Samo zapytanie ma
+ * własne testy (online-booking-block, pg); tu wynik jest podstawiony.
  *
- * Kolejność odczytów (select) przy nowej wizycie: [wpis], [kolizje], [karta],
- * a przy blokadzie dodatkowo [telefon salonu].
+ * Kolejność odczytów (select) przy nowej wizycie: [wpis], [kolizje].
  */
-import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createChainMock } from "../api/helpers";
-import type { SQL } from "drizzle-orm";
 
-const h = vi.hoisted(() => ({ select: vi.fn(), insert: vi.fn(), update: vi.fn(), calc: vi.fn() }));
+const h = vi.hoisted(() => ({
+  select: vi.fn(),
+  insert: vi.fn(),
+  update: vi.fn(),
+  calc: vi.fn(),
+  block: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -33,6 +38,10 @@ vi.mock("@/lib/server/repository", async () => {
     forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
   };
 });
+vi.mock("@/lib/online-booking-block", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/online-booking-block")>()),
+  findOnlineBookingBlock: (...a: unknown[]) => h.block(...a),
+}));
 vi.mock("@/lib/push", () => ({ sendPushNotification: vi.fn() }));
 vi.mock("@/lib/sms", async (importOriginal) => ({
   SMS_TIME_ZONE: (await importOriginal<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
@@ -49,10 +58,8 @@ vi.mock("@/lib/logger", () => ({
 
 import { acceptEarlierSlot } from "@/lib/waiting-list";
 
-const dialect = new PgDialect();
 const FUTURE_START = new Date(Date.now() + 2 * 86400000);
 const FUTURE_END = new Date(FUTURE_START.getTime() + 3600000);
-const BLOCKED_AT = new Date("2026-11-20T09:00:00.000Z");
 
 function entry(extra: Record<string, unknown> = {}) {
   return {
@@ -72,33 +79,29 @@ function entry(extra: Record<string, unknown> = {}) {
   };
 }
 
-type Chain = ReturnType<typeof createChainMock>;
-
-/** Kolejne wyniki select; zwraca łańcuchy, żeby sprawdzić ich `where`. */
-function selects(...results: unknown[][]): Chain[] {
-  const chains = results.map((r) => createChainMock(r as never));
-  for (const c of chains) h.select.mockReturnValueOnce(c);
-  return chains;
+/** Kolejne wyniki select. */
+function selects(...results: unknown[][]) {
+  for (const r of results) h.select.mockReturnValueOnce(createChainMock(r as never));
 }
 
-function renderedWhere(chain: Chain) {
-  const where = chain.where as ReturnType<typeof vi.fn>;
-  return dialect.sqlToQuery(where.mock.calls[0]![0] as SQL);
-}
+const blocked = (salonPhone: string | null) => ({ blocked: true, salonPhone, matchedBy: "card" });
 
 beforeEach(() => {
   vi.clearAllMocks();
   h.select.mockReset();
   h.insert.mockReset();
   h.update.mockReset();
+  h.block.mockReset();
   h.select.mockReturnValue(createChainMock([]));
   h.insert.mockReturnValue(createChainMock([{ id: "apt-new" }]));
   h.update.mockReturnValue(createChainMock([]));
+  h.block.mockResolvedValue({ blocked: false });
 });
 
-describe("acceptEarlierSlot — blokada rezerwacji online karty klienta", () => {
-  it("karta z blokadą, nowa wizyta → odmowa z kodem i komunikatem z telefonem salonu, nic nie zapisane", async () => {
-    const [, , card] = selects([entry()], [], [{ blockedAt: BLOCKED_AT }], [{ phone: "+48 91 000 00 00" }]);
+describe("acceptEarlierSlot — blokada rezerwacji online klienta", () => {
+  it("blokada, nowa wizyta → odmowa z kodem i komunikatem z telefonem salonu, nic nie zapisane", async () => {
+    selects([entry()], []);
+    h.block.mockResolvedValue(blocked("+48 91 000 00 00"));
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
@@ -109,13 +112,20 @@ describe("acceptEarlierSlot — blokada rezerwacji online karty klienta", () => 
     });
     expect(h.insert).not.toHaveBeenCalled();
     expect(h.update).not.toHaveBeenCalled(); // wpis zostaje nierozstrzygnięty
-    const where = renderedWhere(card!);
-    expect(where.sql).toBe('("clients"."id" = $1 and "clients"."salon_id" = $2)');
-    expect(where.params).toEqual(["client-1", "salon-1"]);
   });
 
-  it("karta z blokadą, salon bez telefonu → komunikat ogólny", async () => {
-    selects([entry()], [], [{ blockedAt: BLOCKED_AT }], [{ phone: null }]);
+  it("sprawdzenie używa reguły tego samego klienta: salon wpisu, karta wpisu, bez sesji", async () => {
+    selects([entry()], []);
+
+    await acceptEarlierSlot("wl-1", "tok");
+
+    expect(h.block).toHaveBeenCalledTimes(1);
+    expect(h.block).toHaveBeenCalledWith({ salonId: "salon-1", sessionUser: null, clientId: "client-1" });
+  });
+
+  it("blokada, salon bez telefonu → komunikat ogólny", async () => {
+    selects([entry()], []);
+    h.block.mockResolvedValue(blocked(null));
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
@@ -124,7 +134,8 @@ describe("acceptEarlierSlot — blokada rezerwacji online karty klienta", () => 
   });
 
   it("blokada sprawdzana przed zadatkiem: usługa z zadatkiem i blokada → kod blokady, bez liczenia zadatku", async () => {
-    selects([entry({ serviceId: "service-1" })], [], [{ blockedAt: BLOCKED_AT }], [{ phone: null }]);
+    selects([entry({ serviceId: "service-1" })], []);
+    h.block.mockResolvedValue(blocked(null));
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
@@ -132,40 +143,41 @@ describe("acceptEarlierSlot — blokada rezerwacji online karty klienta", () => 
     expect(h.calc).not.toHaveBeenCalled();
   });
 
-  it("powiązana wizyta odwołana + blokada → odmowa nowej wizyty", async () => {
+  it("powiązana wizyta odwołana w trakcie + blokada innej karty tego klienta → odmowa nowej wizyty", async () => {
     selects(
       [entry({ existingAppointmentId: "apt-old" })],
       [], // kolizje
-      [{ id: "apt-old", status: "cancelled", startTime: FUTURE_START }],
-      [{ blockedAt: BLOCKED_AT }],
-      [{ phone: null }]
+      [{ id: "apt-old", status: "cancelled", startTime: FUTURE_START }]
     );
+    h.block.mockResolvedValue(blocked(null));
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
     expect(res.code).toBe("ONLINE_BOOKING_UNAVAILABLE");
+    expect(h.block).toHaveBeenCalledWith({ salonId: "salon-1", sessionUser: null, clientId: "client-1" });
     expect(h.insert).not.toHaveBeenCalled();
   });
 
-  it("przeniesienie istniejącej wizyty przy blokadzie karty → sukces, blokada nie jest czytana", async () => {
+  it("przeniesienie istniejącej wizyty przy blokadzie → sukces, blokada nie jest sprawdzana", async () => {
     selects(
       [entry({ existingAppointmentId: "apt-old" })],
       [], // kolizje
       [{ id: "apt-old", status: "scheduled", startTime: new Date(FUTURE_START.getTime() + 86400000), notes: null }]
     );
     h.update.mockReturnValueOnce(createChainMock([{ id: "apt-old" }])); // zapis przeniesienia objął wizytę
+    h.block.mockResolvedValue(blocked(null));
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
     expect(res.success).toBe(true);
     expect(res.appointmentId).toBe("apt-old");
     expect(res.code).toBeUndefined();
-    expect(h.select).toHaveBeenCalledTimes(3); // wpis, kolizje, powiązana wizyta — bez karty
+    expect(h.block).not.toHaveBeenCalled();
     expect(h.insert).toHaveBeenCalledTimes(1); // tylko wpis historii powiadomień
   });
 
-  it("karta bez blokady → nowa wizyta powstaje", async () => {
-    selects([entry()], [], [{ blockedAt: null }]);
+  it("bez blokady → nowa wizyta powstaje", async () => {
+    selects([entry()], []);
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
@@ -174,13 +186,11 @@ describe("acceptEarlierSlot — blokada rezerwacji online karty klienta", () => 
     expect(res.code).toBeUndefined();
   });
 
-  it("karta niewidoczna w salonie wpisu (np. blokada tylko w innym salonie) → nowa wizyta powstaje", async () => {
-    const [, , card] = selects([entry()], [], []);
+  it("błąd sprawdzenia blokady → wyjątek, nowa wizyta nie powstaje", async () => {
+    selects([entry()], []);
+    h.block.mockRejectedValue(new Error("db down"));
 
-    const res = await acceptEarlierSlot("wl-1", "tok");
-
-    expect(res.success).toBe(true);
-    expect(res.appointmentId).toBe("apt-new");
-    expect(renderedWhere(card!).params).toEqual(["client-1", "salon-1"]);
+    await expect(acceptEarlierSlot("wl-1", "tok")).rejects.toThrow("db down");
+    expect(h.insert).not.toHaveBeenCalled();
   });
 });

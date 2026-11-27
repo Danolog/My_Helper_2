@@ -8,7 +8,7 @@ import {
   DEPOSIT_REQUIRED_MESSAGE,
 } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
-import { sameCustomerOnlineBookingBlocked } from "@/lib/online-booking-block";
+import { findOnlineBookingBlock, sameCustomerOnlineBookingBlocked } from "@/lib/online-booking-block";
 import { sendPushNotification } from "@/lib/push";
 import {
   waitingList,
@@ -823,26 +823,19 @@ export async function acceptEarlierSlot(
     return { success: false, message };
   };
 
-  // Blokada rezerwacji online karty wpisu: odczyt tuż przed utworzeniem nowej
-  // wizyty, przez tę samą bramę salonu, z jawnym warunkiem id karty i salonu.
-  // Telefon salonu tylko przy blokadzie — do komunikatu dla klienta.
+  // Blokada rezerwacji online tuż przed utworzeniem nowej wizyty, ta sama
+  // reguła co w portalu i przy wysyłce ofert: karta wpisu albo inna karta
+  // tego salonu z tym samym e-mailem lub numerem (findOnlineBookingBlock
+  // z clientId, przez forSalon). Obejmuje też powrót do nowej wizyty, gdy
+  // wizyta do przeniesienia zniknęła w trakcie przyjęcia.
   const onlineBookingBlockRefusal = async (): Promise<AcceptResult | null> => {
-    const [card] = await gate.raw((tx) =>
-      tx
-        .select({ blockedAt: clients.blockedAt })
-        .from(clients)
-        .where(and(eq(clients.id, entry.clientId), eq(clients.salonId, salonId)))
-        .limit(1)
-    );
-    if (!card?.blockedAt) return null;
-    const [salon] = await gate.raw((tx) =>
-      tx.select({ phone: salons.phone }).from(salons).where(eq(salons.id, salonId)).limit(1)
-    );
+    const block = await findOnlineBookingBlock({ salonId, sessionUser: null, clientId: entry.clientId });
+    if (!block.blocked) return null;
     logger.info("Waiting list offer refused: client online booking blocked", { waitingListId, salonId });
     return {
       success: false,
       code: ONLINE_BOOKING_UNAVAILABLE_CODE,
-      message: onlineBookingUnavailableMessage(salon?.phone),
+      message: onlineBookingUnavailableMessage(block.salonPhone),
     };
   };
 
