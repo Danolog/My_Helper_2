@@ -24,7 +24,20 @@ describe("HeaderNavLinks", () => {
     mockSession = { data: { user: { id: "u1", role: "owner" } }, isPending: false };
     render(<HeaderNavLinks />);
     expect(screen.queryByText("Pulpit")).toBeNull();
-    expect(screen.getByText("Salony")).toBeInTheDocument();
+    expect(screen.getByText("Moje wizyty")).toBeInTheDocument();
+  });
+
+  it("klient bez salonu: katalog i ulubione zamrożone => tylko „Moje wizyty”", () => {
+    render(<HeaderNavLinks />);
+    const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["/appointments"]);
+  });
+
+  it("gość: funkcje i cennik na stronie głównej, bez linku do katalogu", () => {
+    mockSession = { data: null, isPending: false };
+    render(<HeaderNavLinks />);
+    const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(["/#features", "/#pricing"]);
   });
 
   it("konto z salonem (bez user.role) => linki panelu", () => {

@@ -19,7 +19,8 @@ async function loginAsClient(page: Page) {
   await page.fill('#email', CLIENT_CREDENTIALS.email);
   await page.fill('#password', CLIENT_CREDENTIALS.password);
   // Po udanym logowaniu klient Better Auth robi pelne przeladowanie na adres
-  // docelowy (window.location.href = callbackURL, tu /salons). Czekamy na
+  // docelowy (window.location.href = callbackURL, tu /appointments — katalog
+  // salonow jest zamrozony). Czekamy na
   // KONIEC tego ladowania — nasluch ustawiony przed kliknieciem.
   // Poprzedni wzorzec /(salons|appointments|dashboard|portal)/ pasowal tez do
   // samego /portal/login: helper wracal natychmiast, a nastepne page.goto()
@@ -28,25 +29,31 @@ async function loginAsClient(page: Page) {
   const redirectedAfterLogin = page.waitForEvent('load', { timeout: 20000 });
   await page.locator('form button[type="submit"]').click();
   await redirectedAfterLogin;
-  await expect(page).toHaveURL(/\/salons/);
+  await expect(page).toHaveURL((url) => url.pathname === '/appointments');
 }
 
 /**
- * /salons → klik w pierwszy salon → czeka, az adres zmieni sie na strone salonu.
- * Link Next.js nawiguje po stronie klienta: waitForLoadState('domcontentloaded')
- * wraca od razu (dokument sie nie zmienia), wiec bez czekania na URL kolejny krok
- * (np. goBack) startowal przed zatwierdzeniem nawigacji i trafial w about:blank.
- * Zwraca sciezke strony salonu.
+ * Salon testowy z seeda. Katalog salonow (lista `/salons`) jest zamrozony —
+ * klient wchodzi na strone salonu z linku od salonu, wiec testy otwieraja ja
+ * wprost, a nie przez liste.
  */
-async function openFirstSalonFromList(page: Page): Promise<string> {
-  await page.goto('/salons');
-  await page.waitForLoadState('domcontentloaded');
-  const salonLink = page.locator('a[href*="/salons/"]').first();
-  await expect(salonLink, 'lista salonow bez linku do salonu (seed: salon testowy)').toBeVisible({ timeout: 15000 });
-  const salonPath = new URL((await salonLink.getAttribute('href'))!, page.url()).pathname;
-  await salonLink.click();
-  await page.waitForURL((url) => url.pathname === salonPath);
-  return salonPath;
+const SALON_ID = '00000000-0000-4000-8000-000000000001';
+const SALON_PATH = `/salons/${SALON_ID}`;
+/** Nazwa salonu i usluga z seeda (`scripts/seed-test.ts`). */
+const SALON_NAME = 'Beauty Studio Demo';
+const SERVICE_ID = '00000000-0000-4000-8000-5e0000000001';
+const SERVICE_NAME = 'Strzyzenie damskie';
+
+/** Strona salonu sie pokazala: nazwa z seeda, bez stanu „Salon nie znaleziony”. */
+async function expectSalonPageRendered(page: Page) {
+  await expect(page.getByText(SALON_NAME, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(/salon nie znaleziony/i)).toHaveCount(0);
+}
+
+/** Strona publiczna zamrozonego modulu: proxy przekierowuje na strone glowna. */
+async function expectRedirectedHome(page: Page, path: string) {
+  await page.goto(path, { waitUntil: 'load' });
+  await expect(page).toHaveURL((url) => url.pathname === '/');
 }
 
 // ---------------------------------------------------------------------------
@@ -57,14 +64,12 @@ test.describe('Flow 7: Client Portal', () => {
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test.describe('Happy path', () => {
-    test('should display salon browsing page (public, no auth)', { tag: ['@smoke', '@csp'] }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
+    test('should display salon page (public, no auth)', { tag: ['@smoke', '@csp'] }, async ({ page }) => {
+      await page.goto(SALON_PATH, { waitUntil: 'load' });
 
-      await expect(
-        // UI: "Znajdz idealny salon" (no diacritics)
-        page.getByText(/salon|us[lł]ug|znajd[zź]|browse/i).first()
-      ).toBeVisible({ timeout: 5000 });
+      await expect(page).toHaveURL((url) => url.pathname === SALON_PATH);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+      await expectSalonPageRendered(page);
     });
 
     test('should display client login page', { tag: '@full' }, async ({ page }) => {
@@ -87,50 +92,36 @@ test.describe('Flow 7: Client Portal', () => {
       ).toBeVisible();
     });
 
-    test('should browse salons without authentication', { tag: '@smoke' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
+    test('salon list is frozen: /salons redirects to home page', { tag: '@smoke' }, async ({ page }) => {
+      await expectRedirectedHome(page, '/salons');
+      // Strona glowna to oferta dla salonow, nie wybor roli.
+      await expect(page.locator('#pricing')).toBeAttached({ timeout: 15000 });
+      await expect(page.locator('a[href="/salons"]')).toHaveCount(0);
+    });
 
-      // Should be able to see salon list without login
-      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      await expect(page).toHaveURL(/\/salons/);
+    test('client landing is frozen: /dla-klientow redirects to home page', { tag: '@full' }, async ({ page }) => {
+      await expectRedirectedHome(page, '/dla-klientow');
     });
 
     test('should view salon detail page', { tag: '@full' }, async ({ page }) => {
-      // Asercja na stronie salonu, nie na liscie (wczesniej klik nie byl
-      // zatwierdzony przed sprawdzeniem, a brak linku pomijal test).
-      await openFirstSalonFromList(page);
+      await page.goto(SALON_PATH, { waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === SALON_PATH);
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should view salon services', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-
-      const salonLink = page.locator('a[href*="/salons/"]').first();
-      if (await salonLink.isVisible()) {
-        const href = await salonLink.getAttribute('href');
-        if (href) {
-          await page.goto(`${href}/services`);
-          await page.waitForLoadState('domcontentloaded');
-          await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-        }
-      }
+    test('should view salon service page', { tag: '@full' }, async ({ page }) => {
+      // Osobnej listy uslug nie ma — jest strona jednej uslugi `services/[serviceId]`.
+      const servicePath = `${SALON_PATH}/services/${SERVICE_ID}`;
+      await page.goto(servicePath, { waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === servicePath);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+      await expect(page.getByTestId('service-name')).toHaveText(SERVICE_NAME, { timeout: 15000 });
     });
 
     test('should view salon gallery', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-
-      const salonLink = page.locator('a[href*="/salons/"]').first();
-      if (await salonLink.isVisible()) {
-        const href = await salonLink.getAttribute('href');
-        if (href) {
-          await page.goto(`${href}/gallery`);
-          await page.waitForLoadState('domcontentloaded');
-          await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-        }
-      }
+      await page.goto(`${SALON_PATH}/gallery`, { waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === `${SALON_PATH}/gallery`);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
     test('should display appointments page for logged-in client', { tag: '@full' }, async ({ page }) => {
@@ -145,16 +136,9 @@ test.describe('Flow 7: Client Portal', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display favorites page for logged-in client', { tag: '@full' }, async ({ page }) => {
+    test('favorites are frozen: logged-in client is redirected home', { tag: '@full' }, async ({ page }) => {
       await loginAsClient(page);
-      await page.goto('/favorites');
-      await page.waitForLoadState('domcontentloaded');
-
-      await expect(
-        page.getByText(/ulubion|favorite|zapisane/i).first()
-          .or(page.getByText(/brak|pust|no/i).first())
-          .first()
-      ).toBeVisible({ timeout: 5000 });
+      await expectRedirectedHome(page, '/favorites');
     });
 
     test('should display waiting list page for logged-in client', { tag: '@full' }, async ({ page }) => {
@@ -170,20 +154,14 @@ test.describe('Flow 7: Client Portal', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should navigate to salon booking page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-
-      const salonLink = page.locator('a[href*="/salons/"]').first();
-      if (await salonLink.isVisible()) {
-        const href = await salonLink.getAttribute('href');
-        if (href) {
-          await page.goto(`${href}/book`);
-          await page.waitForLoadState('domcontentloaded');
-          // Should show booking form or login prompt
-          await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-        }
-      }
+    test('guest can open salon booking page', { tag: '@full' }, async ({ page }) => {
+      // Rezerwacja goscia bez konta zostaje mimo zamrozenia katalogu.
+      await page.goto(`${SALON_PATH}/book`, { waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === `${SALON_PATH}/book`);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+      // Formularz sie wyrenderowal: krok wyboru uslugi z usluga z seeda.
+      await expect(page.getByTestId(`booking-service-option-${SERVICE_ID}`)).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(/salon nie znaleziony/i)).toHaveCount(0);
     });
   });
 
@@ -205,18 +183,17 @@ test.describe('Flow 7: Client Portal', () => {
     });
 
     test('should redirect unauthenticated user from appointments page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/appointments');
-      // Should redirect to login or show auth prompt
-      await page.waitForLoadState('domcontentloaded');
-      const url = page.url();
-      expect(url).toMatch(/\/(login|portal|appointments)/);
+      await page.goto('/appointments', { waitUntil: 'load' });
+      // Logowanie klienta z powrotem na wizyty — nie logowanie panelu salonu (/login).
+      await expect(page).toHaveURL(
+        (url) => url.pathname === '/portal/login' && url.searchParams.get('returnTo') === '/appointments',
+        { timeout: 15000 }
+      );
     });
 
     test('should redirect unauthenticated user from favorites page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/favorites');
-      await page.waitForLoadState('domcontentloaded');
-      const url = page.url();
-      expect(url).toMatch(/\/(login|portal|favorites)/);
+      // Ulubione zamrozone: proxy przekierowuje na strone glowna przed logowaniem.
+      await expectRedirectedHome(page, '/favorites');
     });
 
     test('should handle non-existent salon ID gracefully', { tag: '@full' }, async ({ page }) => {
@@ -248,59 +225,41 @@ test.describe('Flow 7: Client Portal', () => {
   // ── Edge cases ──────────────────────────────────────────────────────────
 
   test.describe('Edge cases', () => {
-    test('should handle salon list with no salons', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-      // Should show empty state or list
+    test('should handle salon list query string (still redirected)', { tag: '@full' }, async ({ page }) => {
+      await expectRedirectedHome(page, '/salons?q=%3Cscript%3E');
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
     test('should handle rapid navigation between client pages', { tag: '@full' }, async ({ page }) => {
-      const clientPages = ['/salons', '/appointments', '/favorites', '/waiting-list'];
+      const clientPages = [SALON_PATH, '/appointments', '/salons', '/waiting-list'];
       for (const path of clientPages) {
-        await page.goto(path);
+        await page.goto(path, { waitUntil: 'load' });
       }
-      await page.waitForLoadState('domcontentloaded');
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should handle search with special characters on salons page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-
-      const searchInput = page.locator(
-        'input[type="search"], input[placeholder*="szukaj"], input[placeholder*="search"]'
-      ).first();
-      if (await searchInput.isVisible()) {
-        await searchInput.fill('<script>alert("xss")</script>');
-        // Should sanitize and not execute script
-        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      }
-    });
-
-    test('should render client portal on mobile viewport', { tag: '@full' }, async ({ page }) => {
+    test('should render salon page on mobile viewport', { tag: '@full' }, async ({ page }) => {
       await page.setViewportSize({ width: 375, height: 812 });
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
+      await page.goto(SALON_PATH, { waitUntil: 'load' });
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should render client portal on tablet viewport', { tag: '@full' }, async ({ page }) => {
+    test('should render salon page on tablet viewport', { tag: '@full' }, async ({ page }) => {
       await page.setViewportSize({ width: 834, height: 1194 });
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
+      await page.goto(SALON_PATH, { waitUntil: 'load' });
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
     test('should handle back/forward browser navigation', { tag: '@full' }, async ({ page }) => {
-      // goBack dopiero po zatwierdzeniu nawigacji do salonu (helper czeka na URL);
-      // wczesniej goBack startowal za wczesnie i trafial w about:blank.
-      const salonPath = await openFirstSalonFromList(page);
-      await page.goBack();
-      // Dokladnie lista, nie /\/salons/ — ten wzorzec pasowal tez do strony salonu.
-      await expect(page).toHaveURL((url) => url.pathname === '/salons');
-      await page.goForward();
-      await expect(page).toHaveURL((url) => url.pathname === salonPath);
+      // Strona glowna -> strona salonu -> wstecz -> naprzod. Kazdy krok czeka
+      // na zatwierdzony adres (wczesniej goBack startowal za wczesnie).
+      await page.goto('/', { waitUntil: 'load' });
+      await page.goto(SALON_PATH, { waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === SALON_PATH);
+      await page.goBack({ waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === '/');
+      await page.goForward({ waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === SALON_PATH);
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 

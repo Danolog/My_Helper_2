@@ -25,7 +25,8 @@
  * m.in. lojalność, newslettery, faktury, asystent głosowy, wideo,
  * fiskalizacja, posty social, opinie) i płatność zadatków online (decyzja D1) nie
  * mogą tu wrócić — pilnuje tego `__tests__/lib/marketing-truth.test.ts`,
- * który listę modułów zamrożonych bierze z rejestru.
+ * który listę modułów zamrożonych bierze z rejestru. Zadatków w ogóle nie
+ * obiecujemy, dopóki `isDepositEnabled()` zwraca false.
  */
 export const PLAN_FEATURES = {
   basic: [
@@ -38,7 +39,6 @@ export const PLAN_FEATURES = {
     "Zarządzanie usługami i wariantami",
     "Magazyn produktów",
     "Raporty podstawowe",
-    "Zadatki za wizyty (ustalane przez salon)",
     "Galeria zdjęć salonu",
     "Promocje i kody rabatowe",
   ],

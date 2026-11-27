@@ -7,7 +7,7 @@ import { DashboardBreadcrumbs } from "@/components/dashboard/dashboard-breadcrum
 import { DashboardSidebar, DashboardMobileHeader } from "@/components/dashboard/dashboard-sidebar";
 import { ModulesProvider } from "@/components/dashboard/modules-provider";
 import { RoleProvider } from "@/components/dashboard/role-provider";
-import { DEFAULT_MODULES } from "@/lib/features";
+import { DEFAULT_MODULES, clientHomePath } from "@/lib/features";
 import { getSalonContext } from "@/lib/salon-context";
 import { getSalonModules } from "@/lib/server/modules";
 import { requireDashboardAccess } from "@/lib/session";
@@ -36,8 +36,8 @@ export default async function DashboardLayout({
       <main>
         <CreateSalonPrompt session={{ user: { name: user.name, email: user.email } }} />
         <p className="pb-8 text-center text-sm text-muted-foreground">
-          <Link href="/salons" className="underline underline-offset-4 hover:text-foreground">
-            Jestem klientem — przejdź do salonów
+          <Link href={clientHomePath()} className="underline underline-offset-4 hover:text-foreground">
+            Jestem klientem — przejdź do portalu klienta
           </Link>
         </p>
       </main>

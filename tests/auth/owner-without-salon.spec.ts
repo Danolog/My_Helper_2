@@ -83,7 +83,8 @@ test.describe('Panel: konto bez salonu', () => {
         await expect(page).toHaveURL(pathRegExp(path));
         await expect(createHeading).toBeVisible({ timeout: 15000 });
         await expect(sidebar).toHaveCount(0);
-        await expect(clientLink).toHaveAttribute('href', '/salons');
+        // Katalog salonów zamrożony: klient trafia do „Moich wizyt”.
+        await expect(clientLink).toHaveAttribute('href', '/appointments');
       }
 
       // 3. Założenie salonu. Pola akceptacji regulaminu i DPA są tylko po

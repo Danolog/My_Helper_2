@@ -19,7 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as route from "@/app/api/salons/route";
 import { logger } from "@/lib/logger";
 import { listPublicSalonCatalog } from "@/lib/server/system";
@@ -30,6 +30,18 @@ type Row = Record<string, unknown>;
 const store: { salons: Row[] } = { salons: [] };
 
 vi.mock("@/lib/server/system", () => ({ listPublicSalonCatalog: vi.fn() }));
+
+// Katalog salonów jest zamrożony (`salonCatalog`, hardOff). Testy kształtu
+// odpowiedzi GET odmrażają go atrapą rejestru; test zamrożenia — nie.
+const catalog = vi.hoisted(() => ({ frozen: false }));
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      key === "salonCatalog" ? catalog.frozen : actual.isModuleFrozen(key),
+  };
+});
 
 // Sesja: null => brak logowania (401), inaczej konto o danym id.
 let sessionUserId: string | null = null;
@@ -174,8 +186,37 @@ const CATALOG_ENTRY = {
   reviewCount: 2,
 };
 
-describe("GET /api/salons — lista przez listPublicSalonCatalog", () => {
+describe("GET /api/salons — katalog zamrożony", () => {
   beforeEach(() => {
+    catalog.frozen = true;
+    vi.mocked(listPublicSalonCatalog).mockReset();
+  });
+
+  afterEach(() => {
+    catalog.frozen = false;
+  });
+
+  it("404 MODULE_DISABLED i żadnego odczytu listy salonów", async () => {
+    vi.mocked(listPublicSalonCatalog).mockResolvedValue([CATALOG_ENTRY]);
+    const res = await route.GET();
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      success: false,
+      code: "MODULE_DISABLED",
+      error: "Ta funkcja jest obecnie niedostępna.",
+    });
+    expect(listPublicSalonCatalog).not.toHaveBeenCalled();
+  });
+
+  it("rejestr bez atrapy: katalog naprawdę jest zamrożony", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
+    expect(actual.isModuleFrozen("salonCatalog")).toBe(true);
+  });
+});
+
+describe("GET /api/salons — lista przez listPublicSalonCatalog (po odmrożeniu)", () => {
+  beforeEach(() => {
+    catalog.frozen = false;
     vi.mocked(listPublicSalonCatalog).mockReset();
     vi.mocked(logger.error).mockClear();
   });

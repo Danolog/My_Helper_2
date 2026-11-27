@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowLeft, Receipt } from "lucide-react";
+import { SessionCheckError } from "@/components/client/session-check-error";
 import { Button } from "@/components/ui/button";
 import { isModuleFrozen } from "@/lib/features";
 import { AppointmentActions } from "./_components/appointment-actions";
@@ -25,6 +26,8 @@ export default function AppointmentDetailPage() {
     loading,
     error,
     isPending,
+    sessionCheckFailed,
+    retrySessionCheck,
     cancelDialogOpen,
     setCancelDialogOpen,
     cancelInfo,
@@ -46,6 +49,10 @@ export default function AppointmentDetailPage() {
     handleSubmitReview,
     resetReviewForm,
   } = useAppointmentDetail();
+
+  if (sessionCheckFailed) {
+    return <SessionCheckError onRetry={retrySessionCheck} />;
+  }
 
   if (isPending || loading) {
     return <LoadingState />;

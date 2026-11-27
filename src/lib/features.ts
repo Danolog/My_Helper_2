@@ -30,7 +30,9 @@
  *   opinii, gdy `isModuleFrozen("reviews")`;
  * - interfejs — `useModuleEnabled()` / `<ModuleGate>` / `moduleForRoute()`;
  *   portal klienta (poza panelem, bez stanu modułów salonu) pyta
- *   `isModuleFrozen()` wprost.
+ *   `isModuleFrozen()` wprost;
+ * - strony publiczne modułu zamrożonego (`PUBLIC_PAGE_MODULE_MAP`, np. lista
+ *   salonów) — proxy przekierowuje na stronę główną `/`.
  * Pilnuje tego `__tests__/lib/frozen-modules.test.ts`.
  */
 
@@ -53,7 +55,9 @@ export type ModuleKey =
   | "pushNotifications"
   | "complexPromotions"
   | "imageGen"
-  | "reviews";
+  | "reviews"
+  | "salonCatalog"
+  | "favoriteSalons";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -210,6 +214,29 @@ export const MODULES: readonly ModuleDef[] = [
     key: "reviews",
     label: "Opinie",
     description: "Opinie klientów o wizytach, moderacja i odpowiedzi salonu.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    // Publiczny katalog salonów: lista `/salons`, strona `/dla-klientow`
+    // (zapowiedź katalogu z podglądem salonów) i `GET /api/salons`.
+    // Strona salonu `/salons/[id]` z podstronami i rezerwacja gościa
+    // (`/api/available-slots`, `/api/salons/[id]`) NIE należą do modułu —
+    // klient wchodzi na nie z linku od salonu.
+    // Strona główna `/` jest stroną sprzedażową dla właścicieli salonów.
+    key: "salonCatalog",
+    label: "Katalog salonów",
+    description: "Publiczna lista salonów do przeglądania przez klientów.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    // Ulubione salony klienta: strona `/favorites`, przycisk na stronie
+    // salonu i `/api/favorites/*`. Bez katalogu nie ma skąd dodawać salonów.
+    // Wiersze w bazie zostają.
+    key: "favoriteSalons",
+    label: "Ulubione salony",
+    description: "Lista ulubionych salonów klienta.",
     defaultEnabled: false,
     hardOff: true,
   },
@@ -455,14 +482,46 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
   { pattern: /^\/api\/client\/appointments\/[^/]+\/review(\/|$)/, module: "reviews" },
   { pattern: /^\/api\/ai\/content\/generate-review-response(\/|$)/, module: "reviews" },
   { pattern: /^\/api\/ai\/business\/review-alerts(\/|$)/, module: "reviews" },
+  // Katalog salonów: tylko lista. Trasy jednego salonu (`/api/salons/[id]`
+  // i niżej) oraz `/api/salons/mine` zostają — strona salonu i rezerwacja.
+  { pattern: /^\/api\/salons$/, module: "salonCatalog" },
+  { pattern: /^\/api\/favorites(\/|$)/, module: "favoriteSalons" },
   // Moduły zamrożone wcześniej i usunięte w B3–B5: głos (voiceAi, B3), wideo
   // (videoGen) i publikacja postów (socialPosts, B4), fiskalizacja (fiscal,
   // B5) — tras nie ma, wzorców też (strażnik: removed-features).
 ];
 
+/**
+ * Strony publiczne (poza panelem) należące do modułów. Ścieżki w postaci
+ * kanonicznej (małe litery, bez ukośnika końcowego). `exact: true` — tylko
+ * ta ścieżka, bez podstron: `/salons` to lista, a `/salons/[id]` (strona
+ * salonu i rezerwacja) zostaje. `exact: false` — ścieżka i jej podstrony.
+ * Proxy przekierowuje stronę modułu zamrożonego na stronę główną `/`.
+ */
+export const PUBLIC_PAGE_MODULE_MAP: ReadonlyArray<{
+  path: string;
+  module: ModuleKey;
+  exact: boolean;
+}> = [
+  { path: "/salons", module: "salonCatalog", exact: true },
+  { path: "/dla-klientow", module: "salonCatalog", exact: true },
+  { path: "/favorites", module: "favoriteSalons", exact: false },
+];
+
+/** Moduł strony publicznej (null = strona nie należy do modułu). */
+function moduleForPublicPage(path: string): ModuleKey | null {
+  const entry = PUBLIC_PAGE_MODULE_MAP.find(
+    (e) => path === e.path || (!e.exact && path.startsWith(`${e.path}/`))
+  );
+  return entry ? entry.module : null;
+}
+
 export interface FrozenTarget {
-  /** `api` — trasa API (odpowiedź 404), `page` — strona panelu (przekierowanie). */
-  kind: "api" | "page";
+  /**
+   * `api` — trasa API (odpowiedź 404), `page` — strona panelu (przekierowanie
+   * na `/dashboard`), `publicPage` — strona publiczna (przekierowanie na `/`).
+   */
+  kind: "api" | "page" | "publicPage";
   module: ModuleKey;
 }
 
@@ -476,12 +535,16 @@ function frozenTargetForCanonicalPath(path: string): FrozenTarget | null {
   const page = moduleForRoute(path);
   if (page && isModuleFrozen(page)) return { kind: "page", module: page };
 
+  const publicPage = moduleForPublicPage(path);
+  if (publicPage && isModuleFrozen(publicPage)) return { kind: "publicPage", module: publicPage };
+
   return null;
 }
 
 /**
- * Czy ścieżka należy do modułu zamrożonego — jedno pytanie dla tras API
- * i stron panelu. Jedyny egzekutor: `src/proxy.ts`. null = ścieżka działa.
+ * Czy ścieżka należy do modułu zamrożonego — jedno pytanie dla tras API,
+ * stron panelu i stron publicznych. Jedyny egzekutor: `src/proxy.ts`.
+ * null = ścieżka działa.
  *
  * Wzorce i prefiksy rejestru zakładają postać kanoniczną ścieżki
  * (`src/lib/path-normalize.ts`). Sprawdzamy OBIE postaci — dosłowną (bez
@@ -510,6 +573,31 @@ export function frozenModuleForApiPath(pathname: string): ModuleKey | null {
 export function frozenModuleForPage(pathname: string): ModuleKey | null {
   const target = frozenModuleForPath(pathname);
   return target?.kind === "page" ? target.module : null;
+}
+
+/** Moduł zamrożony, do którego należy strona publiczna (null = strona działa). */
+export function frozenModuleForPublicPage(pathname: string): ModuleKey | null {
+  const target = frozenModuleForPath(pathname);
+  return target?.kind === "publicPage" ? target.module : null;
+}
+
+/**
+ * Dokąd trafia klient z kontem po logowaniu, rejestracji i potwierdzeniu
+ * e-maila w portalu. Przy zamrożonym katalogu — „Moje wizyty”; po
+ * odmrożeniu wraca lista salonów. Jedyne miejsce tej decyzji.
+ */
+export function clientHomePath(): string {
+  return isModuleFrozen("salonCatalog") ? "/appointments" : "/salons";
+}
+
+/**
+ * Logowanie klienta z powrotem na stronę portalu. Strony portalu bez sesji
+ * kierują tutaj, a nie na `/login` — tamto logowanie jest dla panelu salonu
+ * i prowadzi na `/dashboard`, czyli do zakładania salonu. `returnTo`
+ * sprawdza dalej strona `/portal/login` (`isSafeReturnTo`).
+ */
+export function clientLoginPath(returnTo: string): string {
+  return `/portal/login?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 /**

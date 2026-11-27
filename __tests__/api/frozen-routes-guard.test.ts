@@ -3,7 +3,8 @@
  *
  * Proxy (`src/proxy.ts`) blokuje trasy modułów zamrożonych — to pilnują
  * `frozen-modules.test.ts` i `proxy-frozen-modules.test.ts`. Ten plik
- * pilnuje, że trasy promocji złożonych, generowania obrazów i opinii
+ * pilnuje, że trasy promocji złożonych, generowania obrazów, opinii, listy
+ * salonów katalogu i ulubionych
  * odpowiadają 404 także SAME, gdy proxy zostanie ominięte: handler wołany
  * wprost nie sprawdza sesji ani planu, nie sięga do bazy i nie wywołuje modelu.
  */
@@ -69,6 +70,11 @@ vi.mock("@/lib/db", () => ({
   db: { select: (...a: unknown[]) => mockDbSelect(...a) },
 }));
 vi.mock("@/lib/storage", () => ({ upload: vi.fn() }));
+// Lista salonów katalogu czyta bazę przez warstwę systemową.
+vi.mock("@/lib/server/system", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/server/system")>()),
+  listPublicSalonCatalog: (...a: unknown[]) => mockDbSelect(...a),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -149,6 +155,28 @@ const ROUTES: Array<[string, string, () => Promise<Handler>]> = [
     "/api/ai/business/review-alerts",
     async () => (await import("@/app/api/ai/business/review-alerts/route")).GET,
   ],
+  // Katalog salonów (lista) i ulubione
+  [
+    "GET",
+    "/api/salons",
+    async () => (await import("@/app/api/salons/route")).GET as unknown as Handler,
+  ],
+  [
+    "GET",
+    "/api/favorites/salons",
+    async () => (await import("@/app/api/favorites/salons/route")).GET as unknown as Handler,
+  ],
+  ["POST", "/api/favorites/salons", async () => (await import("@/app/api/favorites/salons/route")).POST],
+  [
+    "DELETE",
+    "/api/favorites/salons",
+    async () => (await import("@/app/api/favorites/salons/route")).DELETE,
+  ],
+  [
+    "GET",
+    "/api/favorites/salons/check",
+    async () => (await import("@/app/api/favorites/salons/check/route")).GET,
+  ],
 ];
 
 beforeEach(() => {
@@ -185,7 +213,13 @@ describe("trasy zamrożone odpowiadają 404 same, bez proxy", () => {
  * w katalogu tych modułów bez wywołania `frozenModuleResponse("<moduł>")`
  * w każdym eksportowanym handlerze = czerwono.
  */
-const ROUTE_GUARDED_MODULES: ModuleKey[] = ["complexPromotions", "imageGen", "reviews"];
+const ROUTE_GUARDED_MODULES: ModuleKey[] = [
+  "complexPromotions",
+  "imageGen",
+  "reviews",
+  "salonCatalog",
+  "favoriteSalons",
+];
 
 const API_DIR = join(process.cwd(), "src/app/api");
 

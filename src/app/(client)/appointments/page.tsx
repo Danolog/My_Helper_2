@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   Clock,
@@ -18,13 +17,15 @@ import {
   Timer,
   Wallet,
 } from "lucide-react";
+import { SessionCheckError } from "@/components/client/session-check-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { useSession } from "@/lib/auth-client";
+import { useClientPortalSession } from "@/hooks/use-client-portal-session";
+import { isModuleFrozen } from "@/lib/features";
 
 interface ClientAppointment {
   id: string;
@@ -118,8 +119,8 @@ function isUpcoming(startTime: string): boolean {
 }
 
 export default function ClientAppointmentsPage() {
-  const { data: session, isPending } = useSession();
-  const router = useRouter();
+  const { session, isPending, signedOut, checkFailed, retry } =
+    useClientPortalSession("/appointments");
   const [appointments, setAppointments] = useState<ClientAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
@@ -137,15 +138,12 @@ export default function ClientAppointmentsPage() {
     }
   }, []);
 
+  // Przekierowanie bez sesji robi useClientPortalSession.
   useEffect(() => {
-    if (!isPending && !session) {
-      router.push("/login");
-      return;
-    }
     if (session) {
       fetchAppointments();
     }
-  }, [session, isPending, router, fetchAppointments]);
+  }, [session, fetchAppointments]);
 
   const upcomingAppointments = appointments.filter(
     (a) => isUpcoming(a.startTime) && a.status !== "cancelled" && a.status !== "completed" && a.status !== "no_show"
@@ -156,8 +154,13 @@ export default function ClientAppointmentsPage() {
   );
 
   const displayedAppointments = activeTab === "upcoming" ? upcomingAppointments : pastAppointments;
+  const catalogOpen = !isModuleFrozen("salonCatalog");
 
-  if (isPending || loading) {
+  if (checkFailed) {
+    return <SessionCheckError onRetry={retry} />;
+  }
+
+  if (isPending || loading || signedOut) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex justify-center items-center py-12">
@@ -169,15 +172,17 @@ export default function ClientAppointmentsPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-3xl">
-      {/* Back navigation */}
-      <div className="mb-6">
-        <Button variant="ghost" asChild>
-          <Link href="/salons">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Powrot do salonow
-          </Link>
-        </Button>
-      </div>
+      {/* Back navigation — tylko przy otwartym katalogu salonów (`salonCatalog`) */}
+      {catalogOpen && (
+        <div className="mb-6">
+          <Button variant="ghost" asChild>
+            <Link href="/salons">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Powrot do salonow
+            </Link>
+          </Button>
+        </div>
+      )}
 
       {/* Page header */}
       <div className="flex items-center gap-3 mb-6">
@@ -222,12 +227,16 @@ export default function ClientAppointmentsPage() {
             </h2>
             <p className="text-muted-foreground mb-4">
               {activeTab === "upcoming"
-                ? "Zarezerwuj wizyte w jednym z naszych salonow."
+                ? catalogOpen
+                  ? "Zarezerwuj wizyte w jednym z naszych salonow."
+                  : "Wizyte zarezerwujesz z linku, ktory udostepnia Twoj salon."
                 : "Twoja historia wizyt pojawi sie tutaj."}
             </p>
-            <Button asChild>
-              <Link href="/salons">Przegladaj salony</Link>
-            </Button>
+            {catalogOpen && (
+              <Button asChild>
+                <Link href="/salons">Przegladaj salony</Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Heart, MapPin, Phone, ArrowLeft } from "lucide-react";
+import { SessionCheckError } from "@/components/client/session-check-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,8 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useClientPortalSession } from "@/hooks/use-client-portal-session";
 import { mutationFetch } from "@/lib/api-client";
-import { useSession } from "@/lib/auth-client";
 
 interface FavoriteSalon {
   id: string;
@@ -27,8 +27,8 @@ interface FavoriteSalon {
 }
 
 export default function FavoritesPage() {
-  const { data: session, isPending } = useSession();
-  const router = useRouter();
+  const { session, isPending, signedOut, checkFailed, retry } =
+    useClientPortalSession("/favorites");
   const [favorites, setFavorites] = useState<FavoriteSalon[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -45,15 +45,12 @@ export default function FavoritesPage() {
     }
   }, []);
 
+  // Przekierowanie bez sesji robi useClientPortalSession.
   useEffect(() => {
-    if (!isPending && !session) {
-      router.push("/login");
-      return;
-    }
     if (session) {
       fetchFavorites();
     }
-  }, [session, isPending, router, fetchFavorites]);
+  }, [session, fetchFavorites]);
 
   async function removeFavorite(salonId: string) {
     try {
@@ -81,7 +78,11 @@ export default function FavoritesPage() {
     return labels[type] || type;
   }
 
-  if (isPending || loading) {
+  if (checkFailed) {
+    return <SessionCheckError onRetry={retry} />;
+  }
+
+  if (isPending || loading || signedOut) {
     return (
       <div className="container mx-auto p-6">
         <div className="text-center py-12 text-muted-foreground">

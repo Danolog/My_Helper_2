@@ -7,13 +7,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { clientHomePath } from "@/lib/features"
 import { hasActiveSession } from "@/lib/session"
 
 export default async function ClientRegistrationPage() {
   const isLoggedIn = await hasActiveSession()
 
   if (isLoggedIn) {
-    redirect("/salons")
+    redirect(clientHomePath())
   }
 
   return (
@@ -22,13 +23,13 @@ export default async function ClientRegistrationPage() {
         <CardHeader className="text-center">
           <CardTitle>Załóż konto klienta</CardTitle>
           <CardDescription>
-            Rezerwuj wizyty, przeglądaj salony i zarządzaj swoimi wizytami.
+            Rezerwuj wizyty i zarządzaj swoimi wizytami.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center">
           <SignUpForm
             showPhone={true}
-            redirectTo="/salons"
+            redirectTo={clientHomePath()}
             loginHref="/portal/login"
           />
         </CardContent>

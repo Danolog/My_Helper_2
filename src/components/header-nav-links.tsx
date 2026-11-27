@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
+import { clientNavLinks, guestNavLinks } from "@/lib/site-nav-links";
 
 export function HeaderNavLinks() {
   const { data: session, isPending } = useSession();
@@ -32,30 +33,22 @@ export function HeaderNavLinks() {
 
     return (
       <div className="hidden md:flex items-center gap-5 text-sm font-medium text-muted-foreground">
-        <Link href="/salons" className="hover:text-primary transition-colors">
-          Salony
-        </Link>
-        <Link href="/client/appointments" className="hover:text-primary transition-colors">
-          Moje wizyty
-        </Link>
-        <Link href="/client/favorites" className="hover:text-primary transition-colors">
-          Ulubione
-        </Link>
+        {clientNavLinks().map((link) => (
+          <Link key={link.href} href={link.href} className="hover:text-primary transition-colors">
+            {link.label}
+          </Link>
+        ))}
       </div>
     );
   }
 
   return (
     <div className="hidden md:flex items-center gap-5 text-sm font-medium text-muted-foreground">
-      <Link href="/dla-salonow#features" className="hover:text-primary transition-colors">
-        Funkcje
-      </Link>
-      <Link href="/dla-salonow#pricing" className="hover:text-primary transition-colors">
-        Cennik
-      </Link>
-      <Link href="/dla-klientow" className="hover:text-primary transition-colors">
-        Dla klientów
-      </Link>
+      {guestNavLinks().map((link) => (
+        <Link key={link.href} href={link.href} className="hover:text-primary transition-colors">
+          {link.label}
+        </Link>
+      ))}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isModuleFrozen } from "@/lib/features";
 import { SalonBookingCta } from "./_components/SalonBookingCta";
 import { SalonEmployees } from "./_components/SalonEmployees";
 import { SalonHeader } from "./_components/SalonHeader";
@@ -21,6 +22,8 @@ export default function SalonProfilePage() {
     expandedServices,
     toggleServiceExpanded,
   } = useSalonData();
+  // Lista salonów zamrożona (`salonCatalog`) — bez linku powrotu do niej.
+  const catalogOpen = !isModuleFrozen("salonCatalog");
 
   if (loading) {
     return (
@@ -37,9 +40,15 @@ export default function SalonProfilePage() {
       <div className="container mx-auto p-6">
         <div className="text-center py-12">
           <h2 className="text-xl font-semibold mb-2">Salon nie znaleziony</h2>
-          <Button asChild>
-            <Link href="/salons">Powrot do listy salonow</Link>
-          </Button>
+          {catalogOpen ? (
+            <Button asChild>
+              <Link href="/salons">Powrot do listy salonow</Link>
+            </Button>
+          ) : (
+            <Button asChild>
+              <Link href="/">Strona główna</Link>
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -47,14 +56,16 @@ export default function SalonProfilePage() {
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
-        <Button variant="ghost" asChild>
-          <Link href="/salons">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Powrot do listy
-          </Link>
-        </Button>
-      </div>
+      {catalogOpen && (
+        <div className="mb-6">
+          <Button variant="ghost" asChild>
+            <Link href="/salons">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Powrot do listy
+            </Link>
+          </Button>
+        </div>
+      )}
 
       <SalonHeader
         salon={salon}

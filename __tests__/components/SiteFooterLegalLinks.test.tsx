@@ -68,12 +68,18 @@ describe("SiteFooter — dokumenty prawne nieopublikowane (flaga wyłączona)", 
     expect(screen.queryByText(/Regulamin|Polityka prywatności|Kontakt/)).toBeNull();
   });
 
-  it("pozostałe odnośniki zostają (rejestracja, cennik, salony)", () => {
+  it("pozostałe odnośniki zostają (rejestracja, cennik, logowanie)", () => {
     render(<SiteFooter />);
 
-    expect(hrefs()).toEqual(
-      expect.arrayContaining(["/register", "/pricing", "/salons", "/dla-klientow"]),
-    );
+    expect(hrefs()).toEqual(expect.arrayContaining(["/register", "/pricing", "/login"]));
+  });
+
+  it("katalog salonów zamrożony: bez linków do listy salonów i strony dla klientów", () => {
+    render(<SiteFooter />);
+
+    expect(hrefs()).not.toContain("/salons");
+    expect(hrefs()).not.toContain("/dla-klientow");
+    expect(screen.queryByText("Dla klientow")).toBeNull();
   });
 
   it("opis marki bez AI i bez „Booksy”", () => {

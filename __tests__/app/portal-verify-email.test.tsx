@@ -2,9 +2,10 @@
  * Strona potwierdzenia e-maila w portalu klienta
  * (`src/app/(client)/portal/verify-email/page.tsx`).
  *
- * Po potwierdzeniu klient trafia na listę salonów (`/salons`), nie do panelu
- * salonu — konto klienta nie ma salonu, a panel pokazałby mu zakładanie
- * salonu. Atrapy: `next/navigation` i globalny `fetch`.
+ * Po potwierdzeniu klient trafia do portalu (`clientHomePath()` — przy
+ * zamrożonym katalogu „Moje wizyty”), nie do panelu salonu — konto klienta
+ * nie ma salonu, a panel pokazałby mu zakładanie salonu. Atrapy:
+ * `next/navigation` i globalny `fetch`.
  */
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -35,16 +36,17 @@ afterEach(() => {
 });
 
 describe("portal/verify-email", () => {
-  it("po potwierdzeniu: przycisk prowadzi na /salons i odświeża trasę", async () => {
+  it("po potwierdzeniu: przycisk prowadzi do „Moich wizyt” (katalog zamrożony) i odświeża trasę", async () => {
     fetchMock.mockResolvedValueOnce({ ok: true, redirected: false });
     const user = userEvent.setup();
     render(<VerifyEmailPage />);
 
-    const next = await screen.findByRole("button", { name: /salon/i });
+    const next = await screen.findByRole("button", { name: /portal/i });
     await user.click(next);
 
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/verify-email?token=token-abc");
-    expect(nav.router.replace).toHaveBeenCalledWith("/salons");
+    expect(nav.router.replace).toHaveBeenCalledWith("/appointments");
+    expect(nav.router.replace).not.toHaveBeenCalledWith("/salons");
     expect(nav.router.replace).not.toHaveBeenCalledWith("/dashboard");
     expect(nav.router.refresh).toHaveBeenCalledTimes(1);
   });
@@ -58,7 +60,7 @@ describe("portal/verify-email", () => {
     render(<VerifyEmailPage />);
 
     expect(await screen.findByText("Token expired")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/portal/login");
     expect(nav.router.replace).not.toHaveBeenCalled();
   });
 

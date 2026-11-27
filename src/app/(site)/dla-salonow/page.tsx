@@ -1,26 +1,10 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { MotionConfig } from "framer-motion";
-import { DlaSalonowClientCta } from "./_components/DlaSalonowClientCta";
-import { DlaSalonowCta } from "./_components/DlaSalonowCta";
-import { DlaSalonowFeatures } from "./_components/DlaSalonowFeatures";
-import { DlaSalonowHero } from "./_components/DlaSalonowHero";
-import { DlaSalonowImageBreak } from "./_components/DlaSalonowImageBreak";
-import { DlaSalonowPricing } from "./_components/DlaSalonowPricing";
-import { DlaSalonowTrustBar } from "./_components/DlaSalonowTrustBar";
-
-export default function Home() {
-  return (
-    <MotionConfig reducedMotion="user">
-    <div className="flex-1">
-      <DlaSalonowHero />
-      <DlaSalonowTrustBar />
-      <DlaSalonowFeatures />
-      <DlaSalonowImageBreak />
-      <DlaSalonowClientCta />
-      <DlaSalonowPricing />
-      <DlaSalonowCta />
-    </div>
-    </MotionConfig>
-  );
+/**
+ * Strona sprzedażowa przeniesiona na stronę główną `/` (src/app/(site)/page.tsx).
+ * Stary adres i jego kotwice (`#features`, `#pricing`) prowadzą tam dalej —
+ * przeglądarka zachowuje kotwicę przy przekierowaniu.
+ */
+export default function DlaSalonowRedirect(): never {
+  redirect("/");
 }

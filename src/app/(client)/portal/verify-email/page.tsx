@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { clientHomePath } from "@/lib/features"
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams()
@@ -75,12 +76,12 @@ function VerifyEmailContent() {
                 className="w-full"
                 onClick={() => {
                   // Portal klienta: konto klienta nie ma salonu, więc kierujemy
-                  // na listę salonów, nie do panelu salonu.
-                  router.replace("/salons")
+                  // do portalu (clientHomePath), nie do panelu salonu.
+                  router.replace(clientHomePath())
                   router.refresh()
                 }}
               >
-                Browse salons
+                Przejdź do portalu
               </Button>
             </>
           )}
@@ -90,7 +91,7 @@ function VerifyEmailContent() {
               <p className="text-sm text-destructive text-center">{errorMessage}</p>
               <div className="flex gap-2 w-full">
                 <Button asChild variant="outline" className="flex-1">
-                  <Link href="/login">Sign in</Link>
+                  <Link href="/portal/login">Sign in</Link>
                 </Button>
                 <Button asChild className="flex-1">
                   <Link href="/portal/register">Register again</Link>

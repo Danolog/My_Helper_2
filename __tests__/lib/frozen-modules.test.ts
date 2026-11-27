@@ -24,6 +24,7 @@ import {
   frozenModuleForApiPath,
   frozenModuleForPage,
   frozenModuleForPath,
+  frozenModuleForPublicPage,
   isModuleFrozen,
   resolveModules,
   type ModuleKey,
@@ -82,6 +83,11 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   // opinii. Publiczny katalog (`/api/salons/[id]`, profil pracownika) nie ma
   // „review” w ścieżce i zostaje; sam nie zwraca ocen (test niżej).
   reviews: /review/,
+  // Katalog salonów: tylko lista (`GET /api/salons`). Strona salonu
+  // (`/api/salons/[id]`), rezerwacja i wolne terminy zostają.
+  salonCatalog: /^\/api\/salons$/,
+  // Ulubione salony: cały katalog /api/favorites.
+  favoriteSalons: /^\/api\/favorites(\/|$)/,
 };
 
 const FROZEN_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
@@ -92,6 +98,7 @@ describe("rejestr modułów zamrożonych", () => {
       "aiNotifications",
       "clientMarketing",
       "complexPromotions",
+      "favoriteSalons",
       "fiscal",
       "imageGen",
       "invoices",
@@ -99,6 +106,7 @@ describe("rejestr modułów zamrożonych", () => {
       "newsletters",
       "pushNotifications",
       "reviews",
+      "salonCatalog",
       "socialPosts",
       "videoGen",
       "voiceAi",
@@ -180,6 +188,9 @@ describe("frozenModuleForApiPath", () => {
     ["/api/client/appointments/abc/review", "reviews"],
     ["/api/ai/content/generate-review-response", "reviews"],
     ["/api/ai/business/review-alerts", "reviews"],
+    ["/api/salons", "salonCatalog"],
+    ["/api/favorites/salons", "favoriteSalons"],
+    ["/api/favorites/salons/check", "favoriteSalons"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
   });
@@ -192,6 +203,9 @@ describe("frozenModuleForApiPath", () => {
     "/api/Clients/abc/Loyalty",
     "/api/invoices/abc/send-email/",
     "/api/clients/abc/loyalty/",
+    "/api/salons/",
+    "/API/Salons",
+    "/api/Favorites/Salons",
   ])("warianty zapisu ścieżki też są zamrożone: %s", (path) => {
     expect(frozenModuleForApiPath(path)).not.toBeNull();
   });
@@ -235,6 +249,13 @@ describe("frozenModuleForApiPath", () => {
     "/api/ai/clients/insights",
     "/api/invoicesx",
     "/api/subscription-plans",
+    // Strona salonu i rezerwacja zostają mimo zamrożenia katalogu.
+    "/api/salons/mine",
+    "/api/salons/abc/services",
+    "/api/salons/abc/employees",
+    "/api/salonsx",
+    "/api/available-slots",
+    "/api/favoritesx",
     "/dashboard/invoices",
     "/api/%zz", // niepoprawne kodowanie nie może wywrócić proxy
   ])("trasa sąsiednia przechodzi: %s", (path) => {
@@ -296,6 +317,41 @@ describe("frozenModuleForPath — jedno pytanie o trasę API i stronę", () => {
     expect(frozenModuleForPage("/api/x/../invoices")).toBeNull();
     expect(frozenModuleForPage("/dashboard/x/../invoices")).toBe("invoices");
     expect(frozenModuleForApiPath("/dashboard/x/../invoices")).toBeNull();
+  });
+});
+
+describe("frozenModuleForPublicPage — katalog i ulubione", () => {
+  it.each<[string, ModuleKey]>([
+    ["/salons", "salonCatalog"],
+    ["/salons/", "salonCatalog"],
+    ["/Salons", "salonCatalog"],
+    ["//salons", "salonCatalog"],
+    ["/%73alons", "salonCatalog"],
+    ["/salons/abc/..", "salonCatalog"],
+    ["/dla-klientow", "salonCatalog"],
+    ["/favorites", "favoriteSalons"],
+    ["/favorites/abc", "favoriteSalons"],
+  ])("%s → %s", (path, module) => {
+    expect(frozenModuleForPublicPage(path)).toBe(module);
+    expect(frozenModuleForPath(path)).toEqual({ kind: "publicPage", module });
+  });
+
+  it.each([
+    // Strona salonu i rezerwacja gościa zostają.
+    "/salons/abc",
+    "/salons/abc/book",
+    "/salons/abc/services",
+    "/salons/abc/employees",
+    "/salons/abc/gallery",
+    "/s/moj-salon",
+    "/",
+    "/salonsx",
+    "/favoritesx",
+    "/appointments",
+    "/dla-salonow",
+  ])("strona przechodzi: %s", (path) => {
+    expect(frozenModuleForPublicPage(path)).toBeNull();
+    expect(frozenModuleForPath(path)).toBeNull();
   });
 });
 

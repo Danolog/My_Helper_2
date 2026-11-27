@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { isModuleFrozen } from "@/lib/features"
 import { isGoogleAuthConfigured } from "@/lib/google-auth"
 import { getOptionalSession } from "@/lib/session"
 
@@ -55,14 +56,17 @@ export default async function LoginPage({
           />
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Jestes klientem?{" "}
-            <Link href="/dla-klientow" className="text-primary hover:underline">
+            <Link href="/portal/login" className="text-primary hover:underline">
               Przejdz do portalu klienta
             </Link>
           </p>
           <div className="mt-3 flex flex-col items-center gap-1 text-sm text-muted-foreground">
-            <Link href="/salons" className="text-primary hover:underline">
-              Przegladaj salony bez logowania
-            </Link>
+            {/* Katalog salonów zamrożony (`salonCatalog`) — bez linku do listy. */}
+            {!isModuleFrozen("salonCatalog") && (
+              <Link href="/salons" className="text-primary hover:underline">
+                Przegladaj salony bez logowania
+              </Link>
+            )}
             <Link href="/" className="hover:underline">
               Powrot do strony glownej
             </Link>

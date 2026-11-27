@@ -1,7 +1,8 @@
 /**
  * Next.js 16 Proxy — handles five concerns:
  * -1. Ambiguous paths (encoded separators/dots, bad percent-encoding) → 404
- * 0. Frozen modules (hardOff in src/lib/features.ts): API → 404, page → /dashboard
+ * 0. Frozen modules (hardOff in src/lib/features.ts): API → 404, page → /dashboard,
+ *    public page → /
  * 1. CSP with per-request nonce (replaces 'unsafe-inline' in script-src)
  * 2. CSRF protection via signed double-submit cookie
  * 3. Auth protection for dashboard routes
@@ -200,6 +201,10 @@ export async function proxy(request: NextRequest) {
   }
   if (frozen?.kind === "page") {
     return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+  // Strona publiczna modulu zamrozonego (np. lista salonow) => strona glowna.
+  if (frozen?.kind === "publicPage") {
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   // --- 1. API mutations: validate CSRF (no CSP needed for JSON responses) ---
