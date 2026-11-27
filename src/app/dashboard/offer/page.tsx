@@ -1,3 +1,5 @@
+"use client";
+
 import { Scissors, Store, UserCog } from "lucide-react";
 import { NavHubPage, type NavHubTile } from "@/components/dashboard/nav-hub";
 

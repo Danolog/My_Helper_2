@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 
 const LABELS: Record<string, string> = {
-  dashboard: "Pulpit",
+  dashboard: "Dziś",
   calendar: "Kalendarz",
   clients: "Klienci",
   services: "Uslugi",

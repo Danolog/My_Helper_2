@@ -1,3 +1,5 @@
+"use client";
+
 import { BarChart3, HandCoins, TrendingUp, Wallet } from "lucide-react";
 import { NavHubPage, type NavHubTile } from "@/components/dashboard/nav-hub";
 
