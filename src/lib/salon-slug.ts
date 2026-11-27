@@ -24,6 +24,18 @@ export const SALON_SLUG_FALLBACK = "salon";
 export const SALON_SLUG_UNIQUE_INDEX = "salons_slug_uq";
 
 /**
+ * Klucz główny rejestru adresów `salon_slug_history` (bieżące i dawne adresy
+ * wszystkich salonów). Konflikt na nim = adres należy albo należał do innego
+ * salonu.
+ */
+export const SALON_SLUG_HISTORY_PRIMARY_KEY = "salon_slug_history_pkey";
+
+const SALON_SLUG_CONFLICT_CONSTRAINTS: ReadonlySet<unknown> = new Set([
+  SALON_SLUG_UNIQUE_INDEX,
+  SALON_SLUG_HISTORY_PRIMARY_KEY,
+]);
+
+/**
  * Słowa, które nie mogą być adresem salonu: ścieżki aplikacji i nazwy, które
  * klient mógłby wziąć za stronę systemową. Adres żyje pod `/s/`, więc kolizji
  * z trasami dziś nie ma — lista chroni przed mylącymi adresami
@@ -174,16 +186,17 @@ export function pickAvailableSalonSlug(base: string, taken: Iterable<string>): s
 }
 
 /**
- * Konflikt indeksu `salons_slug_uq` (23505), także opakowany przez Drizzle
- * w `cause`. postgres-js podaje nazwę w `constraint_name`, node-postgres
- * w `constraint`.
+ * Zajęty adres: konflikt (23505) indeksu `salons_slug_uq` albo klucza głównego
+ * rejestru `salon_slug_history_pkey`, także opakowany przez Drizzle w `cause`.
+ * postgres-js podaje nazwę w `constraint_name`, node-postgres w `constraint`.
  */
 export function isSalonSlugConflict(error: unknown): boolean {
   for (let e: unknown = error, depth = 0; e && depth < 3; depth++) {
     const err = e as { code?: unknown; constraint_name?: unknown; constraint?: unknown };
     if (
       err.code === "23505" &&
-      (err.constraint_name === SALON_SLUG_UNIQUE_INDEX || err.constraint === SALON_SLUG_UNIQUE_INDEX)
+      (SALON_SLUG_CONFLICT_CONSTRAINTS.has(err.constraint_name) ||
+        SALON_SLUG_CONFLICT_CONSTRAINTS.has(err.constraint))
     ) {
       return true;
     }

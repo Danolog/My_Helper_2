@@ -4528,6 +4528,88 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.salon_slug_history": {
+      "name": "salon_slug_history",
+      "schema": "",
+      "columns": {
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "salon_id": {
+          "name": "salon_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "salon_slug_history_salon_id_idx": {
+          "name": "salon_slug_history_salon_id_idx",
+          "columns": [
+            {
+              "expression": "salon_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "salon_slug_history_current_uq": {
+          "name": "salon_slug_history_current_uq",
+          "columns": [
+            {
+              "expression": "salon_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"salon_slug_history\".\"retired_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "salon_slug_history_salon_id_salons_id_fk": {
+          "name": "salon_slug_history_salon_id_salons_id_fk",
+          "tableFrom": "salon_slug_history",
+          "tableTo": "salons",
+          "columnsFrom": [
+            "salon_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "salon_slug_history_slug_format": {
+          "name": "salon_slug_history_slug_format",
+          "value": "length(\"salon_slug_history\".\"slug\") BETWEEN 3 AND 50 AND \"salon_slug_history\".\"slug\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.salon_subscriptions": {
       "name": "salon_subscriptions",
       "schema": "",

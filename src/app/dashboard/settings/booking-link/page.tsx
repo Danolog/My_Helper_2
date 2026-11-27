@@ -262,7 +262,7 @@ function BookingLinkSettingsInner() {
             ) : null}
             <p id="salon-slug-help" className="text-sm text-muted-foreground">
               Małe litery bez polskich znaków, cyfry i myślniki, od 3 do 50 znaków.
-              Po zmianie stary link przestanie działać — popraw go też na Instagramie i Facebooku.
+              Po zmianie stary link będzie dalej prowadzić do Twojego salonu.
             </p>
           </div>
 

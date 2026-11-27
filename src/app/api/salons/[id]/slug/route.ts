@@ -1,18 +1,71 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { isValidUuid, parseBody, updateSalonSlugSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 import { isSalonSlugConflict } from "@/lib/salon-slug";
-import { salons } from "@/lib/schema";
+import { salonSlugHistory, salons } from "@/lib/schema";
 // Odczyt własności i zapis przez forSalon(id z URL), jak PUT /api/salons/[id]:
 // polityka RLS `salons` przepuszcza wiersz o id = kontekst, więc brak wiersza
-// = 404, cudzy właściciel = 403. Zajętość adresu sprawdza indeks unikalny
-// (salons_slug_uq) — w kontekście jednego salonu RLS i tak nie pokazałby
-// sluga innego salonu, a sprawdzenie przed zapisem miałoby wyścig.
-import { forSalon } from "@/lib/server/repository";
+// = 404, cudzy właściciel = 403. Zajętość adresu sprawdzają ograniczenia bazy
+// (klucz główny rejestru salon_slug_history i salons_slug_uq) — w kontekście
+// jednego salonu RLS i tak nie pokazałby adresów innych salonów, a sprawdzenie
+// przed zapisem miałoby wyścig.
+import { forSalon, type DbTx } from "@/lib/server/repository";
 
 const SLUG_TAKEN_CODE = "SLUG_TAKEN";
+
+/**
+ * Zmiana adresu w jednej transakcji salonu (kontekst RLS = `salonId`).
+ *
+ * Rejestr `salon_slug_history` trzyma każdy adres, który salon miał: bieżący
+ * (`retiredAt` null) i dawne. Klucz główny to sam slug, więc adres należący
+ * albo należący kiedyś do innego salonu daje 23505 przy wstawieniu — także
+ * przy dwóch równoległych transakcjach (druga czeka na pierwszą).
+ *
+ * Kroki:
+ * 1. blokada wiersza salonu (FOR UPDATE) i odczyt obecnego sluga — dwie
+ *    równoległe zmiany tego samego salonu idą po kolei;
+ * 2. obecny adres bieżący w rejestrze → dawny (`retiredAt` = teraz);
+ * 3. obecny adres zapisany jako dawny, jeśli rejestr go nie zna (salon
+ *    założony poza aplikacją, np. seed) — ON CONFLICT DO NOTHING, bo zwykle
+ *    wiersz już jest z kroku 2;
+ * 4. odzyskanie własnego dawnego adresu: usunięcie WŁASNEGO wiersza nowego
+ *    sluga (RLS i warunek salonId nie sięgają do cudzych wierszy);
+ * 5. nowy adres jako bieżący — konflikt klucza = adres innego salonu → 409;
+ * 6. zapis w `salons` — konflikt salons_slug_uq = adres innego salonu → 409.
+ * Błąd w dowolnym kroku cofa całość.
+ *
+ * Ten sam slug co obecny: tylko krok 6 (bez zmian w rejestrze).
+ */
+async function changeSalonSlug(tx: DbTx, salonId: string, slug: string): Promise<void> {
+  const [current] = await tx
+    .select({ slug: salons.slug })
+    .from(salons)
+    .where(eq(salons.id, salonId))
+    .for("update");
+  const previousSlug = current?.slug ?? null;
+
+  if (previousSlug !== slug) {
+    const retiredAt = new Date();
+    await tx
+      .update(salonSlugHistory)
+      .set({ retiredAt })
+      .where(and(eq(salonSlugHistory.salonId, salonId), isNull(salonSlugHistory.retiredAt)));
+    if (previousSlug) {
+      await tx
+        .insert(salonSlugHistory)
+        .values({ slug: previousSlug, salonId, retiredAt })
+        .onConflictDoNothing({ target: salonSlugHistory.slug });
+    }
+    await tx
+      .delete(salonSlugHistory)
+      .where(and(eq(salonSlugHistory.slug, slug), eq(salonSlugHistory.salonId, salonId)));
+    await tx.insert(salonSlugHistory).values({ slug, salonId });
+  }
+
+  await tx.update(salons).set({ slug }).where(eq(salons.id, salonId));
+}
 
 /**
  * PUT /api/salons/[id]/slug — zmiana krótkiego adresu salonu `/s/<slug>`.
@@ -20,8 +73,10 @@ const SLUG_TAKEN_CODE = "SLUG_TAKEN";
  * Body: `{ slug: string }` (updateSalonSlugSchema). Tylko właściciel salonu.
  * Odpowiedzi: 200 `{ success, data: { slug } }`, 400 (zły id albo slug),
  * 401 (bez sesji), 403 (nie właściciel), 404 (brak salonu),
- * 409 `SLUG_TAKEN` (adres zajęty przez inny salon), 500.
- * Ten sam slug co obecny → 200 bez zmian w bazie poza `updated_at`.
+ * 409 `SLUG_TAKEN` (adres bieżący albo dawny innego salonu), 500.
+ * Stary adres zostaje w rejestrze jako dawny: `/s/<stary>` dalej prowadzi do
+ * tego salonu, a inny salon nie może go zająć. Własny dawny adres wolno
+ * odzyskać.
  */
 export async function PUT(
   request: Request,
@@ -64,9 +119,7 @@ export async function PUT(
     const { slug } = parsed.data;
 
     try {
-      await forSalon(id).raw((tx) =>
-        tx.update(salons).set({ slug }).where(eq(salons.id, id))
-      );
+      await forSalon(id).raw((tx) => changeSalonSlug(tx, id, slug));
     } catch (error) {
       if (isSalonSlugConflict(error)) {
         return NextResponse.json(

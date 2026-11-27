@@ -146,6 +146,7 @@ vi.mock("@/lib/schema", () => {
     subscriptionPlans: table("subscriptionPlans"),
     salonSubscriptions: table("salonSubscriptions"),
     salons: table("salons"),
+    salonSlugHistory: table("salonSlugHistory"),
     user: table("user"),
     legalAcceptances: table("legalAcceptances"),
   };
@@ -494,8 +495,9 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
       1,
       expect.objectContaining({ ownerId: USER_A.id, email: USER_A.email })
     );
+    // 2. wstawienie: adres bieżący w rejestrze adresów; 3.: subskrypcja.
     expect(mockInsertValues).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.objectContaining({ salonId: SALON_A, planId: PLAN_BASIC.id, status: "trialing" })
     );
   });
@@ -549,6 +551,8 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
       // Wolny adres `/s/<slug>` z wyjścia systemowego przed zapisem nowego salonu.
       "pick:slug:salon-anna",
       "insert:salons",
+      // Adres bieżący w rejestrze adresów (klucz główny slug), ta sama transakcja.
+      "insert:salonSlugHistory",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",
       "insert:salonSubscriptions",
@@ -698,6 +702,39 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     expect(opLog.at(-1)).toBe("commit");
   });
 
+  it("nowy salon zapisuje adres bieżący w rejestrze adresów (slug, salonId, bez retiredAt)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockInsert).toHaveBeenCalledWith("salonSlugHistory");
+    expect(mockInsertValues).toHaveBeenCalledWith({ slug: "salon-anna", salonId: SALON_A });
+  });
+
+  it("istniejący salon konta: bez zapisu w rejestrze adresów", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+
+    await post({ planSlug: "basic" });
+
+    expect(mockInsert).not.toHaveBeenCalledWith("salonSlugHistory");
+  });
+
+  it("adres porzucony równolegle przez inny salon (23505 na salon_slug_history_pkey) → transakcja od nowa, 200", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    failInsert = {
+      table: "salonSlugHistory",
+      error: Object.assign(new Error("db"), { cause: { code: "23505", constraint_name: "salon_slug_history_pkey" } }),
+    };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(2);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(2);
+    expect(opLog.at(-1)).toBe("commit");
+  });
+
   it("konflikt adresu w każdej próbie → 503 LOCK_BUSY (nie 409 „salon ma subskrypcję”)", async () => {
     tableRows = { subscriptionPlans: [PLAN_BASIC] };
     const slugConflict = Object.assign(new Error("db"), { code: "23505", constraint_name: "salons_slug_uq" });
@@ -810,6 +847,7 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
       "select:salons",
       "pick:slug:salon-anna",
       "insert:salons",
+      "insert:salonSlugHistory",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",
       "insert:salonSubscriptions",

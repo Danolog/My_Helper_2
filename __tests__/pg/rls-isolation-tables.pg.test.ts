@@ -142,6 +142,8 @@ const FACTORIES: Record<string, Factory> = {
     version: "2026-01-01",
     source: "registration",
   })),
+  // Klucz główny to sam slug: każdy wiersz dostaje własny (format jak salons_slug_format).
+  salon_slug_history: direct(() => ({ slug: `it-slug-${randomUUID().slice(0, 8)}` })),
 
   time_blocks: child("employees", "employee_id", () => ({ start_time: START, end_time: END, block_type: "break" })),
   work_schedules: child("employees", "employee_id", () => ({ day_of_week: 1, start_time: "09:00", end_time: "17:00" })),

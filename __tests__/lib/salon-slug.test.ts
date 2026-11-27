@@ -146,8 +146,19 @@ describe("isSalonSlugConflict", () => {
     ).toBe(true);
   });
 
+  it("23505 na salon_slug_history_pkey (adres bieżący albo dawny innego salonu)", () => {
+    expect(isSalonSlugConflict({ code: "23505", constraint_name: "salon_slug_history_pkey" })).toBe(true);
+    expect(isSalonSlugConflict({ code: "23505", constraint: "salon_slug_history_pkey" })).toBe(true);
+    expect(
+      isSalonSlugConflict(
+        Object.assign(new Error("wrap"), { cause: { code: "23505", constraint_name: "salon_slug_history_pkey" } })
+      )
+    ).toBe(true);
+  });
+
   it("inny indeks, inny kod albo brak błędu → false", () => {
     expect(isSalonSlugConflict({ code: "23505", constraint_name: "salons_owner_id_uq" })).toBe(false);
+    expect(isSalonSlugConflict({ code: "23505", constraint_name: "salon_slug_history_current_uq" })).toBe(false);
     expect(isSalonSlugConflict({ code: "23514", constraint_name: "salons_slug_uq" })).toBe(false);
     expect(isSalonSlugConflict(new Error("boom"))).toBe(false);
     expect(isSalonSlugConflict(null)).toBe(false);

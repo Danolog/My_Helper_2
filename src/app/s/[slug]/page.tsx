@@ -14,11 +14,13 @@ import { findPublicSalonIdBySlug } from "@/lib/server/system";
  *   przeglądarka i wyszukiwarki nie mogą zapamiętać przekierowania na stałe.
  *
  * Co jest publiczne decyduje `findPublicSalonIdBySlug` (ta sama reguła co
- * `/salons/[id]`). Nieznany albo niepoprawny slug → 404 (`not-found.tsx`).
+ * `/salons/[id]`). Dawny adres salonu (po zmianie w panelu) prowadzi do tego
+ * samego salonu — rejestr `salon_slug_history`; innemu salonowi nie wolno go
+ * zająć. Nieznany albo niepoprawny slug → 404 (`not-found.tsx`).
  *
  * `force-dynamic`: odczyt przy każdym żądaniu. Bez tego Next mógłby zapamiętać
- * wynik dla danego sluga — po zmianie adresu stary dalej by przekierowywał,
- * a nowy salon pod zwolnionym adresem dostawałby 404.
+ * wynik dla danego sluga — nowy adres salonu dostawałby 404 do czasu
+ * odświeżenia pamięci podręcznej.
  */
 export const dynamic = "force-dynamic";
 

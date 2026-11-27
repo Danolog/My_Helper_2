@@ -41,7 +41,12 @@ vi.mock("drizzle-orm", () => {
 vi.mock("@/lib/schema", () => {
   const table = (name: string) =>
     new Proxy({}, { get: (_t, p) => (p === "_table" ? name : typeof p === "symbol" ? undefined : `${name}.${String(p)}`) });
-  return { salons: table("salons"), services: table("services"), reviews: table("reviews") };
+  return {
+    salons: table("salons"),
+    services: table("services"),
+    reviews: table("reviews"),
+    salonSlugHistory: table("salonSlugHistory"),
+  };
 });
 
 vi.mock("@/lib/server/system/db-system", () => ({
@@ -218,10 +223,33 @@ describe("findPublicSalonIdBySlug — krótki adres /s/<slug>", () => {
     expect(queries[0]!.limit).toBe(1);
   });
 
-  it("nieznany slug → null", async () => {
-    results.push([]);
+  it("nieznany slug (ani w salons, ani w rejestrze dawnych adresów) → null", async () => {
+    results.push([], []);
     expect(await findPublicSalonIdBySlug("nie-ma-takiego")).toBeNull();
-    expect(queries).toHaveLength(1);
+    expect(queries).toHaveLength(2);
+  });
+
+  it("dawny adres (jest tylko w rejestrze) → id salonu, który go miał; czyta tylko salon_id", async () => {
+    results.push([], [{ salonId: SALON_B }]);
+
+    expect(await findPublicSalonIdBySlug("stary-adres")).toBe(SALON_B);
+
+    expect(queries).toHaveLength(2);
+    expect(queries[1]!.table).toBe("salonSlugHistory");
+    expect(queries[1]!.cols).toEqual({ salonId: "salonSlugHistory.salonId" });
+    expect(queries[1]!.where).toEqual(node("eq", "salonSlugHistory.slug", "stary-adres"));
+    expect(queries[1]!.limit).toBe(1);
+  });
+
+  it("adres bieżący wygrywa z rejestrem: bez drugiego zapytania", async () => {
+    results.push([{ id: SALON_A }]);
+    expect(await findPublicSalonIdBySlug("salon-ada")).toBe(SALON_A);
+    expect(queries.map((q) => q.table)).toEqual(["salons"]);
+  });
+
+  it("błąd bazy przy odczycie rejestru przechodzi do wołającego", async () => {
+    results.push([], new Error("history down"));
+    await expect(findPublicSalonIdBySlug("stary-adres")).rejects.toThrow("history down");
   });
 
   it("wielkie litery z adresu sprowadzane do małych", async () => {
@@ -258,26 +286,45 @@ describe("findPublicSalonIdBySlug — krótki adres /s/<slug>", () => {
 });
 
 describe("pickFreeSalonSlug — wolny adres dla zakładanego salonu", () => {
-  it("adres wolny → base; zapytanie czyta tylko kolumnę slug, warunek base albo base-%", async () => {
-    results.push([]);
+  it("adres wolny → base; najpierw salons, potem rejestr; oba czytają tylko kolumnę slug, warunek base albo base-%", async () => {
+    results.push([], []);
 
     expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada");
 
-    expect(queries).toHaveLength(1);
+    expect(queries).toHaveLength(2);
     expect(queries[0]!.table).toBe("salons");
     expect(queries[0]!.cols).toEqual({ slug: "salons.slug" });
     expect(queries[0]!.where).toEqual(
       node("or", node("eq", "salons.slug", "salon-ada"), node("like", "salons.slug", "salon-ada-%"))
     );
+    expect(queries[1]!.table).toBe("salonSlugHistory");
+    expect(queries[1]!.cols).toEqual({ slug: "salonSlugHistory.slug" });
+    expect(queries[1]!.where).toEqual(
+      node(
+        "or",
+        node("eq", "salonSlugHistory.slug", "salon-ada"),
+        node("like", "salonSlugHistory.slug", "salon-ada-%")
+      )
+    );
   });
 
-  it("base i base-2 zajęte → base-3", async () => {
-    results.push([{ slug: "salon-ada" }, { slug: "salon-ada-2" }]);
+  it("base i base-2 zajęte w salons → base-3", async () => {
+    results.push([{ slug: "salon-ada" }, { slug: "salon-ada-2" }], []);
+    expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada-3");
+  });
+
+  it("dawny adres innego salonu (tylko w rejestrze) jest pomijany", async () => {
+    results.push([], [{ slug: "salon-ada" }]);
+    expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada-2");
+  });
+
+  it("zajętość z obu źródeł łącznie: base w salons, base-2 w rejestrze → base-3", async () => {
+    results.push([{ slug: "salon-ada" }], [{ slug: "salon-ada-2" }]);
     expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada-3");
   });
 
   it("zajęty tylko sufiks (base wolny) → base", async () => {
-    results.push([{ slug: "salon-ada-2" }]);
+    results.push([{ slug: "salon-ada-2" }], []);
     expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada");
   });
 

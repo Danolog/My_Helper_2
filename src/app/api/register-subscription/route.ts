@@ -15,7 +15,7 @@ import {
 } from "@/lib/legal/acceptance";
 import { logger } from "@/lib/logger";
 import { isSalonSlugConflict, slugFromSalonName } from "@/lib/salon-slug";
-import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
+import { subscriptionPlans, salonSlugHistory, salonSubscriptions, salons } from "@/lib/schema";
 import { pickFreeSalonSlug } from "@/lib/server/system";
 import {
   isSubscriptionLockFailure,
@@ -30,7 +30,8 @@ type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
 const SLUG_CONFLICT_MAX_ATTEMPTS = 3;
 
 /**
- * Ponawia całą transakcję po konflikcie adresu salonu (23505 na salons_slug_uq):
+ * Ponawia całą transakcję po konflikcie adresu salonu (23505 na salons_slug_uq
+ * albo salon_slug_history_pkey):
  * kolejna próba czyta zajęte adresy od nowa i bierze następny sufiks. Inne
  * błędy i konflikt w ostatniej próbie przechodzą do wołającego.
  */
@@ -185,6 +186,11 @@ export async function POST(request: NextRequest) {
             .returning({ id: salons.id });
           if (!newSalon) throw new Error("Register subscription: salon insert returned no row");
           salonId = newSalon.id;
+          // Adres bieżący w rejestrze adresów: klucz główny `slug` odrzuca adres,
+          // który inny salon ma albo miał (także porzucony równolegle po
+          // odczycie wyżej) — 23505 i ponowienie jak przy salons_slug_uq. Zapis
+          // w tej samej transakcji co salon (surowe tx jak reszta transakcji).
+          await tx.insert(salonSlugHistory).values({ slug, salonId });
         }
 
         await lockSalonSubscriptions(tx, salonId);

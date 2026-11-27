@@ -18,8 +18,9 @@
  * - `reviews`: średnia ocena i liczba opinii `approved` na salon — tylko gdy
  *   moduł opinii nie jest zamrożony; zamrożony = bez zapytania, ocena null
  *   i liczba opinii 0;
- * - krótkie adresy: `findPublicSalonIdBySlug` czyta samo `id`,
- *   `pickFreeSalonSlug` samą kolumnę `slug`.
+ * - krótkie adresy: `findPublicSalonIdBySlug` czyta samo `salons.id`, a dla
+ *   dawnego adresu samo `salon_slug_history.salon_id`; `pickFreeSalonSlug`
+ *   samą kolumnę `slug` z `salons` i z `salon_slug_history`.
  *
  * Czego NIE czyta: `settings_json`, `owner_id` ani żadnej innej kolumny
  * salonu spoza DTO; żadnych danych pracowników, klientów ani wizyt.
@@ -29,7 +30,7 @@
 import { and, avg, count, eq, inArray, isNotNull, like, ne, or } from "drizzle-orm";
 import { isModuleFrozen } from "@/lib/features";
 import { isValidSalonSlug, pickAvailableSalonSlug } from "@/lib/salon-slug";
-import { reviews, salons, services } from "@/lib/schema";
+import { reviews, salonSlugHistory, salons, services } from "@/lib/schema";
 import { dbSystem } from "./db-system";
 
 /** Pozycja publicznej listy salonów — dokładnie pola odpowiedzi `GET /api/salons`. */
@@ -138,11 +139,17 @@ export async function listPublicSalonCatalog(): Promise<PublicSalonCatalogEntry[
  * „salon aktywny”, a strona salonu nie sprawdza subskrypcji). Dodatkowo salon
  * musi mieć slug (wiersz bez sluga nie ma krótkiego adresu).
  *
+ * Dawny adres: gdy żaden salon nie ma dziś tego sluga, drugie zapytanie
+ * szuka go w rejestrze `salon_slug_history` i zwraca salon, który go miał —
+ * stare linki (wydrukowane, na Instagramie) dalej prowadzą do tego salonu.
+ * Inny salon nie może zająć dawnego adresu (klucz główny rejestru).
+ *
  * Wejście z adresu: wielkie litery sprowadzane do małych (`/s/Salon-Ada`
  * = `/s/salon-ada`); napis, który nie jest poprawnym slugiem (format, długość,
- * słowo zastrzeżone), daje null BEZ zapytania do bazy. Zapytanie czyta
- * wyłącznie `id` (bez `settings_json`, `owner_id` i pozostałych kolumn),
- * a warunek to równość — slug idzie jako parametr, nie jako wzorzec.
+ * słowo zastrzeżone), daje null BEZ zapytania do bazy. Zapytania czytają
+ * wyłącznie `salons.id` i `salon_slug_history.salon_id` (bez `settings_json`,
+ * `owner_id` i pozostałych kolumn), a warunek to równość — slug idzie jako
+ * parametr, nie jako wzorzec.
  *
  * Błąd bazy propaguje do wołającego.
  */
@@ -155,7 +162,14 @@ export async function findPublicSalonIdBySlug(slug: string): Promise<string | nu
     .from(salons)
     .where(eq(salons.slug, normalized))
     .limit(1);
-  return row?.id ?? null;
+  if (row) return row.id;
+
+  const [retired] = await dbSystem
+    .select({ salonId: salonSlugHistory.salonId })
+    .from(salonSlugHistory)
+    .where(eq(salonSlugHistory.slug, normalized))
+    .limit(1);
+  return retired?.salonId ?? null;
 }
 
 /**
@@ -166,16 +180,22 @@ export async function findPublicSalonIdBySlug(slug: string): Promise<string | nu
  * do innych salonów — w kontekście RLS jednego salonu (`forSalon`) nie byłoby
  * ich widać.
  *
- * Co czyta: wyłącznie kolumnę `slug` salonów, których adres jest równy `base`
- * albo zaczyna się od `base-`. Żadnych id, nazw ani innych kolumn.
+ * Co czyta: wyłącznie kolumnę `slug` — z `salons` (adresy bieżące) i z rejestru
+ * `salon_slug_history` (adresy bieżące i dawne; dawnego adresu innego salonu
+ * nie wolno zająć). Tylko wiersze o adresie równym `base` albo zaczynającym się
+ * od `base-`. Żadnych id, nazw ani innych kolumn.
  *
  * `base` musi być poprawnym slugiem (`slugFromSalonName` zawsze taki daje);
  * inny napis → błąd bez zapytania. Dzięki temu `base` nie zawiera znaków
  * wzorca LIKE (`%`, `_`), więc `base-%` dopasowuje tylko sufiksy.
  *
+ * Kolejność zapytań: najpierw `salons`, potem rejestr. Zmiana adresu przez inny
+ * salon zapisuje oba wiersze w jednej transakcji, więc adres porzucony między
+ * zapytaniami widać w rejestrze, a porzucony wcześniej — w obu.
+ *
  * Wynik nie jest rezerwacją: równoległa rejestracja może wziąć ten sam adres.
- * Wtedy zapis kończy się konfliktem indeksu `salons_slug_uq`, a wołający
- * ponawia (rozpoznaje go `isSalonSlugConflict`).
+ * Wtedy zapis kończy się konfliktem `salons_slug_uq` albo klucza głównego
+ * rejestru, a wołający ponawia (rozpoznaje go `isSalonSlugConflict`).
  *
  * Błąd bazy propaguje do wołającego.
  */
@@ -183,12 +203,16 @@ export async function pickFreeSalonSlug(base: string): Promise<string> {
   if (!isValidSalonSlug(base)) {
     throw new Error("pickFreeSalonSlug: base is not a valid salon slug");
   }
-  const rows = await dbSystem
+  const current = await dbSystem
     .select({ slug: salons.slug })
     .from(salons)
     .where(or(eq(salons.slug, base), like(salons.slug, `${base}-%`)));
-  return pickAvailableSalonSlug(
-    base,
-    rows.flatMap((row) => (row.slug ? [row.slug] : []))
-  );
+  const registered = await dbSystem
+    .select({ slug: salonSlugHistory.slug })
+    .from(salonSlugHistory)
+    .where(or(eq(salonSlugHistory.slug, base), like(salonSlugHistory.slug, `${base}-%`)));
+  return pickAvailableSalonSlug(base, [
+    ...current.flatMap((row) => (row.slug ? [row.slug] : [])),
+    ...registered.map((row) => row.slug),
+  ]);
 }

@@ -149,6 +149,34 @@ export const salons = pgTable(
   ]
 );
 
+// Rejestr krotkich adresow salonu (migracja 0018): kazdy adres, ktory salon
+// kiedykolwiek mial. retiredAt null = adres biezacy, inaczej adres dawny.
+// Dawny adres zostaje przypisany do salonu: inny salon nie moze go zajac
+// (wydrukowane linki nie prowadza do cudzego salonu), a `/s/<stary>`
+// przekierowuje dalej do wlasciciela. Ochrona to klucz glowny na `slug` —
+// zajecie adresu = INSERT wiersza, wiec ten sam adres w dwoch salonach daje
+// 23505 takze przy rownoleglych transakcjach. Wlasny dawny adres salon
+// odzyskuje (usuwa swoj wiersz i wstawia go od nowa jako biezacy).
+export const salonSlugHistory = pgTable(
+  "salon_slug_history",
+  {
+    slug: text("slug").primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("salon_slug_history_salon_id_idx").on(table.salonId),
+    // Najwyzej jeden adres biezacy na salon.
+    uniqueIndex("salon_slug_history_current_uq").on(table.salonId).where(sql`${table.retiredAt} IS NULL`),
+    check(
+      "salon_slug_history_slug_format",
+      sql`length(${table.slug}) BETWEEN 3 AND 50 AND ${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`
+    ),
+  ]
+);
+
 // Clients table - customers who book appointments
 export const clients = pgTable(
   "clients",
