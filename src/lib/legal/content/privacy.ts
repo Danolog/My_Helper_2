@@ -136,7 +136,7 @@ Do USA mogą trafić dane przekazywane:
 - **Resend (Plus Five Five, Inc.)**: e-maile z aplikacji;
 - **Upstash, Inc.**: tylko gdy spółka z USA ma dostęp do danych przechowywanych we Frankfurcie, np. przy wsparciu technicznym.
 
-Podstawą przekazania jest decyzja wykonawcza Komisji Europejskiej (UE) 2023/1795 o odpowiednim stopniu ochrony w ramach **EU-U.S. Data Privacy Framework**. Obie firmy są na oficjalnej liście tego programu. Kopię zabezpieczeń dostaniesz, pisząc na kontakt@nordsignal.cc.
+Podstawą przekazania danych do Resend jest decyzja wykonawcza Komisji Europejskiej (UE) 2023/1795 o odpowiednim stopniu ochrony w ramach **EU-U.S. Data Privacy Framework**. Resend jest na oficjalnej liście tego programu. Podstawą przekazania danych do Upstash są **standardowe klauzule umowne** (decyzja wykonawcza Komisji (UE) 2021/914, moduł 2), włączone do umowy powierzenia z Upstash. Kopię zabezpieczeń dostaniesz, pisząc na kontakt@nordsignal.cc.
 
 ## 6. Jak długo przechowujemy dane
 
