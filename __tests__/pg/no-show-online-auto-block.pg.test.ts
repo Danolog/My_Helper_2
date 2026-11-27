@@ -176,7 +176,9 @@ async function noShowCounter(salonId: string, clientId: string): Promise<{ noSho
     await noShowsRoute.GET(new Request(`http://localhost/api/clients/${clientId}/no-shows`), createRouteParams(clientId))
   );
   expect(res.status).toBe(200);
-  return res.body.data;
+  // Odpowiedz trasy zawiera tez clientId; testy porownuja tylko liczniki.
+  const { noShowCount, phoneOnlyCount } = res.body.data;
+  return { noShowCount, phoneOnlyCount };
 }
 
 async function noShowCount(salonId: string, clientId: string): Promise<number> {
