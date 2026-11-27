@@ -1,6 +1,7 @@
 /**
- * Wyjście systemowe: publiczna lista salonów dla `GET /api/salons` (katalog
- * bez sesji).
+ * Wyjścia systemowe: publiczna lista salonów dla `GET /api/salons` (katalog
+ * bez sesji) i wyszukiwanie salonu po krótkim adresie `/s/<slug>`
+ * (`findPublicSalonIdBySlug`, opis przy funkcji).
  *
  * Dlaczego pula systemowa, a nie `forSalon`: `salons` to tabela korzenia
  * najemcy, a lista z natury obejmuje wiele salonów naraz — nie ma jednego
@@ -24,6 +25,7 @@
  */
 import { and, avg, count, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { isModuleFrozen } from "@/lib/features";
+import { isValidSalonSlug } from "@/lib/salon-slug";
 import { reviews, salons, services } from "@/lib/schema";
 import { dbSystem } from "./db-system";
 
@@ -119,4 +121,36 @@ export async function listPublicSalonCatalog(): Promise<PublicSalonCatalogEntry[
       reviewCount: reviewStatsMap.get(salon.id)?.reviewCount ?? 0,
     }))
     .sort((a, b) => (b.serviceCount > 0 ? 1 : 0) - (a.serviceCount > 0 ? 1 : 0));
+}
+
+/**
+ * Id salonu o krótkim adresie `slug` albo null (strona `/s/[slug]`, bez sesji).
+ *
+ * Dlaczego pula systemowa: przed odczytem nie znamy salonu, więc nie ma id
+ * dla `forSalon`, a polityka RLS `salons` (tenant_self) przepuszcza tylko
+ * wiersz o id = kontekst.
+ *
+ * Co jest publiczne: ta sama reguła co na stronie `/salons/[id]` i w
+ * `GET /api/salons/[id]` — każdy istniejący salon (schemat nie ma flagi
+ * „salon aktywny”, a strona salonu nie sprawdza subskrypcji). Dodatkowo salon
+ * musi mieć slug (wiersz bez sluga nie ma krótkiego adresu).
+ *
+ * Wejście z adresu: wielkie litery sprowadzane do małych (`/s/Salon-Ada`
+ * = `/s/salon-ada`); napis, który nie jest poprawnym slugiem (format, długość,
+ * słowo zastrzeżone), daje null BEZ zapytania do bazy. Zapytanie czyta
+ * wyłącznie `id` (bez `settings_json`, `owner_id` i pozostałych kolumn),
+ * a warunek to równość — slug idzie jako parametr, nie jako wzorzec.
+ *
+ * Błąd bazy propaguje do wołającego.
+ */
+export async function findPublicSalonIdBySlug(slug: string): Promise<string | null> {
+  const normalized = slug.toLowerCase();
+  if (!isValidSalonSlug(normalized)) return null;
+
+  const [row] = await dbSystem
+    .select({ id: salons.id })
+    .from(salons)
+    .where(eq(salons.slug, normalized))
+    .limit(1);
+  return row?.id ?? null;
 }

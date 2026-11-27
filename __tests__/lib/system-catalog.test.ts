@@ -16,6 +16,7 @@ interface Query {
   cols: Record<string, unknown> | null;
   where: unknown;
   groupBy: unknown[];
+  limit?: number;
 }
 
 const queries: Query[] = [];
@@ -59,6 +60,10 @@ vi.mock("@/lib/server/system/db-system", () => ({
           q.groupBy = g;
           return chain;
         },
+        limit(n: number) {
+          q.limit = n;
+          return chain;
+        },
         then(resolve: (r: Row[]) => unknown, reject: (e: unknown) => unknown) {
           const next = results.shift() ?? [];
           return (next instanceof Error ? Promise.reject(next) : Promise.resolve(next)).then(resolve, reject);
@@ -84,7 +89,7 @@ vi.mock("@/lib/features", async (importOriginal) => {
   };
 });
 
-import { listPublicSalonCatalog } from "@/lib/server/system/catalog";
+import { findPublicSalonIdBySlug, listPublicSalonCatalog } from "@/lib/server/system/catalog";
 
 const node = (type: string, ...args: unknown[]) => ({ type, args });
 
@@ -195,5 +200,57 @@ describe("listPublicSalonCatalog", () => {
     results.length = 0;
     results.push([salon(SALON_A, "A")], new Error("services down"));
     await expect(listPublicSalonCatalog()).rejects.toThrow("services down");
+  });
+});
+
+describe("findPublicSalonIdBySlug — krótki adres /s/<slug>", () => {
+  it("salon o tym slugu → jego id; zapytanie czyta tylko id, warunek równości, limit 1", async () => {
+    results.push([{ id: SALON_A }]);
+
+    expect(await findPublicSalonIdBySlug("salon-ada")).toBe(SALON_A);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.table).toBe("salons");
+    expect(queries[0]!.cols).toEqual({ id: "salons.id" });
+    expect(queries[0]!.where).toEqual(node("eq", "salons.slug", "salon-ada"));
+    expect(queries[0]!.limit).toBe(1);
+  });
+
+  it("nieznany slug → null", async () => {
+    results.push([]);
+    expect(await findPublicSalonIdBySlug("nie-ma-takiego")).toBeNull();
+    expect(queries).toHaveLength(1);
+  });
+
+  it("wielkie litery z adresu sprowadzane do małych", async () => {
+    results.push([{ id: SALON_B }]);
+    expect(await findPublicSalonIdBySlug("Salon-ADA")).toBe(SALON_B);
+    expect(queries[0]!.where).toEqual(node("eq", "salons.slug", "salon-ada"));
+  });
+
+  it.each([
+    ["za krótki", "ab"],
+    ["za długi", "x".repeat(51)],
+    ["zły format", "salon_ada"],
+    ["wzorzec SQL", "salon%"],
+    ["zastrzeżony", "admin"],
+    ["ścieżka", "../salons"],
+    ["pusty", ""],
+  ])("%s (%s) → null bez zapytania do bazy", async (_name, slug) => {
+    expect(await findPublicSalonIdBySlug(slug)).toBeNull();
+    expect(queries).toEqual([]);
+  });
+
+  it("bez kolumn prywatnych w zapytaniu (settingsJson, ownerId)", async () => {
+    results.push([{ id: SALON_A }]);
+    await findPublicSalonIdBySlug("salon-ada");
+    const cols = Object.values(queries[0]!.cols ?? {});
+    expect(cols).not.toContain("salons.settingsJson");
+    expect(cols).not.toContain("salons.ownerId");
+  });
+
+  it("błąd bazy przechodzi do wołającego", async () => {
+    results.push(new Error("db down"));
+    await expect(findPublicSalonIdBySlug("salon-ada")).rejects.toThrow("db down");
   });
 });
