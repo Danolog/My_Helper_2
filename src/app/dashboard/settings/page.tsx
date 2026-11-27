@@ -10,6 +10,7 @@ import {
   Gift,
   Crown,
   Blocks,
+  Link2,
 } from "lucide-react";
 import { useModules } from "@/components/dashboard/modules-provider";
 import { RoleGate } from "@/components/dashboard/role-gate";
@@ -27,6 +28,12 @@ const SETTINGS_ITEMS = [
     description: "Nazwa, adres, telefon i typ dzialalnosci salonu",
     href: "/dashboard/settings/salon",
     icon: Building2,
+  },
+  {
+    label: "Link do rezerwacji",
+    description: "Krótki adres salonu i przycisk Zarezerwuj na Instagramie i Facebooku",
+    href: "/dashboard/settings/booking-link",
+    icon: Link2,
   },
   {
     label: "Płatności i zadatki",
