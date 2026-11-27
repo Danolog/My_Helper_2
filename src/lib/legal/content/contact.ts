@@ -10,6 +10,8 @@ NIP: 8561293713 · REGON: 811103360
 
 **E-mail: kontakt@nordsignal.cc**
 
+**Telefon: +48 669 149 383**
+
 Na wiadomości odpowiada człowiek, nie automat. Piszemy w języku polskim.
 
 ## W jakiej sprawie możesz napisać

@@ -4,7 +4,7 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const PRIVACY_CONTENT = `Wersja: 26.11.2026 · obowiązuje od: 26.11.2026
+export const PRIVACY_CONTENT = `Wersja: 28.11.2026 · obowiązuje od: 28.11.2026
 
 ## 1. Kto odpowiada za Twoje dane
 
@@ -13,7 +13,7 @@ MyHelper to aplikacja do rezerwacji wizyt i prowadzenia salonu usługowego. Twoj
 **a) Sami decydujemy o danych (jesteśmy administratorem):**
 - konta w aplikacji: właściciele salonów, pracownicy salonów i klienci z kontem w portalu klienta;
 - konto salonu i jego okres próbny;
-- numer BLIK właściciela salonu, gdy pokazujemy go osobom rezerwującym (pkt 2, „Numer BLIK”);
+- numer BLIK właściciela salonu zapisany w ustawieniach. Osobom rezerwującym pokażemy go dopiero po włączeniu zadatków, które są obecnie niedostępne (pkt 2, „Numer BLIK”);
 - dane salonu publikowane na liście salonów;
 - dane techniczne: pliki cookie, logi serwera i adres IP używany do ochrony przed nadużyciami.
 
@@ -44,6 +44,8 @@ Logowanie kontem Google jest dziś wyłączone. Konto zakładasz adresem e-mail 
 Bez imienia i nazwiska, adresu e-mail i hasła nie założysz konta. Numer telefonu w koncie jest dobrowolny.
 
 ### Numer BLIK właściciela salonu (odpowiada MyHelper)
+**Zadatki są obecnie niedostępne** ([Regulamin](/terms), pkt 8.2). Właściciel może zapisać numer w ustawieniach, ale dopóki zadatki nie działają, nie pokazujemy go nikomu i nie wysyłamy go w SMS-ach. Opis niżej dotyczy czasu po włączeniu zadatków. Zadatki włączymy tylko zmianą regulaminu i tej polityki.
+
 Właściciel salonu może podać numer telefonu, na który klienci wpłacają zadatek BLIK-iem. Numer zapisujemy dopiero wtedy, gdy właściciel potwierdzi, że rozumie zasady jego pokazywania i chce włączyć wpłaty BLIK. Zapisujemy datę i wersję tego potwierdzenia. Zalecamy numer służbowy, nie prywatny. Gdy numer jest zapisany:
 - **pokazujemy go każdej osobie, która zarezerwuje w tym salonie wizytę z zadatkiem, także gościowi bez konta.** Nie sprawdzamy, kim jest ta osoba;
 - numer pojawia się na ekranie po rezerwacji i **w SMS-ie z danymi wpłaty**;
@@ -57,12 +59,12 @@ Podanie numeru jest dobrowolne. Bez niego salon nie przyjmie zadatku BLIK przez 
 
 ### Rezerwacja wizyty (odpowiada salon)
 - imię i nazwisko, numer telefonu, adres e-mail (u gościa opcjonalnie), uwagi do wizyty;
-- termin, usługa, pracownik, status wizyty, kwota zadatku i informacja, czy salon oznaczył go jako wpłacony;
+- termin, usługa, pracownik, status wizyty, a po włączeniu zadatków (obecnie niedostępne) także kwota zadatku i informacja, czy salon oznaczył go jako wpłacony;
 - historia SMS-ów wysłanych w związku z wizytą: treść (z imieniem i danymi wizyty), status i czas wysyłki.
 
 Rezerwacja gościa bez konta **nie zakłada kartoteki klienta.** Dane gościa są zapisane tylko przy wizycie i w treści wysłanych SMS-ów. Do kartoteki trafiasz dopiero, gdy salon sam Cię do niej doda.
 
-Bez imienia i numeru telefonu gość nie zarezerwuje wizyty. Na ten numer idzie potwierdzenie i, jeśli salon wymaga zadatku, dane wpłaty.
+Bez imienia i numeru telefonu gość nie zarezerwuje wizyty. Na ten numer idzie potwierdzenie. Dane wpłaty zadatku będą tam trafiać dopiero po włączeniu zadatków (obecnie niedostępne).
 
 ### Kartoteka klienta (odpowiada salon)
 - dane kontaktowe, notatki, preferencje, data urodzin, ulubiony pracownik, ustawienia zadatku;
@@ -81,7 +83,7 @@ Opinia jest publiczna dopiero po akceptacji przez salon. **Publicznie widać ją
 Funkcje sztucznej inteligencji są w tej wersji aplikacji wyłączone i nie dostają żadnych danych. Jeśli je włączymy, najpierw zmienimy tę politykę.
 
 ### Dane techniczne (odpowiada MyHelper)
-- adres IP osoby, która sprawdza wolne terminy albo rezerwuje wizytę, oraz numer telefonu gościa (porównywany po ostatnich 9 cyfrach). Służą jako klucze liczników, które chronią salony przed nadużyciami;
+- adres IP osoby, która sprawdza wolne terminy albo rezerwuje wizytę, a po włączeniu zadatków (obecnie niedostępne) także numer telefonu gościa (porównywany po ostatnich 9 cyfrach). Służą jako klucze liczników, które chronią salony przed nadużyciami;
 - logi serwera: adres IP, czas, adres strony, kod odpowiedzi i informacja o przeglądarce.
 
 ## 3. Po co przetwarzamy dane i na jakiej podstawie
@@ -92,17 +94,17 @@ Funkcje sztucznej inteligencji są w tej wersji aplikacji wyłączone i nie dost
 | Prowadzenie konta salonu, w tym okresu próbnego | art. 6 ust. 1 lit. b (umowa) | MyHelper |
 | Zapis akceptacji regulaminu i umowy powierzenia | art. 6 ust. 1 lit. f (prawnie uzasadniony interes: dowód zawarcia umowy) | MyHelper |
 | Publikacja danych kontaktowych salonu na liście salonów | art. 6 ust. 1 lit. b (usługa zamówiona przez salon) | MyHelper |
-| Pokazanie numeru BLIK właściciela osobom rezerwującym (ekran, SMS) | art. 6 ust. 1 lit. b (funkcja usługi, którą właściciel sam włącza) | MyHelper |
-| Ochrona przed nadużyciami (limity żądań, prób logowania i rezerwacji z zadatkiem), logi serwera | art. 6 ust. 1 lit. f (prawnie uzasadniony interes: bezpieczeństwo usługi i ochrona salonów przed fałszywymi rezerwacjami) | MyHelper |
+| Pokazanie numeru BLIK właściciela osobom rezerwującym (ekran, SMS), po włączeniu zadatków (obecnie niedostępne) | art. 6 ust. 1 lit. b (funkcja usługi, którą właściciel sam włącza) | MyHelper |
+| Ochrona przed nadużyciami (limity żądań i prób logowania, a po włączeniu zadatków także rezerwacji z zadatkiem), logi serwera | art. 6 ust. 1 lit. f (prawnie uzasadniony interes: bezpieczeństwo usługi i ochrona salonów przed fałszywymi rezerwacjami) | MyHelper |
 | Obsługa reklamacji, zgłoszeń treści i żądań dotyczących danych | art. 6 ust. 1 lit. c (obowiązki z prawa konsumenckiego, aktu o usługach cyfrowych i RODO) | MyHelper |
 | Ustalenie, dochodzenie i obrona roszczeń | art. 6 ust. 1 lit. f (prawnie uzasadniony interes: ochrona przed roszczeniami) | MyHelper |
-| Rezerwacja wizyty, SMS z potwierdzeniem i danymi wpłaty | określa salon (zwykle art. 6 ust. 1 lit. b, umowa o usługę salonu) | salon |
+| Rezerwacja wizyty, SMS z potwierdzeniem (z danymi wpłaty dopiero po włączeniu zadatków) | określa salon (zwykle art. 6 ust. 1 lit. b, umowa o usługę salonu) | salon |
 | Kartoteka klienta | określa salon (zwykle art. 6 ust. 1 lit. b lub f) | salon |
 | Informacje o zdrowiu w kartotece | art. 9 ust. 2 lit. a (wyraźna zgoda klienta odebrana przez salon) | salon |
 | Lista oczekujących | art. 6 ust. 1 lit. b, na prośbę klienta | salon |
 | Opinie i ich moderacja | określa salon | salon |
 
-**Decyzje automatyczne.** Nie podejmujemy wobec Ciebie decyzji opartych wyłącznie na zautomatyzowanym przetwarzaniu, które wywołują skutki prawne albo podobnie istotnie na Ciebie wpływają (art. 22 RODO). Aplikacja stosuje proste limity bezpieczeństwa. Ogranicza liczbę niewpłaconych rezerwacji z zadatkiem z jednego numeru telefonu albo konta w salonie w ciągu doby oraz łączną liczbę takich rezerwacji w salonie w ciągu doby. Po przekroczeniu limitu nowej rezerwacji z zadatkiem nie da się złożyć do końca doby. Możesz wtedy skontaktować się z salonem bezpośrednio.
+**Decyzje automatyczne.** Nie podejmujemy wobec Ciebie decyzji opartych wyłącznie na zautomatyzowanym przetwarzaniu, które wywołują skutki prawne albo podobnie istotnie na Ciebie wpływają (art. 22 RODO). Aplikacja stosuje proste limity bezpieczeństwa: ogranicza liczbę żądań i prób logowania w krótkim czasie. Po włączeniu zadatków (obecnie niedostępne) dojdzie limit rezerwacji z zadatkiem. Aplikacja będzie wtedy ograniczać liczbę niewpłaconych rezerwacji z zadatkiem z jednego numeru telefonu albo konta w salonie w ciągu doby oraz łączną liczbę takich rezerwacji w salonie w ciągu doby. Po przekroczeniu limitu nowej rezerwacji z zadatkiem nie będzie się dało złożyć do końca doby. Będzie można wtedy skontaktować się z salonem bezpośrednio.
 
 **Marketing.** MyHelper nie wysyła klientom salonów wiadomości marketingowych. Newslettery, życzenia urodzinowe i wiadomości „Tęsknimy” są w aplikacji wyłączone. Salon może zapisać zgody marketingowe klienta, ale aplikacja na ich podstawie niczego nie wysyła.
 
@@ -113,10 +115,10 @@ Pełna, aktualna lista dostawców, którzy przetwarzają dane w naszym imieniu, 
 | Odbiorca | Gdzie przetwarza dane | Co dostaje | Po co |
 |---|---|---|---|
 | Google Cloud (Google Cloud Poland sp. z o.o., Warszawa) | region europe-central2 (Warszawa, Polska) | wszystkie dane w aplikacji, w tym wgrane zdjęcia, oraz logi serwera | serwery, baza danych, przechowywanie plików, logi |
-| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy i treść SMS-a, **w tym numer BLIK właściciela w SMS-ie z danymi wpłaty** | wysyłka SMS-ów |
+| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy i treść SMS-a, **po włączeniu zadatków także numer BLIK właściciela w SMS-ie z danymi wpłaty** | wysyłka SMS-ów |
 | Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat i treść wiadomości | e-maile z aplikacji, np. potwierdzenie adresu e-mail i reset hasła |
 | Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt, Niemcy); spółka z siedzibą w USA | adres IP, numer telefonu gościa albo identyfikator salonu jako klucz licznika | ochrona przed nadużyciami |
-| **Każda osoba rezerwująca wizytę z zadatkiem w danym salonie** | — | **numer BLIK właściciela salonu** | wpłata zadatku |
+| **Każda osoba rezerwująca wizytę z zadatkiem w danym salonie, po włączeniu zadatków** (obecnie nikt, bo zadatki są niedostępne) | — | **numer BLIK właściciela salonu** | wpłata zadatku |
 | Personel salonu | — | dane klientów i wizyt własnego salonu, historia powiadomień, opinie | obsługa klientów |
 | Każdy odwiedzający listę salonów | — | dane kontaktowe salonu, zdjęcia z galerii salonu, zaakceptowane opinie z imieniem i pierwszą literą nazwiska autora | wybór salonu |
 
@@ -134,7 +136,7 @@ Do USA mogą trafić dane przekazywane:
 - **Resend (Plus Five Five, Inc.)**: e-maile z aplikacji;
 - **Upstash, Inc.**: tylko gdy spółka z USA ma dostęp do danych przechowywanych we Frankfurcie, np. przy wsparciu technicznym.
 
-Podstawą przekazania jest decyzja Komisji Europejskiej o odpowiednim stopniu ochrony w ramach **EU-U.S. Data Privacy Framework**, jeśli odbiorca jest na oficjalnej liście tego programu. W przeciwnym razie podstawą są **standardowe klauzule umowne** przyjęte decyzją Komisji (UE) 2021/914, zawarte w umowie powierzenia z dostawcą. Kopię zabezpieczeń dostaniesz, pisząc na kontakt@nordsignal.cc.
+Podstawą przekazania jest decyzja wykonawcza Komisji Europejskiej (UE) 2023/1795 o odpowiednim stopniu ochrony w ramach **EU-U.S. Data Privacy Framework**. Obie firmy są na oficjalnej liście tego programu. Kopię zabezpieczeń dostaniesz, pisząc na kontakt@nordsignal.cc.
 
 ## 6. Jak długo przechowujemy dane
 
@@ -142,14 +144,14 @@ Podstawą przekazania jest decyzja Komisji Europejskiej o odpowiednim stopniu oc
 - **Konto użytkownika:** do usunięcia konta. Usuwamy je na Twoją prośbę wysłaną na kontakt@nordsignal.cc, w ciągu miesiąca od jej otrzymania.
 - **Sesja logowania:** wygasa po 15 minutach bezczynności i od tej chwili nie działa. Zapis wygasłej sesji (adres IP, informacja o przeglądarce) oraz wygasłe kody i linki weryfikacyjne (z adresem e-mail) usuwamy automatycznie raz na dobę.
 - **Numer BLIK właściciela:** do usunięcia przez właściciela w ustawieniach albo do usunięcia salonu. Kopie w treści wysłanych SMS-ów należą do historii powiadomień salonu (niżej).
-- **Zapis akceptacji regulaminu i umowy powierzenia:** przez czas trwania umowy i 3 lata od końca roku, w którym umowa się zakończyła (okres przedawnienia roszczeń).
+- **Zapis akceptacji regulaminu i umowy powierzenia:** przez czas trwania umowy i 3 lata od końca roku, w którym umowa się zakończyła.
 - **Logi serwera:** 30 dni, potem usuwa je automatycznie Google Cloud.
 - **Kopie zapasowe bazy:** kopie automatyczne powstają codziennie i są przechowywane 7 dni, z możliwością odtworzenia stanu z dowolnej chwili w tym okresie. Kopie wykonywane przed zmianami w systemie przechowujemy najdłużej 30 dni. Dane usunięte z aplikacji znikają ze wszystkich kopii zapasowych najpóźniej po 30 dniach.
 - **Dane salonu po zakończeniu umowy:** salon może zażądać kopii swoich danych przez 30 dni od zakończenia umowy. Potem usuwamy je w ciągu 30 dni.
-- **Korespondencja w sprawie reklamacji, zgłoszeń treści i żądań dotyczących danych:** 3 lata od końca roku, w którym zamknęliśmy sprawę (okres przedawnienia roszczeń).
+- **Korespondencja w sprawie reklamacji, zgłoszeń treści i żądań dotyczących danych:** 3 lata od końca roku, w którym zamknęliśmy sprawę.
 
 **Dane, za które odpowiada salon.** Okresy niżej to domyślne polecenia z umowy powierzenia. Salon może je zmienić.
-- **Kartoteka klienta:** do usunięcia przez salon, najpóźniej do końca umowy z salonem. Gdy salon usuwa klienta, usuwamy też jego dane kontaktowe i wolny tekst z jego wizyt, powiadomień i opinii, a także powiązanie wizyt z kontem w portalu klienta. Zostają dane potrzebne salonowi do rozliczeń: data i godzina wizyty, usługa, pracownik, status, kwoty, a przy opinii sama ocena, bez komentarza i bez danych autora. Rezerwacji gościa bez konta, której salon nie połączył z kartoteką, ta operacja nie obejmuje.
+- **Kartoteka klienta:** do usunięcia przez salon, najpóźniej do końca umowy z salonem. Gdy salon usuwa klienta, usuwamy też jego dane kontaktowe i wolny tekst z jego wizyt, powiadomień i opinii, a także powiązanie wizyt z kontem w portalu klienta. Zostają dane potrzebne salonowi do rozliczeń: data i godzina wizyty, usługa, pracownik, status, kwoty, a przy opinii sama ocena, bez komentarza i bez danych autora. Te dane mogą nadal pozwalać salonowi powiązać wizytę z Tobą. Salon przechowuje je do rozliczeń i ewentualnych roszczeń, najdłużej przez okres z punktu „Wizyty z danymi klienta”. Rezerwacji gościa bez konta, której salon nie połączył z kartoteką, ta operacja nie obejmuje.
 - **Wizyty z danymi klienta:** 3 lata od końca roku kalendarzowego, w którym odbyła się wizyta. Potem usuwamy dane osobowe przy wizycie. Zostają data, usługa i kwota.
 - **Rezerwacja gościa bez konta:** tak samo jak wizyty z danymi klienta.
 - **Historia powiadomień SMS:** 12 miesięcy od wysłania SMS-a, potem ją usuwamy.
