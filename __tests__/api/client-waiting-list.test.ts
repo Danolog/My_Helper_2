@@ -315,6 +315,37 @@ describe("POST /api/client/waiting-list/[id] — akceptacja oferty przy blokadzi
     expect(body).toEqual({ success: false, code: "ONLINE_BOOKING_UNAVAILABLE", error: BLOCKED_MESSAGE });
   });
 
+  it("zablokowana inna karta z tym samym e-mailem albo numerem => 403 przed acceptEarlierSlot", async () => {
+    sessionUser(true);
+    selectResults.push([
+      { entry: { ...entryRowOfB.entry, notifiedAt: new Date() }, client: { email: EMAIL_B, phone: "600700800" } },
+    ]);
+    vi.mocked(onlineBookingBlockResponse).mockResolvedValue(blockedResponse());
+
+    const { status, body } = await parseResponse(await accept());
+
+    expect(status).toBe(403);
+    expect(body).toEqual({ success: false, code: "ONLINE_BOOKING_UNAVAILABLE", error: BLOCKED_MESSAGE });
+    expect(vi.mocked(onlineBookingBlockResponse)).toHaveBeenCalledWith({
+      salonId: SALON_UUID,
+      sessionUser: expect.objectContaining({ email: EMAIL_B, emailVerified: true }),
+      phone: "600700800",
+    });
+    expect(vi.mocked(acceptEarlierSlot)).not.toHaveBeenCalled();
+  });
+
+  it("odrzucenie oferty nie sprawdza blokady", async () => {
+    sessionUser(true);
+    selectResults.push(notifiedEntryWithToken());
+
+    await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: false } }),
+      params
+    );
+
+    expect(vi.mocked(onlineBookingBlockResponse)).not.toHaveBeenCalled();
+  });
+
   it("inna odmowa acceptEarlierSlot (bez kodu) => dotychczasowe 200 z success=false", async () => {
     sessionUser(true);
     selectResults.push(notifiedEntryWithToken());

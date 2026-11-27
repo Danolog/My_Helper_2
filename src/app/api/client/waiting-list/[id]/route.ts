@@ -7,6 +7,7 @@ import { verifiedClientMatchEmail } from "@/lib/client-match";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { onlineBookingBlockResponse } from "@/lib/online-booking-block";
 import { waitingList, clients } from "@/lib/schema";
 import {
   acceptEarlierSlot,
@@ -36,7 +37,7 @@ export async function POST(
     const [entry] = await db
       .select({
         entry: waitingList,
-        client: { email: clients.email },
+        client: { email: clients.email, phone: clients.phone },
       })
       .from(waitingList)
       .innerJoin(clients, eq(waitingList.clientId, clients.id))
@@ -56,6 +57,18 @@ export async function POST(
         { success: false, error: "Brak dostepu do tego wpisu" },
         { status: 403 }
       );
+    }
+
+    // Przyjęcie terminu to rezerwacja online: ta sama reguła dopasowania co
+    // w portalu (e-mail konta i telefon z karty wpisu), więc zablokowana inna
+    // karta z tym samym e-mailem albo numerem też zatrzymuje przyjęcie.
+    if (accepted) {
+      const blockResponse = await onlineBookingBlockResponse({
+        salonId: entry.entry.salonId,
+        sessionUser: authResult.user,
+        phone: entry.client.phone,
+      });
+      if (blockResponse) return blockResponse;
     }
 
     // Verify the entry has been notified (notifiedAt must be set)
