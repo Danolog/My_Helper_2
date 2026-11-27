@@ -24,10 +24,12 @@
 --      SELECT count(*) FROM salons;
 --
 -- 3. Tabela salon_slug_history (rejestr adresów salonów, opis przy tabeli niżej):
---    RLS salonu, kontrola uprawnień i uzupełnienie bieżących adresów.
+--    RLS salonu, jawne uprawnienia roli aplikacji (REVOKE ALL, potem GRANT SELECT,
+--    INSERT, UPDATE, DELETE; wzór 0014), kontrola uprawnień i uzupełnienie bieżących
+--    adresów.
 --
 -- ROLLBACK: ręcznie:
---   DROP TABLE salon_slug_history;
+--   DROP TABLE salon_slug_history;  (usuwa też politykę i uprawnienia nadane wyżej)
 --   ALTER TABLE salons DROP CONSTRAINT salons_slug_format;
 --   DROP INDEX salons_slug_uq;
 --   ALTER TABLE salons DROP COLUMN slug;
@@ -103,16 +105,28 @@ INSERT INTO salon_slug_history (slug, salon_id, retired_at)
 SELECT slug, id, NULL FROM salons WHERE slug IS NOT NULL;
 --> statement-breakpoint
 -- Dopisane ręcznie: RLS salonu (kształt jak 0014 i 0015, z nullif). Drizzle nie wyraża
--- polityk. Strażnik RLS czyta tę migrację z listy RLS_EXTRA_MIGRATION_FILES. Uprawnienia
--- roli aplikacji (SELECT, INSERT, UPDATE, DELETE) z uprawnień domyślnych schematu (0005).
+-- polityk ani uprawnień. Strażnik RLS czyta tę migrację z listy RLS_EXTRA_MIGRATION_FILES.
 ALTER TABLE salon_slug_history ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 CREATE POLICY tenant_isolation ON salon_slug_history
   USING (salon_id = nullif(current_setting('app.current_salon_id', true), '')::uuid)
   WITH CHECK (salon_id = nullif(current_setting('app.current_salon_id', true), '')::uuid);
 --> statement-breakpoint
--- Kontrola w tej samej transakcji: RLS włączone, rola aplikacji ma odczyt i zapis.
+-- Dopisane ręcznie: uprawnienia roli aplikacji nadaje ta migracja wprost (wzór 0014),
+-- niezależnie od uprawnień domyślnych schematu (0005). REVOKE ALL odbiera też to, co
+-- dały uprawnienia domyślne, i uprawnienia kolumnowe; potem dokładnie SELECT, INSERT,
+-- UPDATE, DELETE (zajęcie adresu, porzucenie z retired_at, odzyskanie własnego adresu).
+REVOKE ALL ON TABLE salon_slug_history FROM PUBLIC;
+--> statement-breakpoint
+REVOKE ALL ON TABLE salon_slug_history FROM myhelper_app;
+--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE salon_slug_history TO myhelper_app;
+--> statement-breakpoint
+-- Kontrola w tej samej transakcji: RLS włączone, rola aplikacji ma dokładnie SELECT,
+-- INSERT, UPDATE, DELETE, bez TRUNCATE, REFERENCES i TRIGGER (także kolumnowych).
 DO $$
+DECLARE
+  bad text;
 BEGIN
   IF NOT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.salon_slug_history'::regclass) THEN
     RAISE EXCEPTION 'salon_slug_history bez RLS';
@@ -122,6 +136,21 @@ BEGIN
      OR NOT has_table_privilege('myhelper_app', 'public.salon_slug_history', 'UPDATE')
      OR NOT has_table_privilege('myhelper_app', 'public.salon_slug_history', 'DELETE') THEN
     RAISE EXCEPTION 'myhelper_app bez SELECT, INSERT, UPDATE albo DELETE na salon_slug_history';
+  END IF;
+  SELECT string_agg(p, ', ') INTO bad
+  FROM unnest(ARRAY['TRUNCATE','REFERENCES','TRIGGER']) AS p
+  WHERE has_table_privilege('myhelper_app', 'public.salon_slug_history', p)
+     OR (p = 'REFERENCES' AND has_any_column_privilege('myhelper_app', 'public.salon_slug_history', p));
+  IF bad IS NOT NULL THEN
+    RAISE EXCEPTION 'myhelper_app ma zakazane uprawnienia do salon_slug_history: %', bad;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'myhelper_app_login') THEN
+    SELECT string_agg(p, ', ') INTO bad
+    FROM unnest(ARRAY['TRUNCATE','REFERENCES','TRIGGER']) AS p
+    WHERE has_table_privilege('myhelper_app_login', 'public.salon_slug_history', p);
+    IF bad IS NOT NULL THEN
+      RAISE EXCEPTION 'myhelper_app_login ma zakazane uprawnienia do salon_slug_history: %', bad;
+    END IF;
   END IF;
 END
 $$;
