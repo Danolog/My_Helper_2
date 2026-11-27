@@ -141,6 +141,13 @@
       "when": 1795800060000,
       "tag": "0019_clients_online_booking_block",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795800120000,
+      "tag": "0020_salon_slug_history_grant",
+      "breakpoints": true
     }
   ]
 }

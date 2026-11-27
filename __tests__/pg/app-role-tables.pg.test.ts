@@ -301,6 +301,18 @@ suite("strażnik uprawnień roli aplikacji do tabel (#193)", () => {
     it("pg_default_acl roli migracji równe DEFAULT_ACL, bez wpisów typu f", async () => {
       expect(await defaultAclViolations(h!.observer)).toEqual([]);
     });
+    it("salon_slug_history: myhelper_app ma SELECT, INSERT, UPDATE i DELETE (jawny GRANT z migracji 0020)", async () => {
+      const rows = (await h!.observer.unsafe(
+        `SELECT p, has_table_privilege('${APP_ROLE}', 'public.salon_slug_history', p) AS ok
+         FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS p ORDER BY p`
+      )) as Array<{ p: string; ok: boolean }>;
+      expect(rows).toEqual([
+        { p: "DELETE", ok: true },
+        { p: "INSERT", ok: true },
+        { p: "SELECT", ok: true },
+        { p: "UPDATE", ok: true },
+      ]);
+    });
   });
 
   describe("mutanty (wycofywana transakcja)", () => {
