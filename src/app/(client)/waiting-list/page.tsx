@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { clientLoginPath } from "@/lib/features";
 
 interface WaitingListEntry {
   id: string;
@@ -100,7 +101,7 @@ export default function WaitingListPage() {
       const res = await fetch("/api/client/waiting-list");
       if (!res.ok) {
         if (res.status === 401) {
-          router.push("/portal");
+          router.push(clientLoginPath("/waiting-list"));
           return;
         }
         throw new Error("Blad pobierania danych");
@@ -118,7 +119,7 @@ export default function WaitingListPage() {
   useEffect(() => {
     if (!sessionLoading) {
       if (!session) {
-        router.push("/portal");
+        router.push(clientLoginPath("/waiting-list"));
       } else {
         fetchEntries();
       }

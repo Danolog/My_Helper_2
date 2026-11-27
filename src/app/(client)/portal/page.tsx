@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation"
+import { isModuleFrozen } from "@/lib/features"
 
 export default async function ClientPortalPage() {
-  // Redirect all visitors to the new client landing page
-  redirect("/dla-klientow")
+  // Przy zamrożonym katalogu (`salonCatalog`) `/dla-klientow` przekierowuje
+  // na stronę sprzedażową dla salonów, więc klient trafia od razu do logowania.
+  redirect(isModuleFrozen("salonCatalog") ? "/portal/login" : "/dla-klientow")
 }

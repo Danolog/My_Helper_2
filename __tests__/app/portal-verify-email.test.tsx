@@ -60,7 +60,7 @@ describe("portal/verify-email", () => {
     render(<VerifyEmailPage />);
 
     expect(await screen.findByText("Token expired")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/portal/login");
     expect(nav.router.replace).not.toHaveBeenCalled();
   });
 

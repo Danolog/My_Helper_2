@@ -91,7 +91,7 @@ function VerifyEmailContent() {
               <p className="text-sm text-destructive text-center">{errorMessage}</p>
               <div className="flex gap-2 w-full">
                 <Button asChild variant="outline" className="flex-1">
-                  <Link href="/login">Sign in</Link>
+                  <Link href="/portal/login">Sign in</Link>
                 </Button>
                 <Button asChild className="flex-1">
                   <Link href="/portal/register">Register again</Link>

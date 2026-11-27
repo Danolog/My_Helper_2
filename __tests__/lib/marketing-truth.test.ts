@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { MODULES } from "@/lib/features";
+import { MODULES, isDepositEnabled } from "@/lib/features";
 import { PLAN_FEATURES, PLAN_SUMMARY } from "@/lib/plan-features";
 
 const ROOT = process.cwd();
@@ -49,6 +49,9 @@ const VIDEO = /wideo|video/i;
 const SOCIAL_POSTS = /post(y|[óo]w)\b[^"\n]*social/i;
 const FISCAL = /drukark[ąa] fiskaln/i;
 const ONLINE_DEPOSITS = /Stripe \+ Blik|p[łl]atno[śs]ci zadatk[óo]w|zadatk[óo]w przez Stripe/i;
+// Zadatek jest wyłączony w całej aplikacji (`isDepositEnabled()`), więc oferta
+// planów nie może go obiecywać w żadnej postaci — także „ustalanego przez salon”.
+const ANY_DEPOSIT = /zadat/i;
 // Analizy sentymentu nie ma w kodzie: `grep -rniE "sentyment|sentiment" src`
 // nie znajduje żadnej implementacji.
 const SENTIMENT = /sentyment|sentiment/i;
@@ -275,6 +278,11 @@ describe("prawda w marketingu", () => {
     it.each(PLAN_OFFER_FILES)("%s nie twierdzi, że któryś plan jest najpopularniejszy ani polecany", (file) => {
       expectNoMatch(file, POPULARITY_CLAIM);
     });
+
+    it.each(PLAN_OFFER_FILES)("%s nie obiecuje zadatków, dopóki są wyłączone", (file) => {
+      if (isDepositEnabled()) return;
+      expectNoMatch(file, ANY_DEPOSIT);
+    });
   });
 
   describe("listy funkcji planów (źródło dla tabeli subscription_plans)", () => {
@@ -290,6 +298,7 @@ describe("prawda w marketingu", () => {
       expect(feature).not.toMatch(SENTIMENT);
       expect(feature).not.toMatch(AUTO_REVIEW_REPLIES);
       expect(feature).not.toMatch(POPULARITY_CLAIM);
+      if (!isDepositEnabled()) expect(feature).not.toMatch(ANY_DEPOSIT);
     });
 
     it("plan Pro nadal obiecuje generowanie opisów usług (jedyne, co zostało z „AI content”)", () => {

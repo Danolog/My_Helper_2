@@ -220,9 +220,9 @@ export const MODULES: readonly ModuleDef[] = [
   {
     // Publiczny katalog salonów: lista `/salons`, strona `/dla-klientow`
     // (zapowiedź katalogu z podglądem salonów) i `GET /api/salons`.
-    // Strona salonu `/salons/[id]` z podstronami, rezerwacja gościa
-    // (`/api/available-slots`, `/api/salons/[id]`) i adres `/s/[slug]`
-    // NIE należą do modułu — klient wchodzi na nie z linku od salonu.
+    // Strona salonu `/salons/[id]` z podstronami i rezerwacja gościa
+    // (`/api/available-slots`, `/api/salons/[id]`) NIE należą do modułu —
+    // klient wchodzi na nie z linku od salonu.
     // Strona główna `/` jest stroną sprzedażową dla właścicieli salonów.
     key: "salonCatalog",
     label: "Katalog salonów",
@@ -588,6 +588,16 @@ export function frozenModuleForPublicPage(pathname: string): ModuleKey | null {
  */
 export function clientHomePath(): string {
   return isModuleFrozen("salonCatalog") ? "/appointments" : "/salons";
+}
+
+/**
+ * Logowanie klienta z powrotem na stronę portalu. Strony portalu bez sesji
+ * kierują tutaj, a nie na `/login` — tamto logowanie jest dla panelu salonu
+ * i prowadzi na `/dashboard`, czyli do zakładania salonu. `returnTo`
+ * sprawdza dalej strona `/portal/login` (`isSafeReturnTo`).
+ */
+export function clientLoginPath(returnTo: string): string {
+  return `/portal/login?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 /**

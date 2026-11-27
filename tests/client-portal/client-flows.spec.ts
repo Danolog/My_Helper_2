@@ -39,6 +39,16 @@ async function loginAsClient(page: Page) {
  */
 const SALON_ID = '00000000-0000-4000-8000-000000000001';
 const SALON_PATH = `/salons/${SALON_ID}`;
+/** Nazwa salonu i usluga z seeda (`scripts/seed-test.ts`). */
+const SALON_NAME = 'Beauty Studio Demo';
+const SERVICE_ID = '00000000-0000-4000-8000-5e0000000001';
+const SERVICE_NAME = 'Strzyzenie damskie';
+
+/** Strona salonu sie pokazala: nazwa z seeda, bez stanu „Salon nie znaleziony”. */
+async function expectSalonPageRendered(page: Page) {
+  await expect(page.getByText(SALON_NAME, { exact: true }).first()).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText(/salon nie znaleziony/i)).toHaveCount(0);
+}
 
 /** Strona publiczna zamrozonego modulu: proxy przekierowuje na strone glowna. */
 async function expectRedirectedHome(page: Page, path: string) {
@@ -59,7 +69,7 @@ test.describe('Flow 7: Client Portal', () => {
 
       await expect(page).toHaveURL((url) => url.pathname === SALON_PATH);
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      await expect(page.getByText(/salon|us[lł]ug/i).first()).toBeVisible({ timeout: 15000 });
+      await expectSalonPageRendered(page);
     });
 
     test('should display client login page', { tag: '@full' }, async ({ page }) => {
@@ -99,10 +109,13 @@ test.describe('Flow 7: Client Portal', () => {
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should view salon services', { tag: '@full' }, async ({ page }) => {
-      await page.goto(`${SALON_PATH}/services`, { waitUntil: 'load' });
-      await expect(page).toHaveURL((url) => url.pathname === `${SALON_PATH}/services`);
+    test('should view salon service page', { tag: '@full' }, async ({ page }) => {
+      // Osobnej listy uslug nie ma — jest strona jednej uslugi `services/[serviceId]`.
+      const servicePath = `${SALON_PATH}/services/${SERVICE_ID}`;
+      await page.goto(servicePath, { waitUntil: 'load' });
+      await expect(page).toHaveURL((url) => url.pathname === servicePath);
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+      await expect(page.getByTestId('service-name')).toHaveText(SERVICE_NAME, { timeout: 15000 });
     });
 
     test('should view salon gallery', { tag: '@full' }, async ({ page }) => {
@@ -146,6 +159,9 @@ test.describe('Flow 7: Client Portal', () => {
       await page.goto(`${SALON_PATH}/book`, { waitUntil: 'load' });
       await expect(page).toHaveURL((url) => url.pathname === `${SALON_PATH}/book`);
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+      // Formularz sie wyrenderowal: krok wyboru uslugi z usluga z seeda.
+      await expect(page.getByTestId(`booking-service-option-${SERVICE_ID}`)).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(/salon nie znaleziony/i)).toHaveCount(0);
     });
   });
 
@@ -167,11 +183,12 @@ test.describe('Flow 7: Client Portal', () => {
     });
 
     test('should redirect unauthenticated user from appointments page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/appointments');
-      // Should redirect to login or show auth prompt
-      await page.waitForLoadState('domcontentloaded');
-      const url = page.url();
-      expect(url).toMatch(/\/(login|portal|appointments)/);
+      await page.goto('/appointments', { waitUntil: 'load' });
+      // Logowanie klienta z powrotem na wizyty — nie logowanie panelu salonu (/login).
+      await expect(page).toHaveURL(
+        (url) => url.pathname === '/portal/login' && url.searchParams.get('returnTo') === '/appointments',
+        { timeout: 15000 }
+      );
     });
 
     test('should redirect unauthenticated user from favorites page', { tag: '@full' }, async ({ page }) => {

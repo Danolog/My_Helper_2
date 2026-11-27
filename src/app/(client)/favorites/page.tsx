@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { clientLoginPath } from "@/lib/features";
 
 interface FavoriteSalon {
   id: string;
@@ -47,7 +48,7 @@ export default function FavoritesPage() {
 
   useEffect(() => {
     if (!isPending && !session) {
-      router.push("/login");
+      router.push(clientLoginPath("/favorites"));
       return;
     }
     if (session) {

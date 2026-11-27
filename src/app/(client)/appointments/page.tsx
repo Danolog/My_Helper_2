@@ -25,7 +25,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { useSession } from "@/lib/auth-client";
-import { isModuleFrozen } from "@/lib/features";
+import { clientLoginPath, isModuleFrozen } from "@/lib/features";
 
 interface ClientAppointment {
   id: string;
@@ -140,7 +140,7 @@ export default function ClientAppointmentsPage() {
 
   useEffect(() => {
     if (!isPending && !session) {
-      router.push("/login");
+      router.push(clientLoginPath("/appointments"));
       return;
     }
     if (session) {

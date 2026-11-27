@@ -4,7 +4,7 @@
  * Better Auth 1.7.x przy błędzie innym niż 401 zachowuje już wczytaną sesję
  * w useSession(), ale przy PIERWSZYM pobraniu (data === null) 429 daje
  * `data: null, isPending: false`. Strony biorą to za brak logowania:
- * portal klienta robi router.push("/login") (a /login po stronie serwera
+ * portal klienta robi router.push na /portal/login (a logowanie po stronie serwera
  * widzi ważną sesję i odsyła dalej), panel się nie renderuje.
  *
  * Ta nakładka na fetch (fetchOptions.customFetchImpl w auth-client) przy 429

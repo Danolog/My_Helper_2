@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
-import { isModuleFrozen } from "@/lib/features";
+import { clientLoginPath, isModuleFrozen } from "@/lib/features";
 import type { AppointmentDetail, CancelInfo, ReviewInfo } from "../_types";
 
 export function useAppointmentDetail() {
@@ -197,13 +197,13 @@ export function useAppointmentDetail() {
   // Redirect unauthenticated users and fetch appointment data
   useEffect(() => {
     if (!isPending && !session) {
-      router.push("/login");
+      router.push(clientLoginPath(`/appointments/${appointmentId}`));
       return;
     }
     if (session) {
       fetchAppointment();
     }
-  }, [session, isPending, router, fetchAppointment]);
+  }, [session, isPending, router, fetchAppointment, appointmentId]);
 
   // Fetch review once appointment is loaded and is completed
   // (moduł opinii zamrożony — bez zapytania, sekcji opinii też nie ma)
