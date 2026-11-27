@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { eq, and, like, notInArray, sql } from "drizzle-orm";
 import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { parseBody, completeAppointmentSchema } from "@/lib/api-validation";
+import {
+  APPOINTMENT_COMPLETED_CODE,
+  APPOINTMENT_COMPLETED_MESSAGE,
+  COMMISSION_RATE_INVALID_MESSAGE,
+  COMPLETE_ERROR_CODES,
+  SERVICE_PRICE_INVALID_MESSAGE,
+  commissionFor,
+} from "@/lib/appointment-completion";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { resolveModules } from "@/lib/features";
@@ -29,28 +37,51 @@ import {
   salons,
 } from "@/lib/schema";
 import { forSalon, type DbTx } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 
 /**
- * Statusy, których nie da się zakończyć. Zakończona i anulowana mają własne
- * komunikaty 400 przy odczycie; „Nie przyszedł” — 409 (najpierw cofnięcie).
+ * Statusy, których nie da się zakończyć. Zakończona — 409 jak w PUT i DELETE,
+ * anulowana — 400 jak „już anulowana” w DELETE, „Nie przyszedł” — 409
+ * (najpierw cofnięcie).
  */
 const NOT_COMPLETABLE_STATUSES = ["completed", "cancelled", NO_SHOW_STATUS];
 
 /**
- * Zapis statusu nie trafił w wiersz: status zmienił się po odczycie
- * (równoległe zakończenie, anulowanie albo oznaczenie „Nie przyszedł”) lub
- * wiersz zniknął. Rzucany w transakcji, żeby wycofać zapisy wykonane przed
- * zmianą statusu. `currentStatus` to status odczytany ponownie w tej samej
- * transakcji (`null`, gdy wiersza już nie ma) — od niego zależy odpowiedź.
+ * Wizyty nie da się zakończyć: odczyt pod blokadą wiersza nie znalazł wizyty
+ * (albo pracownik kończy cudzą), wizyta ma status spoza dozwolonych, albo
+ * zapis statusu nie trafił w wiersz. Rzucany w transakcji, żeby wycofać
+ * wszystkie jej zapisy. `currentStatus` to status z tej samej transakcji
+ * (`null` = brak wizyty dla wołającego) — od niego zależy odpowiedź.
  */
 class AppointmentNotCompletableError extends Error {
   readonly currentStatus: string | null;
 
   constructor(currentStatus: string | null) {
-    super("Appointment status changed before completion");
+    super("Appointment cannot be completed");
     this.name = "AppointmentNotCompletableError";
     this.currentStatus = currentStatus;
   }
+}
+
+/**
+ * Dane w bazie nie pozwalają policzyć prowizji (cena albo stawka nie jest
+ * liczbą skończoną, np. 'NaN' w kolumnie numeric). Rzucany w transakcji:
+ * nic się nie zapisuje, trasa oddaje 409 z kodem zamiast prowizji „NaN”.
+ */
+class CompletionDataError extends Error {
+  readonly code: string;
+  readonly userMessage: string;
+
+  constructor(code: string, userMessage: string) {
+    super("Appointment completion data invalid");
+    this.name = "CompletionDataError";
+    this.code = code;
+    this.userMessage = userMessage;
+  }
+}
+
+function errorResponse(status: number, code: string, error: string) {
+  return NextResponse.json({ success: false, code, error }, { status });
 }
 
 /**
@@ -70,40 +101,28 @@ function dbConstraintName(error: unknown): string | undefined {
 }
 
 function noShowConflictResponse() {
-  return NextResponse.json(
-    {
-      success: false,
-      code: NO_SHOW_COMPLETE_BLOCKED_CODE,
-      error: NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
-    },
-    { status: 409 }
-  );
+  return errorResponse(409, NO_SHOW_COMPLETE_BLOCKED_CODE, NO_SHOW_COMPLETE_BLOCKED_MESSAGE);
 }
 
 function appointmentNotFoundResponse() {
-  return NextResponse.json(
-    { success: false, error: "Appointment not found" },
-    { status: 404 }
-  );
+  return errorResponse(404, COMPLETE_ERROR_CODES.appointmentNotFound, "Appointment not found");
 }
 
 /**
  * Odpowiedź dla wizyty, której nie da się zakończyć — wspólna dla
- * sprawdzenia przy odczycie i dla zapisu, który nie trafił w wiersz, żeby
- * wyścig dawał ten sam komunikat co zwykły przypadek. `null` dla statusu
- * spoza listy (nie powinien wystąpić: UPDATE odrzuca tylko te statusy).
+ * sprawdzenia pod blokadą wiersza i dla zapisu, który nie trafił w wiersz.
+ * `null` dla statusu spoza listy (nie powinien wystąpić: UPDATE odrzuca
+ * tylko te statusy).
  */
 function notCompletableResponse(status: string): NextResponse | null {
   if (status === "completed") {
-    return NextResponse.json(
-      { success: false, error: "Wizyta jest juz zakonczona" },
-      { status: 400 }
-    );
+    return errorResponse(409, APPOINTMENT_COMPLETED_CODE, APPOINTMENT_COMPLETED_MESSAGE);
   }
   if (status === "cancelled") {
-    return NextResponse.json(
-      { success: false, error: "Nie mozna zakonczyc anulowanej wizyty" },
-      { status: 400 }
+    return errorResponse(
+      400,
+      COMPLETE_ERROR_CODES.appointmentCancelled,
+      "Nie mozna zakonczyc anulowanej wizyty"
     );
   }
   if (status === NO_SHOW_STATUS) {
@@ -166,13 +185,7 @@ async function checkAndNotifyLowStock(
       })
       .returning();
 
-    logger.info("Low stock alert notification sent", {
-      productName: product.name,
-      productId: product.id,
-      currentQty: qty,
-      minQty,
-    });
-
+    // Log dopiero po zatwierdzeniu transakcji (w trasie), nie tutaj.
     return { notificationSent: true, notification };
   }
 
@@ -192,21 +205,31 @@ export async function POST(
     // employee wyłącznie własną (sprawdzenie po pobraniu wizyty niżej).
     const ctx = await getSalonContext();
     if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
+      return errorResponse(404, COMPLETE_ERROR_CODES.salonNotFound, "Salon not found");
     }
     const salonId = ctx.salonId;
 
     const { id } = await params;
-    const body = await request.json();
+    // Niepoprawny identyfikator dawał błąd bazy (22P02) i 500.
+    if (!isValidUuid(id)) {
+      return errorResponse(400, COMPLETE_ERROR_CODES.invalidId, "Invalid appointment ID format");
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return errorResponse(400, COMPLETE_ERROR_CODES.invalidJson, "Invalid JSON body");
+    }
 
     // Server-side validation with Zod schema. Sparsowane dane, nie surowe body:
     // schemat zamienia kwotę na tekst dla kolumny numeric.
     const parsed = parseBody(completeAppointmentSchema, body);
     if (!parsed.ok) {
-      return NextResponse.json(parsed.error, { status: 400 });
+      return NextResponse.json(
+        { ...parsed.error, code: COMPLETE_ERROR_CODES.validationFailed },
+        { status: 400 }
+      );
     }
 
     const { recipe, techniques, notes, commissionPercentage, paidAmount, paymentMethod } =
@@ -216,38 +239,6 @@ export async function POST(
     const payment =
       paidAmount != null && paymentMethod != null ? { paidAmount, paymentMethod } : {};
 
-    // Fetch the appointment with service info, scoped to the caller's salon
-    const result = await forSalon(salonId).raw((tx) =>
-      tx
-      .select({
-        appointment: appointments,
-        service: services,
-      })
-      .from(appointments)
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1)
-    );
-
-    const row = result[0];
-    // Employee: cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia).
-    if (
-      !row ||
-      (ctx.role === "employee" &&
-        (!ctx.employeeId || row.appointment.employeeId !== ctx.employeeId))
-    ) {
-      return appointmentNotFoundResponse();
-    }
-
-    const appointment = row.appointment;
-    const service = row.service;
-
-    // Wizyta zakończona, anulowana albo „Nie przyszedł” — bez zapisu.
-    const notCompletable = notCompletableResponse(appointment.status);
-    if (notCompletable) {
-      return notCompletable;
-    }
-
     // All mutating operations are wrapped in a single transaction so that
     // a failure at any step (e.g. stock deduction, commission insert) rolls
     // back every preceding write, keeping the database consistent.
@@ -255,6 +246,42 @@ export async function POST(
     // appointment_materials, employee_commissions, loyalty_transactions) i
     // `salons` (polityka `tenant_self`) widzą tylko ten salon; jawne filtry zostają.
     const txResult = await forSalon(salonId).raw(async (tx) => {
+      // 0. Wizyta z usługą pod blokadą wiersza wizyty — pierwsza instrukcja
+      // transakcji i jedyny odczyt wizyty. Status, pracownik, usługa, klient
+      // i rabat do końca transakcji są takie, jak tutaj: równoległe
+      // przeniesienie, anulowanie, „Nie przyszedł” albo drugie zakończenie
+      // czeka na COMMIT albo jest już zatwierdzone i widoczne w tym odczycie.
+      // Prowizja, cena, zużycie i punkty liczą się z tego odczytu.
+      const [row] = await tx
+        .select({
+          appointment: appointments,
+          service: services,
+        })
+        .from(appointments)
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .limit(1)
+        .for("update", { of: appointments });
+
+      // Employee: cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia).
+      // Sprawdzane pod blokadą: wizyta przepisana na innego pracownika
+      // w tej chwili nie jest już jego.
+      if (
+        !row ||
+        (ctx.role === "employee" &&
+          (!ctx.employeeId || row.appointment.employeeId !== ctx.employeeId))
+      ) {
+        throw new AppointmentNotCompletableError(null);
+      }
+
+      const appointment = row.appointment;
+      const service = row.service;
+
+      // Wizyta zakończona, anulowana albo „Nie przyszedł” — przed zapisami.
+      if (NOT_COMPLETABLE_STATUSES.includes(appointment.status)) {
+        throw new AppointmentNotCompletableError(appointment.status);
+      }
+
       // 1. Save or update treatment record
       const [existingTreatment] = await tx
         .select()
@@ -293,10 +320,9 @@ export async function POST(
       });
 
       // 2. Mark appointment as completed
-      // Warunek statusu w samym UPDATE: odczyt wyżej jest w osobnej transakcji,
-      // a trasa „Nie przyszedł” zmienia status pod blokadą wiersza. UPDATE czeka
-      // na tę blokadę i sprawdza warunek ponownie, więc zmiana statusu wstawiona
-      // między odczytem a zapisem wycofuje całą transakcję.
+      // Warunek statusu w samym UPDATE i ponowny odczyt przy 0 wierszach to
+      // druga linia obrony: pod blokadą z kroku 0 status nie może się zmienić,
+      // ale zapis nie polega wyłącznie na tym, że blokada została wzięta.
       // Kwota i metoda płatności w tym samym SET co status: zapisują się tylko
       // razem z zakończeniem i wycofują razem z resztą transakcji. Nie logujemy ich.
       const [updatedAppointment] = await tx
@@ -362,7 +388,23 @@ export async function POST(
           effectivePrice = parseFloat(employeePrice.customPrice);
         }
 
-        const commissionAmount = (effectivePrice * commPct) / 100;
+        // 'NaN' albo 'Infinity' w kolumnie numeric dałyby prowizję „NaN”
+        // albo 500 z bazy. Błąd z kodem wycofuje całą transakcję.
+        if (!Number.isFinite(effectivePrice)) {
+          throw new CompletionDataError(
+            COMPLETE_ERROR_CODES.servicePriceInvalid,
+            SERVICE_PRICE_INVALID_MESSAGE
+          );
+        }
+        if (!Number.isFinite(commPct)) {
+          throw new CompletionDataError(
+            COMPLETE_ERROR_CODES.commissionRateInvalid,
+            COMMISSION_RATE_INVALID_MESSAGE
+          );
+        }
+
+        const { amount: commissionAmount, percentage: commissionPercentageSaved } =
+          commissionFor(effectivePrice, commPct);
 
         // Check if commission already exists for this appointment
         const [existingCommission] = await tx
@@ -376,8 +418,8 @@ export async function POST(
           [commission] = await tx
             .update(employeeCommissions)
             .set({
-              amount: commissionAmount.toFixed(2),
-              percentage: commPct.toFixed(2),
+              amount: commissionAmount,
+              percentage: commissionPercentageSaved,
             })
             .where(eq(employeeCommissions.id, existingCommission.id))
             .returning();
@@ -388,16 +430,16 @@ export async function POST(
             .values({
               employeeId: appointment.employeeId,
               appointmentId: id,
-              amount: commissionAmount.toFixed(2),
-              percentage: commPct.toFixed(2),
+              amount: commissionAmount,
+              percentage: commissionPercentageSaved,
             })
             .returning();
         }
 
         logger.info("Commission recorded", {
-          commissionPct: commPct,
+          commissionPct: commissionPercentageSaved,
           effectivePrice: effectivePrice.toFixed(2),
-          commissionAmount: commissionAmount.toFixed(2),
+          commissionAmount,
           employeeId: appointment.employeeId,
         });
       }
@@ -556,6 +598,9 @@ export async function POST(
               priceForPoints = Math.max(0, priceForPoints - parseFloat(appointment.discountAmount));
             }
 
+            // Cena spoza liczb skończonych ('NaN' w numeric) — bez punktów.
+            if (!Number.isFinite(priceForPoints)) return null;
+
             // Calculate points: (price / currencyUnit) * pointsPerCurrencyUnit
             const currencyUnit = loyaltySettings.currencyUnit || 1;
             const pointsPerUnit = loyaltySettings.pointsPerCurrencyUnit || 1;
@@ -620,13 +665,7 @@ export async function POST(
               throw new Error("Failed to create loyalty transaction");
             }
 
-            logger.info("Loyalty points awarded", {
-              pointsAwarded: pointsToAward,
-              servicePrice: priceForPoints.toFixed(2),
-              newBalance,
-              clientId: loyaltyClientId,
-            });
-
+            // Log dopiero po zatwierdzeniu transakcji (w trasie), bez klienta i kwot.
             return {
               pointsAwarded: pointsToAward,
               totalPoints: newBalance,
@@ -656,6 +695,20 @@ export async function POST(
 
     // Po zatwierdzeniu transakcji: log nie twierdzi zakończenia, które COMMIT wycofał.
     logger.info("Appointment marked as completed", { appointmentId: id });
+    for (const deduction of txResult.stockDeductions) {
+      if (deduction.lowStockAlert?.notificationSent) {
+        logger.info("Low stock alert notification sent", {
+          appointmentId: id,
+          productId: deduction.productId,
+        });
+      }
+    }
+    if (txResult.loyalty) {
+      logger.info("Loyalty points awarded", {
+        appointmentId: id,
+        pointsAwarded: txResult.loyalty.pointsAwarded,
+      });
+    }
 
     return NextResponse.json({
       success: true,
@@ -668,6 +721,11 @@ export async function POST(
       // wystąpić) → 409 jak dotąd, bo zakończenie i tak nie zostało zapisane.
       if (error.currentStatus === null) return appointmentNotFoundResponse();
       return notCompletableResponse(error.currentStatus) ?? noShowConflictResponse();
+    }
+    if (error instanceof CompletionDataError) {
+      // Sam kod, bez ceny i stawki.
+      logger.warn("Appointment completion blocked by invalid data", { code: error.code });
+      return errorResponse(409, error.code, error.userMessage);
     }
     // Bez `message` i `stack`: treść błędu zapytania niesie SQL i parametry
     // (m.in. kwotę i metodę płatności). Tylko nazwa, SQLSTATE i ograniczenie.
