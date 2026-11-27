@@ -14,6 +14,7 @@ import {
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
+import { salonSlugProblem, salonSlugProblemMessage } from "@/lib/salon-slug";
 import { isOwnUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
@@ -550,6 +551,23 @@ export const updateSalonSchema = z.object({
   industryType: z.enum(["hair_salon", "beauty_salon", "nails", "barbershop", "spa", "medical"], {
     message: "Nieprawidlowy typ branzy",
   }).nullable().optional(),
+});
+
+/**
+ * Schema for PUT /api/salons/[id]/slug — krótki adres salonu `/s/<slug>`.
+ * Spacje na brzegach i wielkie litery są poprawiane (czytać `data` z parseBody);
+ * reszta reguł (format, długość, słowa zastrzeżone) z src/lib/salon-slug.ts.
+ * Zajętość sprawdza baza (indeks salons_slug_uq → 409 w trasie).
+ */
+export const updateSalonSlugSchema = z.object({
+  slug: z
+    .string({ message: "Adres jest wymagany" })
+    .trim()
+    .toLowerCase()
+    .superRefine((value, ctx) => {
+      const problem = salonSlugProblem(value);
+      if (problem) ctx.addIssue({ code: "custom", message: salonSlugProblemMessage(problem) });
+    }),
 });
 
 /**

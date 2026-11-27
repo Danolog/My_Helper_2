@@ -35,6 +35,8 @@ export async function GET() {
             email: salons.email,
             address: salons.address,
             industryType: salons.industryType,
+            // Krótki adres `/s/<slug>` — publiczny (ten sam co w linku salonu).
+            slug: salons.slug,
           })
           .from(salons)
           .where(eq(salons.id, ctx.salonId))
