@@ -18,6 +18,7 @@ import { isIPv6 } from 'node:net';
 export const SKIPPED_LINE = '[pominięty wpis]';
 export const MAX_MESSAGE_LENGTH = 300;
 const MAX_PATH_LENGTH = 200;
+const MAX_REQUEST_URL_LENGTH = 8192;
 // Górna granica długości tekstu przed maskowaniem — ogranicza koszt wyrażeń regularnych.
 const MAX_RAW_LENGTH = 4000;
 const EMPTY_FIELD = '-';
@@ -372,6 +373,9 @@ function maskSegment(segment: string): string {
 
 /** Ścieżka z requestUrl: bez schematu, hosta, query i fragmentu; UUID i liczby → :id. */
 export function sanitizePath(requestUrl: string): string | null {
+  // Bardzo długi adres pomijamy w całości: przycięcie przez środek segmentu
+  // mogłoby zostawić fragment identyfikatora, a pełne maskowanie trwałoby długo.
+  if (requestUrl.length > MAX_REQUEST_URL_LENGTH) return null;
   // Wiodące „//” (adres bez schematu) też oznacza host — usuwamy go razem z hostem.
   // Dodatkowe ukośniki („///host/x”) nie zostawiają hosta jako segmentu.
   const withoutHost = requestUrl.replace(/^(?:[a-z][a-z0-9+.-]*:)?\/\/+[^/?#]*/i, '');

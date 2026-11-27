@@ -681,3 +681,13 @@ describe('wpisy uszkodzone i puste wejście', () => {
     expect(formatJson(null)).toContain('pominięty');
   });
 });
+
+describe('path: bardzo długi adres', () => {
+  it('adres dłuższy niż 8192 znaki jest pomijany w całości', () => {
+    const long = '/api/x/' + 'a.'.repeat(5000);
+    expect(sanitizePath(long)).toBeNull();
+  });
+  it('adres do 8192 znaków nadal jest przetwarzany', () => {
+    expect(sanitizePath('/api/health')).toBe('/api/health');
+  });
+});
