@@ -9,14 +9,20 @@
  *   gcloud logging read 'resource.type="cloud_run_revision"' --project=<projekt> --limit=50 --format=json | pnpm -s logs:read
  *
  * Flagi:
- *   --json   jeden obiekt JSON na linię zamiast pól rozdzielonych tabulatorem
+ *   --json      jeden obiekt JSON na linię zamiast pól rozdzielonych tabulatorem
+ *   --message   dołącz zamaskowaną treść komunikatu (domyślnie wyłączona)
  *
  * Kolumny (tryb tekstowy): timestamp, severity, revision, status, method,
- * path, latencyMs, message. Puste pole = "-".
+ * path, latencyMs, a z --message także message. Puste pole = "-".
+ *
+ * Wolny tekst komunikatu (imiona, nazwiska, adresy) przechodzi mimo maskowania,
+ * więc --message stosujemy tylko wtedy, gdy jest potrzebny.
  */
 import { LogInputError, processLogInput } from './mask';
 
-const USAGE = 'Użycie: <wyjście gcloud logging read --format=json> | pnpm -s logs:read [--json]';
+const FLAGS = new Set(['--json', '--message']);
+const USAGE =
+  'Użycie: <wyjście gcloud logging read --format=json> | pnpm -s logs:read [--json] [--message]';
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -32,7 +38,7 @@ async function main(): Promise<number> {
     process.stdout.write(USAGE + '\n');
     return 0;
   }
-  const unknown = args.filter((a) => a !== '--json');
+  const unknown = args.filter((a) => !FLAGS.has(a));
   if (unknown.length > 0) {
     process.stderr.write('Nieznana flaga. ' + USAGE + '\n');
     return 64;
@@ -45,7 +51,10 @@ async function main(): Promise<number> {
   const input = await readStdin();
   let lines: string[];
   try {
-    lines = processLogInput(input, { json: args.includes('--json') });
+    lines = processLogInput(input, {
+      json: args.includes('--json'),
+      message: args.includes('--message'),
+    });
   } catch (err) {
     // Komunikat ogólny — nigdy fragment surowego wejścia.
     const msg = err instanceof LogInputError ? err.message : 'Nie udało się przetworzyć wejścia.';

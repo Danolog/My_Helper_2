@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BASE_FIELDS,
   MAX_MESSAGE_LENGTH,
   OUTPUT_FIELDS,
   SKIPPED_LINE,
@@ -12,6 +13,7 @@ import {
 } from '../../scripts/logs/mask';
 
 const UUID = '3f2b8c1e-9a4d-4e7f-8b2a-1c0d9e8f7a6b';
+const WITH_MESSAGE = { message: true } as const;
 
 /** Pełny, fikcyjny wpis Cloud Run z polami, które muszą zniknąć. */
 function fullEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -75,7 +77,7 @@ const FORBIDDEN_VALUES = [
 
 describe('biała lista pól', () => {
   it('wpis zawiera dokładnie pola z białej listy', () => {
-    const entry = toSafeEntry(fullEntry());
+    const entry = toSafeEntry(fullEntry(), WITH_MESSAGE);
     expect(entry).not.toBeNull();
     expect(Object.keys(entry!).sort()).toEqual([...OUTPUT_FIELDS].sort());
     expect(entry).toEqual({
@@ -100,17 +102,23 @@ describe('biała lista pól', () => {
 
   it('JSON lines ma tylko klucze z białej listy, w ustalonej kolejności', () => {
     const [line] = processLogInput(JSON.stringify([fullEntry()]), { json: true });
-    expect(Object.keys(JSON.parse(line!))).toEqual([...OUTPUT_FIELDS]);
+    expect(Object.keys(JSON.parse(line!))).toEqual([...BASE_FIELDS]);
+    const [withMessage] = processLogInput(JSON.stringify([fullEntry()]), { json: true, message: true });
+    expect(Object.keys(JSON.parse(withMessage!))).toEqual([...OUTPUT_FIELDS]);
   });
 
   it('tryb tekstowy: jedna linia, pola rozdzielone tabulatorem, puste jako "-"', () => {
-    const entry = toSafeEntry({ timestamp: '2026-11-27T10:15:30Z', textPayload: 'start' });
-    expect(formatText(entry)).toBe(['2026-11-27T10:15:30Z', '-', '-', '-', '-', '-', '-', 'start'].join('\t'));
+    const entry = toSafeEntry({ timestamp: '2026-11-27T10:15:30Z', textPayload: 'start' }, WITH_MESSAGE);
+    expect(formatText(entry, WITH_MESSAGE)).toBe(
+      ['2026-11-27T10:15:30Z', '-', '-', '-', '-', '-', '-', 'start'].join('\t'),
+    );
   });
 
   it('message z textPayload ma pierwszeństwo, nie-string w jsonPayload.message daje null', () => {
-    expect(toSafeEntry(fullEntry({ textPayload: 'z tekstu' }))?.message).toBe('z tekstu');
-    expect(toSafeEntry(fullEntry({ jsonPayload: { message: { a: 1 } } }))?.message).toBeNull();
+    expect(toSafeEntry(fullEntry({ textPayload: 'z tekstu' }), WITH_MESSAGE)?.message).toBe('z tekstu');
+    expect(
+      toSafeEntry(fullEntry({ jsonPayload: { message: { a: 1 } } }), WITH_MESSAGE)?.message,
+    ).toBeNull();
   });
 
   it('wartości spoza dozwolonych zbiorów w polach białej listy dają null', () => {
@@ -188,8 +196,202 @@ describe('maskowanie message', () => {
   });
 
   it('maskuje w jsonPayload.message wpisu', () => {
-    const entry = toSafeEntry(fullEntry({ jsonPayload: { message: 'login user@example.com z 192.0.2.1' } }));
+    const entry = toSafeEntry(
+      fullEntry({ jsonPayload: { message: 'login user@example.com z 192.0.2.1' } }),
+      WITH_MESSAGE,
+    );
     expect(entry?.message).toBe('login [email] z [ip]');
+  });
+});
+
+describe('flaga --message', () => {
+  const raw = JSON.stringify([fullEntry({ textPayload: 'Rezerwacja dla Anna Przykładowa' })]);
+
+  it('bez flagi wpis nie ma pola message', () => {
+    const entry = toSafeEntry(fullEntry());
+    expect(entry).not.toBeNull();
+    expect('message' in entry!).toBe(false);
+    expect(Object.keys(entry!).sort()).toEqual([...BASE_FIELDS].sort());
+  });
+
+  it('bez flagi JSON nie ma klucza message, a tekst nie ma kolumny z treścią', () => {
+    const [jsonLine] = processLogInput(raw, { json: true });
+    expect(JSON.parse(jsonLine!)).not.toHaveProperty('message');
+    expect(jsonLine).not.toContain('Przykładowa');
+
+    const [textLine] = processLogInput(raw, { json: false });
+    expect(textLine!.split('\t')).toHaveLength(BASE_FIELDS.length);
+    expect(textLine).not.toContain('Przykładowa');
+  });
+
+  it('z flagą message jest na wyjściu (tekst i JSON)', () => {
+    const [jsonLine] = processLogInput(raw, { json: true, message: true });
+    expect(JSON.parse(jsonLine!).message).toBe('Rezerwacja dla Anna Przykładowa');
+
+    const [textLine] = processLogInput(raw, { json: false, message: true });
+    expect(textLine!.split('\t')).toHaveLength(OUTPUT_FIELDS.length);
+    expect(textLine).toContain('Rezerwacja dla Anna Przykładowa');
+  });
+
+  it('formatText i formatJson bez opcji pomijają message nawet z wpisu, który je ma', () => {
+    const entry = toSafeEntry(fullEntry(), WITH_MESSAGE);
+    expect(formatText(entry).split('\t')).toHaveLength(BASE_FIELDS.length);
+    expect(JSON.parse(formatJson(entry))).not.toHaveProperty('message');
+  });
+});
+
+// Fikcyjny klucz w formacie Google API składany w teście, żeby skanery sekretów
+// w repozytorium nie zgłaszały fałszywego alarmu.
+const FAKE_GOOGLE_KEY = 'AIza' + 'SyA1234567890abcdefghijklmnopqrstu';
+
+describe('regresja: wycieki z recenzji', () => {
+  // [nazwa, wejście, fragmenty, których nie może być na wyjściu, fragment oczekiwany]
+  it.each([
+    // 1. e-mail zakodowany w URL
+    ['e-mail z %40', 'login jan.kowalski%40example.com failed', ['jan.kowalski', 'example.com'], '[email]'],
+    ['e-mail z %2B i %40', 'login jan%2Bpromo%40example.com', ['jan', 'promo', 'example.com'], '[email]'],
+    // 2. domena spoza ASCII
+    ['e-mail z domeną spoza ASCII', 'user anna@przykład.example', ['anna', 'przykład'], '[email]'],
+    // 3. IP przyklejone do klucza
+    ['IPv6 po ip:', 'peer ip:2001:db8::1', ['2001', 'db8'], 'ip:[ip]'],
+    ['IPv6 po addr:', 'addr:2001:db8::2 x', ['2001', 'db8'], 'addr:[ip] x'],
+    ['IPv4 po _', 'client_ip_198.51.100.12 blocked', ['198.51', '100.12'], 'client_ip_[ip] blocked'],
+    // 4. dane logowania w URI i nagłówek Basic
+    [
+      'hasło w connection stringu',
+      'postgresql://app:S3cretPass@db.example.com:5432/db',
+      ['S3cretPass', 'app:'],
+      'postgresql://[dane]@',
+    ],
+    [
+      'hasło w connection stringu z IP',
+      'postgresql://app:S3cretPass@192.0.2.3/db',
+      ['S3cretPass', '192.0.2.3'],
+      'postgresql://[dane]@[ip]/db',
+    ],
+    [
+      'nagłówek Basic',
+      'Authorization: Basic YW5uYUBleGFtcGxlLmNvbTpoYXNsbzEyMw==',
+      ['YW5u', 'bzEyMw'],
+      'Authorization: Basic [token]',
+    ],
+    // 5. ciasteczka i klucz=wartość bez ?
+    [
+      'ciasteczko sesji',
+      'cookie better-auth.session_token=AbCdEf123.SiGnAtUrE456',
+      ['AbCdEf123', 'SiGnAtUrE456'],
+      'session_token=[token]',
+    ],
+    ['token= bez ?', 'reset token=AbC123xyz wygasł', ['AbC123xyz'], 'token=[token]'],
+    ['secret: wartość', 'api_secret: TopSecretValue1', ['TopSecretValue1'], 'api_secret: [token]'],
+    ['nagłówek Cookie', 'Cookie: sid=abc123; theme=dark', ['abc123', 'theme'], 'Cookie: [cookie]'],
+    // 6. klucze dostawców
+    ['klucz AIza', `key ${FAKE_GOOGLE_KEY}`, ['AIza', '1234567890', 'abcdefghij'], 'key [token]'],
+    ['klucz rk_live_', 'klucz rk_live_abc odrzucony', ['rk_live', 'abc'], 'klucz [token] odrzucony'],
+    ['token ghp_', 'token ghp_abcdefghij1234567890', ['ghp_', 'abcdefghij', '1234567890'], '[token]'],
+    ['klucz re_', 'klucz re_AbCd1234_xyz', ['re_', 'AbCd', 'xyz'], 'klucz [token]'],
+    // 7. identyfikatory
+    ['id alfanumeryczny ≥ 20', 'user id kR3xQ8mZpLw2VtY7nB4cHs9dJf6gA1eU', ['kR3x', 'gA1eU'], 'user id [id]'],
+    ['UUID bez myślników', 'uuid 3f2a1b4c111142228333444455556666', ['3f2a1b4c', '6666'], 'uuid [uuid]'],
+    [
+      'UUID po _',
+      'salon_3f2a1b4c-1111-4222-8333-444455556666',
+      ['3f2a1b4c', '4222', '6666'],
+      'salon_[uuid]',
+    ],
+    // 9. telefony
+    ['telefon 3-2-2-2', 'tel 600 70 08 00', ['600', '08 00'], 'tel [telefon]'],
+    ['telefon z nawiasem', 'tel (22) 123 45 67', ['(22)', '123'], 'tel [telefon]'],
+    ['telefon z kropkami', 'tel 600.700.800', ['600', '800'], 'tel [telefon]'],
+    ['telefon po _', 'phone_600-700-800', ['600', '800'], 'phone_[telefon]'],
+  ])('%s', (_name, input, forbidden, expected) => {
+    const out = maskMessage(input as string);
+    for (const fragment of forbidden as string[]) expect(out).not.toContain(fragment);
+    expect(out).toContain(expected as string);
+  });
+
+  // 8. ścieżka
+  it.each([
+    ['telefon w ścieżce', '/api/clients/600-700-800', '/api/clients/:id'],
+    ['IP w ścieżce', '/api/ip/192.0.2.7', '/api/ip/:id'],
+    ['krótkie IP w ścieżce', '/api/ip/1.2.3.4', '/api/ip/:id'],
+    ['telefon z kropkami w ścieżce', 'https://app.example.com/api/c/600.700.800?x=1', '/api/c/:id'],
+    ['e-mail z domeną spoza ASCII w ścieżce', '/api/u/anna%40przyk%C5%82ad.example', '/api/u/:id'],
+  ])('%s', (_name, input, expected) => {
+    expect(sanitizePath(input)).toBe(expected);
+  });
+
+  it('zwykłe segmenty ścieżki zostają', () => {
+    expect(sanitizePath('/api/salons/salon-nazwa/services')).toBe('/api/salons/salon-nazwa/services');
+  });
+});
+
+describe('kolejność reguł', () => {
+  it('maskowanie IP nie zostawia hasła z URI', () => {
+    const out = maskMessage('connect postgresql://app:S3cretPass@198.51.100.7:5432/db refused');
+    expect(out).toBe('connect postgresql://[dane]@[ip]:5432/db refused');
+  });
+
+  it('maskowanie liczby nie zostawia prefiksu klucza', () => {
+    for (const input of ['sk_live_1234567890123', 'rk_live_1234567890123', 'ghp_1234567890123456']) {
+      const out = maskMessage(`klucz ${input} odrzucony`);
+      expect(out).toBe('klucz [token] odrzucony');
+    }
+  });
+
+  it('e-mail jako hasło w URI nie zostawia loginu', () => {
+    const out = maskMessage('smtp://jan@example.com:Haslo123@mail.example.com/');
+    expect(out).not.toContain('jan');
+    expect(out).not.toContain('Haslo123');
+  });
+
+  it('para klucz=wartość zagnieżdżona za zwykłym kluczem', () => {
+    expect(maskMessage('a=token=AbC123xyz')).not.toContain('AbC123xyz');
+  });
+});
+
+describe('bez fałszywych trafień', () => {
+  it.each([
+    ['data z godziną', 'start 2026-11-27 10:15:30 ok'],
+    ['data europejska z godziną', 'start 27.11.2026 10:15 ok'],
+    ['odwołanie do metody', 'błąd w Cache::add i std::cout'],
+    ['licznik tokenów modelu', 'max_tokens=1000 input_tokens: 250'],
+    ['zwykłe słowo Basic', 'Basic plan aktywny'],
+    ['IPv6 pętli zwrotnej nie jest daną osobową', 'nasłuch na ::1'],
+  ])('%s', (_name, input) => {
+    expect(maskMessage(input)).toBe(input);
+  });
+});
+
+describe('znaki sterujące spoza ASCII', () => {
+  it.each([
+    ['U+2028', ' '],
+    ['U+2029', ' '],
+    ['U+0085', '\u0085'],
+    ['U+0080', '\u0080'],
+    ['U+009B', '\u009b'],
+    ['U+009F', '\u009f'],
+    ['U+202E', '‮'],
+  ])('%s zamieniony na spację', (_name, ch) => {
+    expect(maskMessage(`a${ch}b`)).toBe('a b');
+  });
+
+  it('zakodowana nowa linia (%0A) też jest spłaszczana', () => {
+    expect(maskMessage('a%0Ab')).toBe('a b');
+  });
+});
+
+describe('bardzo długie wejście', () => {
+  it('sekret za granicą przycięcia nie zostaje w połowie', () => {
+    const text = 'słowo '.repeat(700) + 'jan.kowalski@example.com';
+    const out = maskMessage(text);
+    expect(out).not.toContain('jan.kowalski');
+    expect(Array.from(out).length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+  });
+
+  it('jeden bardzo długi ciąg bez spacji nie przechodzi', () => {
+    const out = maskMessage('x'.repeat(10000));
+    expect(out).not.toContain('x');
   });
 });
 
