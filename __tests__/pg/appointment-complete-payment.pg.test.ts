@@ -347,9 +347,10 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
 
       expect(res.status, JSON.stringify(res.body)).toBe(500);
       expect(res.body).toEqual({ success: false, error: "Failed to complete appointment" });
-      // UPDATE się wykonał: trasa zalogowała zakończenie, a trigger zobaczył w tej
-      // transakcji status i płatność wizyty (kod ROLLBACK_SEEN_CODE, nie UNSEEN).
-      expect(mocks.info).toHaveBeenCalledWith("Appointment marked as completed", { appointmentId: appt });
+      // UPDATE się wykonał: trigger zobaczył w tej transakcji status i płatność
+      // wizyty (kod ROLLBACK_SEEN_CODE, nie UNSEEN). Log zakończenia pada dopiero
+      // po zatwierdzeniu transakcji, więc przy wycofaniu go nie ma.
+      expect(mocks.info).not.toHaveBeenCalledWith("Appointment marked as completed", { appointmentId: appt });
       expect(mocks.error).toHaveBeenCalledWith(
         "Failed to complete appointment",
         expect.objectContaining({ errorCode: ROLLBACK_SEEN_CODE })

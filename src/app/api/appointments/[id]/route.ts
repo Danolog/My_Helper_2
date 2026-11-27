@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
+import {
+  APPOINTMENT_COMPLETED_CODE,
+  APPOINTMENT_COMPLETED_MESSAGE,
+  AppointmentCompletedError,
+  COMPLETE_DEDICATED_ROUTE_CODE,
+  COMPLETE_DEDICATED_ROUTE_MESSAGE,
+  COMPLETED_STATUS,
+} from "@/lib/appointment-completion";
 import {
   appointmentConflictWhere,
   dbErrorCode,
@@ -65,6 +73,17 @@ function noShowCancelResponse() {
       error: "Najpierw cofnij oznaczenie „Nie przyszedł” w szczegółach wizyty",
     },
     { status: 400 }
+  );
+}
+
+/**
+ * Zmiana statusu wizyty zakończonej (PUT ze statusem, DELETE). Ta sama
+ * odpowiedź przed transakcją i po blokadzie wiersza / warunku w UPDATE.
+ */
+function completedFinalResponse() {
+  return NextResponse.json(
+    { success: false, code: APPOINTMENT_COMPLETED_CODE, error: APPOINTMENT_COMPLETED_MESSAGE },
+    { status: 409 }
   );
 }
 
@@ -226,6 +245,21 @@ export async function PUT(
       );
     }
 
+    // `completed` ustawia wyłącznie /api/appointments/[id]/complete — tam w tej
+    // samej transakcji zapisuje się płatność, prowizja i zużycie materiałów.
+    if (status === COMPLETED_STATUS) {
+      return NextResponse.json(
+        { success: false, code: COMPLETE_DEDICATED_ROUTE_CODE, error: COMPLETE_DEDICATED_ROUTE_MESSAGE },
+        { status: 400 }
+      );
+    }
+
+    // Wizyta zakończona ma ostateczny wynik: bez przywrócenia i anulowania.
+    // Edycja innych pól (notatka) działa jak dotąd.
+    if (existing.status === COMPLETED_STATUS && status != null) {
+      return completedFinalResponse();
+    }
+
     // P1 (audyt bezpieczeństwa): klient, pracownik i usluga z body musza nalezec do salonu
     // z sesji — inaczej wizyta wskazywalaby cudzego klienta (dane w GET) lub
     // blokowala kalendarz pracownika innego salonu. null = wyczyszczenie pola.
@@ -338,11 +372,34 @@ export async function PUT(
             .for("update")
         : [];
 
+      // Zmiana statusu z warunkiem „nie zakończona” w samym UPDATE: odczyt
+      // `existing` jest sprzed transakcji, a zakończenie mogło wejść po nim.
+      // UPDATE czeka na blokadę wiersza i sprawdza warunek ponownie.
+      const changesStatus = updateData.status !== undefined;
       const [updatedAppointment] = await tx
         .update(appointments)
         .set(updateData)
-        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .where(
+          changesStatus
+            ? and(
+                eq(appointments.id, id),
+                eq(appointments.salonId, salonId),
+                ne(appointments.status, COMPLETED_STATUS)
+              )
+            : and(eq(appointments.id, id), eq(appointments.salonId, salonId))
+        )
         .returning();
+
+      if (!updatedAppointment && changesStatus) {
+        // Bieżący status z tej samej transakcji (READ COMMITTED widzi
+        // zatwierdzone zakończenie). Błąd wycofuje całą transakcję.
+        const [current] = await tx
+          .select({ status: appointments.status })
+          .from(appointments)
+          .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+          .limit(1);
+        if (current?.status === COMPLETED_STATUS) throw new AppointmentCompletedError();
+      }
 
       if (
         depositPaid !== undefined &&
@@ -388,6 +445,10 @@ export async function PUT(
       message: "Appointment rescheduled successfully",
     });
   } catch (error) {
+    // Zakończenie weszło między odczytem a zapisem statusu — nic nie zapisane.
+    if (error instanceof AppointmentCompletedError) {
+      return completedFinalResponse();
+    }
     // #171: równoległy zapis zajął termin (EXCLUDE w bazie: 23P01 albo 40P01
     // przy jego sprawdzaniu, przeniesienia „na krzyż”) — ta sama kolizja.
     if (isAppointmentSlotTaken(error)) {
@@ -466,6 +527,12 @@ export async function DELETE(
     // `cancelAppointmentInTx` (oznaczenie wstawione między odczytem a transakcją).
     if (appointment.status === NO_SHOW_STATUS) {
       return noShowCancelResponse();
+    }
+
+    // Wizyta zakończona: anulowanie zwróciłoby zadatek za wykonaną usługę.
+    // Po blokadzie wiersza sprawdza to ponownie `cancelAppointmentInTx`.
+    if (appointment.status === COMPLETED_STATUS) {
+      return completedFinalResponse();
     }
 
     // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
@@ -622,6 +689,10 @@ export async function DELETE(
     // anulowania jest wycofana, bez zwrotu, SMS-a i listy oczekujących.
     if (error instanceof AppointmentMarkedNoShowError) {
       return noShowCancelResponse();
+    }
+    // Zakończenie weszło po wczesnym sprawdzeniu — anulowanie wycofane w całości.
+    if (error instanceof AppointmentCompletedError) {
+      return completedFinalResponse();
     }
     logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(

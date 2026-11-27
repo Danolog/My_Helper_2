@@ -18,6 +18,7 @@
  * zdążył potwierdzić wpłatę, widzimy `depositPaid = true` i zwracamy.
  */
 import { and, eq } from "drizzle-orm";
+import { AppointmentCompletedError, COMPLETED_STATUS } from "@/lib/appointment-completion";
 import { logger } from "@/lib/logger";
 import { NO_SHOW_STATUS } from "@/lib/no-show";
 import { toErrorIdentity } from "@/lib/safe-error";
@@ -65,7 +66,8 @@ export class AppointmentMarkedNoShowError extends Error {
  * nie powinna mieć płatności `pending`; jeśli klient mimo to zapłaci,
  * webhook zapisze wpłatę i ją zwróci (#70). Dla obcej wizyty krok 1 nic
  * nie zmienia (warunek `salonId`). Wizyta `no_show` po blokadzie rzuca
- * `AppointmentMarkedNoShowError` i wycofuje całą transakcję.
+ * `AppointmentMarkedNoShowError`, a `completed` — `AppointmentCompletedError`;
+ * oba wycofują całą transakcję.
  */
 export async function cancelAppointmentInTx(
   tx: Tx,
@@ -97,6 +99,9 @@ export async function cancelAppointmentInTx(
   // Błąd, a nie wynik: wizyta zostaje, więc krok 1 (`pending → failed`) też
   // musi zostać wycofany.
   if (current.status === NO_SHOW_STATUS) throw new AppointmentMarkedNoShowError();
+  // Wizyta zakończona ma ostateczny wynik: anulowanie zwróciłoby zadatek za
+  // wykonaną usługę i zatarło płatność. Błąd, nie wynik — krok 1 też wycofany.
+  if (current.status === COMPLETED_STATUS) throw new AppointmentCompletedError();
 
   const paidMethods = await tx
     .select({ paymentMethod: depositPayments.paymentMethod })

@@ -1,16 +1,11 @@
 /**
- * POST /api/appointments/[id]/treatment — zapis zabiegu kończy wizytę, ale
- * nie nadpisuje „Nie przyszedł”.
+ * POST /api/appointments/[id]/treatment — zapis zabiegu NIE zmienia statusu
+ * wizyty (zamyka ją tylko /complete) i nie trafia do wizyty „Nie przyszedł”.
  *
  * - Wizyta `no_show` przy odczycie → 409 `APPOINTMENT_NO_SHOW` (ten sam kod
  *   i komunikat co /complete), bez transakcji.
- * - UPDATE statusu ma `eq(id)`, `eq(salonId)` i warunek wykluczający
- *   `completed`, `cancelled` i `no_show`.
- * - Oznaczenie wstawione między odczytem a zapisem (UPDATE bez wiersza,
- *   ponowny odczyt w transakcji widzi `no_show`) → 409 i wycofanie zapisu
- *   zabiegu (błąd rzucony w transakcji).
- * - Równoległe zakończenie (ponowny odczyt widzi `completed`) → zabieg
- *   zapisany, jak przy wizycie już zakończonej.
+ * - Dla każdego innego statusu: zabieg zapisany (201 / 200), zero UPDATE
+ *   tabeli wizyt.
  *
  * Atrapą jest baza (forSalon), sesja i salon z sesji.
  */
@@ -141,7 +136,7 @@ beforeEach(() => {
   givenAppointment("scheduled");
 });
 
-describe("POST /api/appointments/[id]/treatment — „Nie przyszedł”", () => {
+describe("POST /api/appointments/[id]/treatment — status wizyty bez zmian, „Nie przyszedł” odrzucone", () => {
   it("wizyta no_show przy odczycie → 409 jak /complete, bez transakcji i zapisów", async () => {
     givenAppointment("no_show");
 
@@ -158,65 +153,30 @@ describe("POST /api/appointments/[id]/treatment — „Nie przyszedł”", () =>
     expect(h.updates).toEqual([]);
   });
 
-  it("UPDATE statusu z eq(id), eq(salonId) i warunkiem wykluczającym completed, cancelled, no_show", async () => {
-    const { status } = await parseResponse<Body>(await post());
+  it.each(["scheduled", "confirmed", "completed", "cancelled"])(
+    "wizyta %s: nowy zabieg zapisany (201), status wizyty bez zmian",
+    async (current) => {
+      givenAppointment(current);
 
-    expect(status).toBe(201);
-    const [update] = appointmentUpdates();
-    expect(update?.set).toEqual({ status: "completed" });
-    expect(update?.where).toEqual({
-      op: "and",
-      args: [
-        { op: "eq", col: "appointments.id", val: APPOINTMENT },
-        { op: "eq", col: "appointments.salonId", val: SALON },
-        { op: "notInArray", col: "appointments.status", val: ["completed", "cancelled", "no_show"] },
-      ],
-    });
-    // Bez ponownego odczytu statusu, gdy UPDATE trafił w wiersz.
-    expect(h.selects).toHaveLength(1);
-  });
+      const { status, body } = await parseResponse<Body>(await post());
 
-  it("oznaczenie weszło między odczytem a zapisem → 409, błąd w transakcji (zapis zabiegu wycofany)", async () => {
-    h.appointmentUpdateRows = [];
-    // 1) odczyt istniejącego zabiegu (brak), 2) ponowny odczyt statusu.
-    h.selectResults = [[], [{ status: "no_show" }]];
+      expect(status).toBe(201);
+      expect(body.success).toBe(true);
+      expect(h.inserts).toEqual([expect.objectContaining({ _name: "treatmentHistory" })]);
+      expect(appointmentUpdates()).toEqual([]);
+      // Jedyny odczyt w transakcji to istniejący zabieg — bez odczytu statusu.
+      expect(h.selects).toHaveLength(1);
+    }
+  );
 
-    const { status, body } = await parseResponse<Body>(await post());
+  it("wizyta zaplanowana z istniejącym zabiegiem: aktualizacja zabiegu (200), status bez zmian", async () => {
+    h.selectResults = [[{ id: "treatment-1", appointmentId: APPOINTMENT }]];
 
-    expect(status).toBe(409);
-    expect(body.code).toBe(NO_SHOW_COMPLETE_BLOCKED_CODE);
-    expect(body.error).toBe(NO_SHOW_COMPLETE_BLOCKED_MESSAGE);
-    // Ponowny odczyt w tej samej transakcji, z jawnym eq(salonId).
-    expect(h.transactions).toBe(1);
-    expect(h.selects[1]?.cols).toEqual({ status: "appointments.status" });
-    expect(h.selects[1]?.where).toEqual({
-      op: "and",
-      args: [
-        { op: "eq", col: "appointments.id", val: APPOINTMENT },
-        { op: "eq", col: "appointments.salonId", val: SALON },
-      ],
-    });
-    // 409 to nie błąd bazy — bez logu error.
-    expect(h.logger.error).not.toHaveBeenCalled();
-  });
+    const { status } = await parseResponse<Body>(await post({ notes: "Poprawka" }));
 
-  it("równoległe zakończenie (UPDATE bez wiersza, status completed) → zabieg zapisany, 201", async () => {
-    h.appointmentUpdateRows = [];
-    h.selectResults = [[], [{ status: "completed" }]];
-
-    const { status, body } = await parseResponse<Body>(await post());
-
-    expect(status).toBe(201);
-    expect(body.success).toBe(true);
-    expect(h.inserts).toHaveLength(1);
-  });
-
-  it.each(["completed", "cancelled"])("wizyta %s: zabieg zapisany bez zmiany statusu (jak dotąd)", async (current) => {
-    givenAppointment(current);
-
-    const { status } = await parseResponse<Body>(await post());
-
-    expect(status).toBe(201);
+    expect(status).toBe(200);
+    expect(h.updates).toHaveLength(1);
+    expect((h.updates[0]!.table as { _name?: string })._name).toBe("treatmentHistory");
     expect(appointmentUpdates()).toEqual([]);
   });
 
