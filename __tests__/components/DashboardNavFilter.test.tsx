@@ -46,7 +46,8 @@ const ALL_ON = Object.fromEntries(MODULES.map((m) => [m.key, true])) as ModulesS
 function hrefs(modules: ModulesState): string[] {
   const { unmount } = render(
     <ModulesProvider modules={modules}>
-      <SidebarNav pathname="/dashboard" />
+      {/* Rozwinięte „Więcej” — dodatki modułów przełączalnych są w tej grupie. */}
+      <SidebarNav pathname="/dashboard" moreDefaultOpen />
     </ModulesProvider>
   );
   const result = screen.getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
