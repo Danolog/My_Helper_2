@@ -121,6 +121,11 @@ export const salons = pgTable(
     industryType: text("industry_type"), // e.g., 'hair_salon', 'beauty', 'medical'
     settingsJson: jsonb("settings_json").default({}),
     ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    // Krotki adres salonu `/s/<slug>` (src/lib/salon-slug.ts). Nullable tylko
+    // dla wierszy wstawianych poza aplikacja (testy pg, reczny SQL): kazda
+    // sciezka zakladania salonu w kodzie nadaje slug, migracja 0018 uzupelnila
+    // istniejace salony. Salon bez sluga nie ma krotkiego adresu (404).
+    slug: text("slug"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -132,6 +137,15 @@ export const salons = pgTable(
     // salonu po ownerId z limit(1). NULL-e (salony bez wlasciciela) sie nie
     // zderzaja. Zastapil nieunikalny salons_owner_id_idx.
     uniqueIndex("salons_owner_id_uq").on(table.ownerId),
+    // Adres jest unikalny; konflikt (23505 na tym indeksie) trasa zmiany adresu
+    // zamienia na 409, zakladanie salonu na kolejna probe z sufiksem.
+    uniqueIndex("salons_slug_uq").on(table.slug),
+    // Format i dlugosc jak SALON_SLUG_PATTERN i limity w src/lib/salon-slug.ts.
+    // Slow zastrzezonych baza nie zna — pilnuje ich aplikacja.
+    check(
+      "salons_slug_format",
+      sql`${table.slug} IS NULL OR (length(${table.slug}) BETWEEN 3 AND 50 AND ${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$')`
+    ),
   ]
 );
 
