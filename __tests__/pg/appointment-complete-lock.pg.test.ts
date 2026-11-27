@@ -14,8 +14,10 @@
  *   dowodzą, że kolejne zapytanie w transakcji nadal widzi tylko dane salonu.
  *
  * Kolejność w wyścigach wymusza obserwator: trzyma blokadę wiersza wizyty
- * w swojej transakcji, czeka (`pg_blocking_pids`), aż żądania staną na jego
- * blokadzie, i dopiero wtedy zatwierdza. Bez uśpień na czas.
+ * w swojej transakcji, czeka, aż żądania staną za jego blokadą (łańcuch
+ * `pg_blocking_pids`: druga czekająca stoi za blokadą krotki pierwszej), i
+ * dopiero wtedy zatwierdza. Bez uśpień na czas. Żądanie zakończone przed
+ * barierą (bez czekania na blokadę) przerywa test od razu z jego wynikiem.
  *
  * Trasa wołana bezpośrednio; atrapa sesji (`auth.api.getSession`), nagłówków
  * i loggera. `@/lib/db` wskazuje bazę testową, kontekst salonu i `forSalon`
@@ -141,24 +143,63 @@ const complete = (id: string, body: Record<string, unknown> = {}) =>
 
 type Body = { success: boolean; code?: string; error?: string; data?: Record<string, unknown> };
 
-/** Czeka, aż `count` połączeń czeka na blokadę trzymaną przez `pid`. */
-async function waitForBlockedBy(pid: number, count: number, timeoutMs = 10_000): Promise<void> {
+/**
+ * Liczba transakcji stojących za transakcją `holderPid`: wprost albo w kolejce
+ * za inną czekającą (łańcuch `pg_blocking_pids`). Druga transakcja czekająca na
+ * ten sam wiersz stoi za blokadą krotki PIERWSZEJ czekającej, nie bezpośrednio
+ * za obserwatorem, więc samo `holderPid = any(pg_blocking_pids(pid))` widzi
+ * najwyżej jedną. Wzór jak w `deposit-confirmation` i `no-show-online-auto-block`.
+ */
+async function waitersBehind(holderPid: number): Promise<number> {
+  const [row] = await h!.observer<{ n: number }[]>`
+    with recursive chain(pid) as (
+      select a.pid from pg_stat_activity a where ${holderPid} = any(pg_blocking_pids(a.pid))
+      union
+      select a.pid from pg_stat_activity a join chain c on c.pid = any(pg_blocking_pids(a.pid))
+    )
+    select count(*)::int as n from chain
+  `;
+  return row?.n ?? 0;
+}
+
+/** Stan połączeń przy nieudanej barierze: bez treści zapytań i danych. */
+async function lockDiagnostics(): Promise<string> {
+  const rows = await h!.observer<{ state: string | null; wait: string | null; blockers: string }[]>`
+    select state, wait_event_type || ':' || wait_event as wait, pg_blocking_pids(pid)::text as blockers
+    from pg_stat_activity
+    where datname = current_database() and pid <> pg_backend_pid() and backend_type = 'client backend'
+  `;
+  return JSON.stringify(rows);
+}
+
+/**
+ * Czeka, aż `count` transakcji stoi za `holderPid`. Gdy żądania skończą się
+ * wcześniej (nie czekały na blokadę), pada od razu z ich wynikiem zamiast
+ * czekać do limitu czasu.
+ */
+async function waitForWaitersBehind(
+  holderPid: number,
+  count: number,
+  settled: () => boolean,
+  outcome: () => string,
+  timeoutMs = 10_000
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const [row] = await h!.observer<{ n: number }[]>`
-      select count(*)::int as n
-      from pg_stat_activity
-      where ${pid}::int = any(pg_blocking_pids(pid))
-    `;
-    if ((row?.n ?? 0) >= count) return;
+    if ((await waitersBehind(holderPid)) >= count) return;
+    if (settled()) {
+      throw new Error(`bariera: żądania zakończone bez czekania na blokadę wiersza: ${outcome()}`);
+    }
     await new Promise((r) => setTimeout(r, 25));
   }
-  throw new Error(`bariera: mniej niż ${count} połączeń czeka na blokadę po ${timeoutMs} ms`);
+  throw new Error(
+    `bariera: mniej niż ${count} transakcji czeka na blokadę po ${timeoutMs} ms; połączenia: ${await lockDiagnostics()}`
+  );
 }
 
 /**
  * Obserwator blokuje wiersz wizyty, uruchamia `start`, czeka, aż `blocked`
- * połączeń stanie na jego blokadzie, wykonuje `whileLocked` w tej samej
+ * transakcji stanie za jego blokadą, wykonuje `whileLocked` w tej samej
  * transakcji i zatwierdza. Zwraca wynik `start`.
  */
 async function underRowLock<T>(
@@ -170,13 +211,26 @@ async function underRowLock<T>(
   const box: { pending?: Promise<T> } = {};
   await h!.observer.begin(async (tx) => {
     await tx.unsafe("set local lock_timeout = '15s'");
-    await tx.unsafe("select id from appointments where id = $1 for update", [appt]);
     const [me] = (await tx.unsafe("select pg_backend_pid() as pid")) as unknown as { pid: number }[];
+    const locked = (await tx.unsafe("select id from appointments where id = $1 for update", [appt])) as unknown as unknown[];
+    // Bez wiersza nie ma blokady, a bariera nie miałaby na co czekać.
+    if (locked.length !== 1) throw new Error("obserwator nie zablokował wiersza wizyty");
+    let done = false;
+    let result = "";
     const pending = start();
     box.pending = pending;
     // Błąd żądania przed barierą nie może zostać nieobsłużoną obietnicą.
-    pending.catch(() => {});
-    await waitForBlockedBy(me!.pid, blocked);
+    pending.then(
+      (v) => {
+        done = true;
+        result = JSON.stringify(v);
+      },
+      (e: unknown) => {
+        done = true;
+        result = e instanceof Error ? e.name : "rejected";
+      }
+    );
+    await waitForWaitersBehind(me!.pid, blocked, () => done, () => result);
     await whileLocked(tx as never);
   });
   if (!box.pending) throw new Error("żądanie nie wystartowało");

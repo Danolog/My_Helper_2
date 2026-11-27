@@ -275,11 +275,26 @@ export async function POST(
       }
 
       const appointment = row.appointment;
-      const service = row.service;
 
       // Wizyta zakończona, anulowana albo „Nie przyszedł” — przed zapisami.
       if (NOT_COMPLETABLE_STATUSES.includes(appointment.status)) {
         throw new AppointmentNotCompletableError(appointment.status);
+      }
+
+      // Usługa zgodna z wizytą spod blokady. Gdy odczyt czekał na blokadę,
+      // a w tym czasie zatwierdzono zmianę usługi wizyty, Postgres sprawdza
+      // ponownie tylko nową wersję wiersza wizyty, z usługą z pierwotnego
+      // odczytu: złączenie przestaje pasować i usługa wraca jako NULL (albo
+      // stara). Wtedy usługa jest czytana jeszcze raz, po identyfikatorze
+      // z zablokowanej wizyty — inaczej prowizja i zużycie by przepadły.
+      let service = appointment.serviceId ? row.service : null;
+      if (appointment.serviceId && service?.id !== appointment.serviceId) {
+        const [current] = await tx
+          .select()
+          .from(services)
+          .where(and(eq(services.id, appointment.serviceId), eq(services.salonId, salonId)))
+          .limit(1);
+        service = current ?? null;
       }
 
       // 1. Save or update treatment record

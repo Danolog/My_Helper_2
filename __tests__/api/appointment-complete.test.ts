@@ -2058,6 +2058,64 @@ describe("POST /api/appointments/[id]/complete", () => {
       expect(vi.mocked(eq).mock.calls).toContainEqual(["employeeServicePrices.serviceId", OTHER_SERVICE]);
     });
 
+    it.each([
+      ["usługa ze złączenia NULL", null],
+      ["usługa ze złączenia sprzed przeniesienia", "stara"],
+    ])(
+      "%s (zmiana usługi zatwierdzona w czasie czekania na blokadę) → usługa czytana ponownie po id z wizyty, prowizja od niej",
+      async (_name, joined) => {
+        const { eq } = await import("drizzle-orm");
+        const serviceB = makeService({ id: OTHER_SERVICE, basePrice: "300.00" });
+        const locked = chainMock([
+          {
+            appointment: makeAppointment({ status: "scheduled", employeeId: OTHER_EMPLOYEE, serviceId: OTHER_SERVICE }),
+            service: joined === null ? null : makeService({ basePrice: "150.00" }),
+          },
+        ]);
+        mockDbSelect.mockReturnValueOnce(locked);
+        // Ponowny odczyt usługi po id z zablokowanej wizyty.
+        const reread = chainMock([serviceB]);
+        mockDbSelect.mockReturnValueOnce(reread);
+        mockDbSelect.mockReturnValueOnce(chainMock([]));
+        mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+        mockDbUpdate.mockReturnValueOnce(
+          chainMock([makeAppointment({ status: "completed", employeeId: OTHER_EMPLOYEE, serviceId: OTHER_SERVICE })])
+        );
+        mockDbSelect.mockReturnValueOnce(chainMock([{ commissionRate: "10.00" }]));
+        mockDbSelect.mockReturnValueOnce(chainMock([{ customPrice: "280.00" }]));
+        const commissionChain = thenCommissionSaved();
+
+        const response = await post();
+
+        expect(response.status).toBe(200);
+        expect(reread.for).not.toHaveBeenCalled();
+        expect(vi.mocked(eq).mock.calls).toContainEqual(["services.id", OTHER_SERVICE]);
+        expect(vi.mocked(eq).mock.calls).toContainEqual(["services.salonId", TEST_IDS.SALON_UUID]);
+        expect(commissionChain.values).toHaveBeenCalledWith({
+          employeeId: OTHER_EMPLOYEE,
+          appointmentId: TEST_IDS.APPOINTMENT_UUID,
+          amount: "28.00",
+          percentage: "10.00",
+        });
+        expect(vi.mocked(eq).mock.calls).toContainEqual(["employeeServicePrices.serviceId", OTHER_SERVICE]);
+      }
+    );
+
+    it("usługa ze złączenia zgodna z wizytą → bez ponownego odczytu usługi", async () => {
+      const { eq } = await import("drizzle-orm");
+      givenUpToPrice({
+        appointment: makeAppointment({ status: "scheduled" }),
+        service: makeService({ basePrice: "200.00" }),
+      });
+      thenCommissionSaved();
+
+      const response = await post();
+
+      expect(response.status).toBe(200);
+      // Złączenie woła eq(appointments.serviceId, services.id); ponowny odczyt — eq(services.id, …).
+      expect(vi.mocked(eq).mock.calls.filter((c) => (c[0] as unknown) === "services.id")).toHaveLength(0);
+    });
+
     it("pracownik: wizyta pod blokadą należy do innego pracownika → 404 z kodem, bez zapisów", async () => {
       const { getSalonContext } = await import("@/lib/salon-context");
       vi.mocked(getSalonContext).mockResolvedValueOnce({
