@@ -176,12 +176,22 @@ vi.mock("@/lib/legal/documents", async (importOriginal) => {
 });
 
 const mockEq = vi.fn((...args: unknown[]) => ({ type: "eq", args }));
-const mockLike = vi.fn((...args: unknown[]) => ({ type: "like", args }));
 vi.mock("drizzle-orm", () => ({
   eq: (...args: unknown[]) => mockEq(...args),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  or: vi.fn((...args: unknown[]) => ({ type: "or", args })),
-  like: (...args: unknown[]) => mockLike(...args),
+}));
+
+// Wolny adres `/s/<slug>` wybiera wyjście systemowe (zajęte adresy należą do innych
+// salonów). Atrapa odnotowuje wywołanie w opLog i oddaje `base` albo pierwszy wolny
+// sufiks z listy `takenSlugs`.
+const slugState = vi.hoisted(() => ({ taken: [] as string[] }));
+const mockPickFreeSalonSlug = vi.fn(async (base: string) => {
+  opLog.push(`pick:slug:${base}`);
+  if (!slugState.taken.includes(base)) return base;
+  for (let n = 2; ; n++) if (!slugState.taken.includes(`${base}-${n}`)) return `${base}-${n}`;
+});
+vi.mock("@/lib/server/system", () => ({
+  pickFreeSalonSlug: (base: string) => mockPickFreeSalonSlug(base),
 }));
 
 const mockRequireAuth = vi.fn();
@@ -216,6 +226,7 @@ beforeEach(() => {
   opLog.length = 0;
   failInsert = null;
   lockFailure.next = null;
+  slugState.taken = [];
   legalState.published = false;
   legalState.terms = null;
   legalState.dpa = null;
@@ -535,8 +546,8 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
       "tx:start",
       "lock_timeout",
       "select:salons",
-      // Zajęte adresy `/s/<slug>` przed zapisem nowego salonu.
-      "select:salons",
+      // Wolny adres `/s/<slug>` z wyjścia systemowego przed zapisem nowego salonu.
+      "pick:slug:salon-anna",
       "insert:salons",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",
@@ -613,7 +624,7 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
 });
 
 describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", () => {
-  it("nowy salon dostaje slug z nazwy (polskie znaki → ASCII); zapytanie o zajęte adresy base i base-%", async () => {
+  it("nowy salon dostaje slug z nazwy (polskie znaki → ASCII); wolny adres z wyjścia systemowego", async () => {
     mockRequireAuth.mockResolvedValue({
       session: { user: { ...USER_A, name: "Żaneta Łęcka" } },
       user: { ...USER_A, name: "Żaneta Łęcka" },
@@ -623,17 +634,25 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(1);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledWith("salon-zaneta-lecka");
     expect(mockInsertValues).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Salon Żaneta Łęcka", slug: "salon-zaneta-lecka" })
     );
-    expect(mockEq).toHaveBeenCalledWith("salons.slug", "salon-zaneta-lecka");
-    expect(mockLike).toHaveBeenCalledWith("salons.slug", "salon-zaneta-lecka-%");
   });
 
-  it("adres zajęty → pierwszy wolny sufiks (-2 zajęte → -3)", async () => {
-    // Atrapa oddaje te same wiersze `salons` dla obu zapytań: wiersze bez `id`
-    // nie są salonem konta (pierwsze zapytanie), a ich slugi są zajęte (drugie).
-    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ slug: "salon-anna" }, { slug: "salon-anna-2" }] };
+  it("trasa nie czyta zajętych adresów sama: jedyny odczyt salons to salon konta", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    await post({ planSlug: "basic" });
+
+    expect(opLog.filter((op) => op === "select:salons")).toHaveLength(1);
+    expect(mockEq).not.toHaveBeenCalledWith("salons.slug", expect.anything());
+  });
+
+  it("adres zajęty → slug wybrany przez wyjście systemowe (-2 zajęte → -3)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    slugState.taken = ["salon-anna", "salon-anna-2"];
 
     const { status } = await post({ planSlug: "basic" });
 
@@ -641,14 +660,25 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
     expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ slug: "salon-anna-3" }));
   });
 
-  it("istniejący salon konta: bez zapytania o adresy i bez zmiany sluga", async () => {
+  it("istniejący salon konta: bez wyboru adresu i bez zmiany sluga", async () => {
     tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
 
     const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
-    expect(mockLike).not.toHaveBeenCalled();
+    expect(mockPickFreeSalonSlug).not.toHaveBeenCalled();
     expect(mockInsertValues).not.toHaveBeenCalledWith(expect.objectContaining({ slug: expect.anything() }));
+  });
+
+  it("błąd wyjścia systemowego przy wyborze adresu → 500, transakcja wycofana, bez zapisu salonu", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    mockPickFreeSalonSlug.mockRejectedValueOnce(new Error("db down"));
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(500);
+    expect(opLog).toContain("rollback");
+    expect(mockInsert).not.toHaveBeenCalledWith("salons");
   });
 
   it("równoległa rejestracja zajęła adres (23505 na salons_slug_uq) → cała transakcja od nowa, 200", async () => {
@@ -662,6 +692,8 @@ describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", (
 
     expect(status).toBe(200);
     expect(opLog.filter((op) => op === "tx:start")).toHaveLength(2);
+    // Każda próba wybiera adres od nowa (stan zajętości po równoległym zapisie).
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(2);
     expect(opLog).toContain("rollback");
     expect(opLog.at(-1)).toBe("commit");
   });
@@ -776,7 +808,7 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
       "tx:start",
       "lock_timeout",
       "select:salons",
-      "select:salons",
+      "pick:slug:salon-anna",
       "insert:salons",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",

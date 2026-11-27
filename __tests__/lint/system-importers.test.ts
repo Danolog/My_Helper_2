@@ -77,6 +77,9 @@ const SNAPSHOT: Record<string, string[]> = {
   "catalog.ts:findPublicSalonIdBySlug": ["src/app/s/[slug]/page.tsx"],
   // Publiczna lista salonów: bez argumentów (brak userId/salonId), tylko odczyt.
   "catalog.ts:listPublicSalonCatalog": ["src/app/api/salons/route.ts"],
+  // Wolny adres dla zakładanego salonu: tylko odczyt kolumny slug; wejście = slug
+  // z nazwy salonu (slugFromSalonName, walidowany w funkcji), bez userId/salonId.
+  "catalog.ts:pickFreeSalonSlug": ["src/app/api/register-subscription/route.ts"],
   // #193 (ADR-002): tylko odczyt; sessionUserId = authResult.user.id z requireAuth (nie z żądania),
   // appointmentId z adresu (UUID); salon do zapisu wyłącznie z wyniku odczytu.
   "client-portal.ts:findClientAppointmentForUser": ["src/app/api/client/appointments/[id]/cancel/route.ts"],

@@ -1,7 +1,8 @@
 /**
  * Wyjścia systemowe: publiczna lista salonów dla `GET /api/salons` (katalog
- * bez sesji) i wyszukiwanie salonu po krótkim adresie `/s/<slug>`
- * (`findPublicSalonIdBySlug`, opis przy funkcji).
+ * bez sesji), wyszukiwanie salonu po krótkim adresie `/s/<slug>`
+ * (`findPublicSalonIdBySlug`) i wybór wolnego adresu dla nowego salonu
+ * (`pickFreeSalonSlug`); opisy przy funkcjach.
  *
  * Dlaczego pula systemowa, a nie `forSalon`: `salons` to tabela korzenia
  * najemcy, a lista z natury obejmuje wiele salonów naraz — nie ma jednego
@@ -16,16 +17,18 @@
  * - `services`: liczba aktywnych usług na salon;
  * - `reviews`: średnia ocena i liczba opinii `approved` na salon — tylko gdy
  *   moduł opinii nie jest zamrożony; zamrożony = bez zapytania, ocena null
- *   i liczba opinii 0.
+ *   i liczba opinii 0;
+ * - krótkie adresy: `findPublicSalonIdBySlug` czyta samo `id`,
+ *   `pickFreeSalonSlug` samą kolumnę `slug`.
  *
  * Czego NIE czyta: `settings_json`, `owner_id` ani żadnej innej kolumny
  * salonu spoza DTO; żadnych danych pracowników, klientów ani wizyt.
  *
  * Błąd bazy propaguje do wołającego.
  */
-import { and, avg, count, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, avg, count, eq, inArray, isNotNull, like, ne, or } from "drizzle-orm";
 import { isModuleFrozen } from "@/lib/features";
-import { isValidSalonSlug } from "@/lib/salon-slug";
+import { isValidSalonSlug, pickAvailableSalonSlug } from "@/lib/salon-slug";
 import { reviews, salons, services } from "@/lib/schema";
 import { dbSystem } from "./db-system";
 
@@ -153,4 +156,39 @@ export async function findPublicSalonIdBySlug(slug: string): Promise<string | nu
     .where(eq(salons.slug, normalized))
     .limit(1);
   return row?.id ?? null;
+}
+
+/**
+ * Pierwszy wolny krótki adres dla zakładanego salonu: `base`, potem `base-2`,
+ * `base-3`… (`pickAvailableSalonSlug`). Woła go trasa rejestracji.
+ *
+ * Dlaczego pula systemowa: salon jeszcze nie istnieje, a zajęte adresy należą
+ * do innych salonów — w kontekście RLS jednego salonu (`forSalon`) nie byłoby
+ * ich widać.
+ *
+ * Co czyta: wyłącznie kolumnę `slug` salonów, których adres jest równy `base`
+ * albo zaczyna się od `base-`. Żadnych id, nazw ani innych kolumn.
+ *
+ * `base` musi być poprawnym slugiem (`slugFromSalonName` zawsze taki daje);
+ * inny napis → błąd bez zapytania. Dzięki temu `base` nie zawiera znaków
+ * wzorca LIKE (`%`, `_`), więc `base-%` dopasowuje tylko sufiksy.
+ *
+ * Wynik nie jest rezerwacją: równoległa rejestracja może wziąć ten sam adres.
+ * Wtedy zapis kończy się konfliktem indeksu `salons_slug_uq`, a wołający
+ * ponawia (rozpoznaje go `isSalonSlugConflict`).
+ *
+ * Błąd bazy propaguje do wołającego.
+ */
+export async function pickFreeSalonSlug(base: string): Promise<string> {
+  if (!isValidSalonSlug(base)) {
+    throw new Error("pickFreeSalonSlug: base is not a valid salon slug");
+  }
+  const rows = await dbSystem
+    .select({ slug: salons.slug })
+    .from(salons)
+    .where(or(eq(salons.slug, base), like(salons.slug, `${base}-%`)));
+  return pickAvailableSalonSlug(
+    base,
+    rows.flatMap((row) => (row.slug ? [row.slug] : []))
+  );
 }

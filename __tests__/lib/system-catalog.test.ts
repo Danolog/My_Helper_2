@@ -33,6 +33,8 @@ vi.mock("drizzle-orm", () => {
     inArray: node("inArray"),
     count: node("count"),
     avg: node("avg"),
+    like: node("like"),
+    or: node("or"),
   };
 });
 
@@ -89,7 +91,7 @@ vi.mock("@/lib/features", async (importOriginal) => {
   };
 });
 
-import { findPublicSalonIdBySlug, listPublicSalonCatalog } from "@/lib/server/system/catalog";
+import { findPublicSalonIdBySlug, listPublicSalonCatalog, pickFreeSalonSlug } from "@/lib/server/system/catalog";
 
 const node = (type: string, ...args: unknown[]) => ({ type, args });
 
@@ -252,5 +254,45 @@ describe("findPublicSalonIdBySlug — krótki adres /s/<slug>", () => {
   it("błąd bazy przechodzi do wołającego", async () => {
     results.push(new Error("db down"));
     await expect(findPublicSalonIdBySlug("salon-ada")).rejects.toThrow("db down");
+  });
+});
+
+describe("pickFreeSalonSlug — wolny adres dla zakładanego salonu", () => {
+  it("adres wolny → base; zapytanie czyta tylko kolumnę slug, warunek base albo base-%", async () => {
+    results.push([]);
+
+    expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada");
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.table).toBe("salons");
+    expect(queries[0]!.cols).toEqual({ slug: "salons.slug" });
+    expect(queries[0]!.where).toEqual(
+      node("or", node("eq", "salons.slug", "salon-ada"), node("like", "salons.slug", "salon-ada-%"))
+    );
+  });
+
+  it("base i base-2 zajęte → base-3", async () => {
+    results.push([{ slug: "salon-ada" }, { slug: "salon-ada-2" }]);
+    expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada-3");
+  });
+
+  it("zajęty tylko sufiks (base wolny) → base", async () => {
+    results.push([{ slug: "salon-ada-2" }]);
+    expect(await pickFreeSalonSlug("salon-ada")).toBe("salon-ada");
+  });
+
+  it.each([
+    ["wzorzec LIKE %", "salon%"],
+    ["wzorzec LIKE _", "salon_ada"],
+    ["za krótki", "ab"],
+    ["zastrzeżony", "admin"],
+  ])("niepoprawny base (%s: %s) → błąd bez zapytania", async (_name, base) => {
+    await expect(pickFreeSalonSlug(base)).rejects.toThrow("not a valid salon slug");
+    expect(queries).toEqual([]);
+  });
+
+  it("błąd bazy przechodzi do wołającego", async () => {
+    results.push(new Error("db down"));
+    await expect(pickFreeSalonSlug("salon-ada")).rejects.toThrow("db down");
   });
 });

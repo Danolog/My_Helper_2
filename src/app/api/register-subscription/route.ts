@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, like, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { BETA_INVITE_ONLY_CODE, BETA_INVITE_ONLY_MESSAGE, salonGateDenial } from "@/lib/beta-access";
@@ -14,8 +14,9 @@ import {
   type LegalAcceptanceInput,
 } from "@/lib/legal/acceptance";
 import { logger } from "@/lib/logger";
-import { isSalonSlugConflict, pickAvailableSalonSlug, slugFromSalonName } from "@/lib/salon-slug";
+import { isSalonSlugConflict, slugFromSalonName } from "@/lib/salon-slug";
 import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
+import { pickFreeSalonSlug } from "@/lib/server/system";
 import {
   isSubscriptionLockFailure,
   lockSalonSubscriptions,
@@ -168,18 +169,11 @@ export async function POST(request: NextRequest) {
         if (!salonId) {
           const name = `Salon ${account.name || "Nowy"}`;
           // Krótki adres `/s/<slug>` z nazwy: pierwszy wolny z `base`, `base-2`…
-          // Odczyt zajętych adresów surowym db (rola właściciela bazy) widzi
-          // wszystkie salony. Wyścig dwóch rejestracji o ten sam adres kończy się
-          // 23505 na salons_slug_uq — wtedy cała transakcja jest ponawiana niżej.
-          const baseSlug = slugFromSalonName(name);
-          const takenSlugs = await tx
-            .select({ slug: salons.slug })
-            .from(salons)
-            .where(or(eq(salons.slug, baseSlug), like(salons.slug, `${baseSlug}-%`)));
-          const slug = pickAvailableSalonSlug(
-            baseSlug,
-            takenSlugs.flatMap((row) => (row.slug ? [row.slug] : []))
-          );
+          // Zajęte adresy należą do innych salonów, więc czyta je wyjście
+          // systemowe (tylko kolumna slug). Wyścig dwóch rejestracji o ten sam
+          // adres kończy się 23505 na salons_slug_uq — wtedy cała transakcja jest
+          // ponawiana niżej i adres wybierany od nowa.
+          const slug = await pickFreeSalonSlug(slugFromSalonName(name));
           const [newSalon] = await tx
             .insert(salons)
             .values({
