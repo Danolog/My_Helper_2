@@ -15,6 +15,21 @@ import { forSalon, type DbTx } from "@/lib/server/repository";
 
 const SLUG_TAKEN_CODE = "SLUG_TAKEN";
 const SLUG_CHANGE_LIMIT_CODE = "SLUG_CHANGE_LIMIT";
+const SLUG_RETRY_CODE = "SLUG_RETRY";
+
+// Zakleszczenie (40P01) i konflikt serializacji (40001): dwie zmiany adresu
+// czekające na siebie, np. salony zamieniające się adresami w tej samej chwili.
+// Baza cofnęła transakcję, nic się nie zapisało — ponowienie jest bezpieczne.
+const RETRYABLE_PG_CODES: ReadonlySet<unknown> = new Set(["40P01", "40001"]);
+
+/** Błąd bazy do ponowienia, także opakowany przez Drizzle w `cause`. */
+function isSlugRetryableError(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 3; depth++) {
+    if (RETRYABLE_PG_CODES.has((e as { code?: unknown }).code)) return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 /** Salon wykorzystał limit zmian adresu — transakcja jest cofana, nic się nie zapisuje. */
 class SlugChangeLimitError extends Error {
@@ -97,7 +112,9 @@ async function changeSalonSlug(tx: DbTx, salonId: string, slug: string): Promise
  * 401 (bez sesji), 403 (nie właściciel), 404 (brak salonu),
  * 409 `SLUG_TAKEN` (adres bieżący albo dawny innego salonu), 409
  * `SLUG_CHANGE_LIMIT` (salon ma już `SALON_SLUG_MAX_CHANGES` wycofanych
- * adresów, a nowy nie jest odzyskaniem własnego), 500.
+ * adresów, a nowy nie jest odzyskaniem własnego), 409 `SLUG_RETRY`
+ * (zakleszczenie 40P01 albo konflikt serializacji 40001 — nic nie zapisano,
+ * można ponowić), 500.
  * Stary adres zostaje w rejestrze jako dawny: `/s/<stary>` dalej prowadzi do
  * tego salonu, a inny salon nie może go zająć. Własny dawny adres wolno
  * odzyskać.
@@ -127,14 +144,14 @@ export async function PUT(
       return NextResponse.json({ success: false, error: "Salon nie znaleziony" }, { status: 404 });
     }
     if (salon.ownerId !== authResult.user.id) {
-      return NextResponse.json({ success: false, error: "Brak uprawnien" }, { status: 403 });
+      return NextResponse.json({ success: false, error: "Brak uprawnień" }, { status: 403 });
     }
 
     let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ success: false, error: "Nieprawidlowe dane" }, { status: 400 });
+      return NextResponse.json({ success: false, error: "Nieprawidłowe dane" }, { status: 400 });
     }
     const parsed = parseBody(updateSalonSlugSchema, body);
     if (!parsed.ok) {
@@ -155,6 +172,12 @@ export async function PUT(
           { status: 409 }
         );
       }
+      if (isSlugRetryableError(error)) {
+        return NextResponse.json(
+          { success: false, code: SLUG_RETRY_CODE, error: "Nie udało się zmienić adresu. Spróbuj ponownie." },
+          { status: 409 }
+        );
+      }
       if (isSalonSlugConflict(error)) {
         return NextResponse.json(
           { success: false, code: SLUG_TAKEN_CODE, error: "Ten adres jest już zajęty. Wybierz inny." },
@@ -169,7 +192,7 @@ export async function PUT(
   } catch (error) {
     logger.error("[Salon Slug API] Error", { error: error });
     return NextResponse.json(
-      { success: false, error: "Nie udalo sie zmienic adresu salonu" },
+      { success: false, error: "Wystąpił błąd. Spróbuj ponownie." },
       { status: 500 }
     );
   }

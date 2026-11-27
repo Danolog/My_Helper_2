@@ -1,5 +1,5 @@
 /**
- * Krótki adres salonu `/s/<slug>` (plan wejścia na rynek, pkt 2.1, D3).
+ * Krótki adres salonu `/s/<slug>`.
  *
  * Czyste funkcje bez bazy — używa ich trasa zakładania salonu, trasa zmiany
  * adresu, strona `/s/[slug]` i formularz w panelu. Te same reguły egzekwuje

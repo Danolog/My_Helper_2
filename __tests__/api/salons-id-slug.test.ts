@@ -453,17 +453,19 @@ describe("PUT /api/salons/[id]/slug", () => {
       headers: { "Content-Type": "application/json" },
       body: "{nie-json",
     });
-    const { status } = await PUT(request, createRouteParams(SALON_A)).then(parseResponse);
+    const { status, body } = await PUT(request, createRouteParams(SALON_A)).then(parseResponse);
     expect(status).toBe(400);
+    expect(body.error).toBe("Nieprawidłowe dane");
     expect(state.writes).toEqual([]);
   });
 
   it("403: zalogowany, ale nie właściciel salonu — bez zapisu", async () => {
     signInAs(OTHER_USER);
 
-    const { status } = await put(SALON_A, { slug: "przejety-adres" });
+    const { status, body } = await put(SALON_A, { slug: "przejety-adres" });
 
     expect(status).toBe(403);
+    expect(body.error).toBe("Brak uprawnień");
     expect(state.writes).toEqual([]);
   });
 
@@ -512,6 +514,21 @@ describe("PUT /api/salons/[id]/slug", () => {
     const { status, body } = await put(SALON_A, { slug: "salon-ada" });
 
     expect(status).toBe(500);
+    expect(body.error).toBe("Wystąpił błąd. Spróbuj ponownie.");
     expect(JSON.stringify(body)).not.toContain("10.0.0.5");
+  });
+
+  it.each([
+    ["40P01 (zakleszczenie)", "40P01"],
+    ["40001 (konflikt serializacji)", "40001"],
+  ])("409 SLUG_RETRY: %s — rejestr wycofany", async (_name, code) => {
+    state.updateError = Object.assign(new Error("db"), { cause: { code } });
+
+    const { status, body } = await put(SALON_A, { slug: "salon-ada" });
+
+    expect(status).toBe(409);
+    expect(body.code).toBe("SLUG_RETRY");
+    expect(body.error).toBe("Nie udało się zmienić adresu. Spróbuj ponownie.");
+    expect(historyOf(SALON_A)).toEqual([{ slug: "salon-a", current: true }]);
   });
 });

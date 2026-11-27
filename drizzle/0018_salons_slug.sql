@@ -1,4 +1,4 @@
--- Krótki adres salonu `/s/<slug>` (plan wejścia na rynek, pkt 2.1).
+-- Krótki adres salonu `/s/<slug>`.
 --
 -- Ze schematu (src/lib/schema.ts, snapshot 0018):
 --   slug — text, NULL dozwolony (wiersze wstawiane poza aplikacją; każda ścieżka
@@ -79,7 +79,7 @@ ALTER TABLE "salons" ADD CONSTRAINT "salons_slug_format" CHECK ("salons"."slug" 
 -- Rejestr adresów salonów: każdy adres, który salon kiedykolwiek miał.
 --   retired_at IS NULL     — adres bieżący (ten sam co salons.slug),
 --   retired_at IS NOT NULL — adres dawny: przekierowuje do salonu i nie może go
---                            zająć inny salon (wydrukowane linki i QR).
+--                            zająć inny salon (rozesłane i wydrukowane linki).
 -- Ochrona przed przejęciem to klucz główny na `slug`: zajęcie adresu to INSERT
 -- wiersza (slug, salon, NULL), porzucenie — wiersz zostaje z retired_at. Ten sam
 -- adres w dwóch salonach = 23505 na salon_slug_history_pkey, także przy dwóch
