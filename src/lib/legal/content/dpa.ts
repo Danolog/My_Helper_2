@@ -4,7 +4,7 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const DPA_CONTENT = `Wersja: 26.11.2026 · obowiązuje od: 26.11.2026
+export const DPA_CONTENT = `Wersja: 28.11.2026 · obowiązuje od: 28.11.2026
 
 ## § 1. Strony i zawarcie umowy
 
@@ -18,7 +18,7 @@ export const DPA_CONTENT = `Wersja: 26.11.2026 · obowiązuje od: 26.11.2026
 
 ## § 2. Przedmiot, charakter i cel przetwarzania
 
-1. Salon powierza MyHelper przetwarzanie danych osobowych w zakresie potrzebnym do świadczenia usługi opisanej w Regulaminie (pkt 3): kalendarz i rezerwacja wizyt, kartoteka klientów, powiadomienia SMS i e-mail, zadatki BLIK, lista oczekujących, opinie, pracownicy i moduły dodatkowe włączone przez Salon.
+1. Salon powierza MyHelper przetwarzanie danych osobowych w zakresie potrzebnym do świadczenia usługi opisanej w Regulaminie (pkt 3): kalendarz i rezerwacja wizyt, kartoteka klientów, powiadomienia SMS i e-mail, zadatki BLIK (obecnie niedostępne, Regulamin, pkt 8.2), lista oczekujących, opinie, pracownicy i moduły dodatkowe włączone przez Salon.
 2. Charakter przetwarzania: zbieranie przez formularze Aplikacji, przechowywanie, porządkowanie, wyświetlanie uprawnionym osobom Salonu, wysyłka powiadomień, usuwanie danych.
 3. MyHelper nie przetwarza powierzonych danych do własnych celów, nie sprzedaje ich i nie łączy z danymi innych salonów.
 4. Funkcje AI są wyłączone i nie dostają powierzonych danych. Ich włączenie wymaga zmiany tej umowy i listy podprocesorów (§ 7).
@@ -37,7 +37,9 @@ export const DPA_CONTENT = `Wersja: 26.11.2026 · obowiązuje od: 26.11.2026
 | Pracownicy Salonu | dane wpisane przez Salon: imię i nazwisko, kontakt, grafik, usługi, tymczasowe uprawnienia |
 | Właściciel Salonu | numer BLIK w treści SMS-ów zapisanych w historii powiadomień Salonu (§ 5) |
 
-Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane techniczne ochrony przed nadużyciami i publiczne dane kontaktowe Salonu MyHelper przetwarza **jako administrator**, na zasadach Polityki prywatności. Ta umowa ich nie obejmuje.
+Zadatki są obecnie niedostępne (Regulamin, pkt 8.2). Dopóki ich nie włączymy, Aplikacja nie przyjmuje nowych zadatków i nie wysyła SMS-ów z numerem BLIK. Kategorie dotyczące zadatku obejmują do tego czasu wyłącznie dane zapisane wcześniej.
+
+Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane techniczne ochrony przed nadużyciami (także te, które w imieniu MyHelper przetwarza Upstash, Inc.) i publiczne dane kontaktowe Salonu MyHelper przetwarza **jako administrator**, na zasadach Polityki prywatności. Ta umowa ich nie obejmuje.
 
 ## § 4. Informacje o zdrowiu w kartotece
 
@@ -48,6 +50,8 @@ Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane
 
 ## § 5. Numer BLIK właściciela: dwie role
 
+Zadatki są obecnie niedostępne (Regulamin, pkt 8.2). Dopóki ich nie włączymy, numer zapisany w ustawieniach nie trafia do osób rezerwujących ani do nowych SMS-ów. Pokazywanie numeru z ust. 1 zacznie się dopiero po włączeniu zadatków. Zapis numeru w ustawieniach (ust. 1) i SMS-y wysłane wcześniej (ust. 2) podlegają temu paragrafowi już dziś.
+
 1. **MyHelper jest administratorem** numeru BLIK właściciela, gdy zapisuje go w ustawieniach i pokazuje osobom rezerwującym wizytę z zadatkiem, na ekranie po rezerwacji i w SMS-ie z danymi wpłaty. MyHelper sam określa, jak ta funkcja działa (Polityka prywatności, pkt 1a i 2).
 2. **MyHelper jest podmiotem przetwarzającym** numer BLIK zapisany w treści wysłanych SMS-ów, które tworzą historię powiadomień Salonu. Historia powiadomień jest dokumentacją Salonu, a Salon jest jej administratorem. Dotyczy jej ta umowa.
 3. Usunięcie numeru w ustawieniach kończy przetwarzanie z ust. 1 dla nowych rezerwacji. Nie usuwa numeru z SMS-ów już wysłanych ani z historii powiadomień.
@@ -55,30 +59,30 @@ Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane
 ## § 6. Polecenia Salonu, w tym okresy przechowywania
 
 1. MyHelper przetwarza dane wyłącznie na udokumentowane polecenie Salonu (art. 28 ust. 3 lit. a RODO), także przy przekazywaniu danych do państw trzecich (§ 8). Poleceniem jest: ta umowa, Regulamin, konfiguracja i działania Salonu w Aplikacji oraz polecenia wysłane z adresu konta właściciela na kontakt@nordsignal.cc. Jeśli prawo UE albo polskie nakłada na MyHelper obowiązek przetwarzania, MyHelper informuje o nim Salon przed rozpoczęciem przetwarzania, chyba że prawo tego zabrania.
-2. **Domyślne okresy przechowywania.** Akceptując umowę, Salon poleca stosować poniższe okresy. Salon może je zmienić poleceniem e-mail z ust. 1.
-   1. **wizyty z danymi klienta:** 3 lata od końca roku kalendarzowego, w którym odbyła się wizyta; po tym czasie MyHelper usuwa dane osobowe przy wizycie, a zostają data, usługa i kwota;
+2. **Domyślne okresy przechowywania.** Akceptując umowę, Salon poleca stosować poniższe okresy. Salon może je zmienić poleceniem e-mail z ust. 1. Jeśli zmiany nie da się wykonać w Aplikacji, MyHelper informuje o tym Salon w ciągu 7 dni od polecenia i wykonuje zmianę ręcznie. Jeśli nie może jej wykonać także ręcznie, Salon może wypowiedzieć umowę o korzystanie z Aplikacji bez kosztów.
+   1. **wizyty z danymi klienta:** 3 lata od końca roku kalendarzowego, w którym odbyła się wizyta; po tym czasie MyHelper usuwa dane osobowe przy wizycie, a zostają data, usługa i kwota. Ten okres obejmuje też rekordy, które zostały po usunięciu klienta (ust. 3): po jego upływie znika z nich także pracownik;
    2. **dane gościa bez konta zapisane przy wizycie:** jak w pkt 1;
    3. **historia powiadomień SMS:** 12 miesięcy od wysłania SMS-a, po tym czasie MyHelper ją usuwa;
    4. **kartoteka klienta:** do usunięcia przez Salon, najpóźniej do końca umowy (§ 12);
    5. **wpis na liście oczekujących:** do usunięcia przez klienta albo Salon, razem z kartoteką albo z kontem Salonu;
    6. **opinie i odpowiedzi:** do usunięcia przez Salon, najpóźniej do końca umowy.
-3. **Usunięcie klienta.** Gdy Salon usuwa klienta z kartoteki, MyHelper w tej samej operacji usuwa jego dane kontaktowe i wolny tekst powiązany z nim poza kartoteką: uwagi i dane kontaktowe w jego wizytach, treść powiadomień, komentarze opinii, notatki z zabiegów, a także powiązanie wizyt z kontem klienta w portalu. Zostają wyłącznie: data i godzina wizyty, usługa, wariant, pracownik, status, kwoty (cena, rabat, zadatek i jego status) i ocena w opinii. Operacja nie obejmuje rezerwacji gościa bez konta, które nie są połączone z kartoteką, bo dopasowanie po telefonie albo e-mailu groziłoby usunięciem danych innej osoby. Takie rezerwacje Salon wskazuje poleceniem z ust. 1.
+3. **Usunięcie klienta.** Gdy Salon usuwa klienta z kartoteki, MyHelper w tej samej operacji usuwa jego dane kontaktowe i wolny tekst powiązany z nim poza kartoteką: uwagi i dane kontaktowe w jego wizytach, treść powiadomień, komentarze opinii, notatki z zabiegów, a także powiązanie wizyt z kontem klienta w portalu. Zostają wyłącznie: data i godzina wizyty, usługa, wariant, pracownik, status, kwoty (cena, rabat, zadatek i jego status) i ocena w opinii, najdłużej przez okres z ust. 2 pkt 1. Operacja nie obejmuje rezerwacji gościa bez konta, które nie są połączone z kartoteką, bo dopasowanie po telefonie albo e-mailu groziłoby usunięciem danych innej osoby. Takie rezerwacje Salon wskazuje poleceniem z ust. 1.
 4. Gdy klient ma przyszłe wizyty albo wpłacony i niezwrócony zadatek, Aplikacja nie pozwala go usunąć, dopóki Salon nie odwoła wizyt albo nie rozliczy zadatku.
 5. MyHelper niezwłocznie informuje Salon, jeśli jego zdaniem polecenie narusza RODO albo inne przepisy o ochronie danych (art. 28 ust. 3 zd. 2 RODO), i może wstrzymać jego wykonanie do wyjaśnienia.
 
 ## § 7. Dalsze powierzenie (podprocesorzy)
 
 1. Salon udziela **ogólnej zgody** na korzystanie przez MyHelper z dalszych podmiotów przetwarzających (art. 28 ust. 2 RODO). Aktualna lista jest pod stałym adresem [/podprocesorzy](/podprocesorzy), z datą ostatniej zmiany. Lista na dzień zawarcia umowy jest w załączniku A.
-2. **Powiadomienie o zmianie.** O zamiarze dodania albo zastąpienia podprocesora MyHelper informuje Salon e-mailem na adres konta właściciela co najmniej **14 dni** przed zmianą. Podaje nazwę, siedzibę, zakres danych i podstawę transferu.
+2. **Powiadomienie o zmianie.** O zamiarze dodania albo zastąpienia podprocesora oraz o zmianie miejsca przetwarzania danych u obecnego podprocesora MyHelper informuje Salon e-mailem na adres konta właściciela co najmniej **14 dni** przed zmianą. Podaje nazwę, siedzibę, zakres danych i podstawę transferu.
 3. **Prawo sprzeciwu.** Salon może w tym terminie zgłosić sprzeciw z uzasadnieniem na kontakt@nordsignal.cc. MyHelper odpowiada przed wprowadzeniem zmiany. Jeśli nie da się uwzględnić sprzeciwu, Salon może wypowiedzieć umowę o korzystanie z Aplikacji ze skutkiem na dzień zmiany, bez kosztów.
-4. Wyjątek: w nagłym przypadku bezpieczeństwa (np. awaria albo naruszenie u podprocesora) MyHelper może zmienić podprocesora wcześniej i niezwłocznie o tym informuje. Prawo sprzeciwu z ust. 3 przysługuje wtedy od otrzymania informacji.
+4. Wyjątek: w nagłym przypadku bezpieczeństwa (np. awaria albo naruszenie u podprocesora) MyHelper może zmienić podprocesora przed upływem terminu z ust. 2. Może to zrobić wyłącznie na czas potrzebny do usunięcia zagrożenia i wyłącznie na podmiot, który przetwarza dane w EOG i daje te same gwarancje ochrony danych. MyHelper informuje o tym Salon w ciągu 48 godzin od zmiany. Prawo sprzeciwu z ust. 3 przysługuje wtedy od otrzymania informacji.
 5. MyHelper nakłada na każdego podprocesora w umowie te same obowiązki ochrony danych co w tej umowie, w szczególności co do bezpieczeństwa (art. 28 ust. 4 RODO), i odpowiada wobec Salonu za jego działania jak za własne.
 
 ## § 8. Przekazywanie danych poza EOG
 
-1. Dane przechowujemy w EOG: serwery, baza danych i pliki w Google Cloud, region europe-central2 (Warszawa); SMS-y przez SMSAPI (Polska); liczniki nadużyć w Upstash, region eu-central-1 (Frankfurt).
-2. Salon poleca przekazywanie danych do USA w zakresie załącznika A: e-maile z Aplikacji przez Resend (Plus Five Five, Inc.) oraz ewentualny dostęp Upstash, Inc. do danych przechowywanych we Frankfurcie (np. przy wsparciu technicznym).
-3. Podstawą przekazania jest decyzja Komisji Europejskiej w sprawie **EU-U.S. Data Privacy Framework**, jeśli odbiorca jest na oficjalnej liście tego programu. W przeciwnym razie podstawą są **standardowe klauzule umowne, moduł 3 (podmiot przetwarzający → podmiot przetwarzający)**, przyjęte decyzją wykonawczą Komisji (UE) 2021/914 i zawarte w umowie powierzenia z dostawcą. MyHelper dokumentuje wtedy ocenę skutków transferu.
+1. Dane przechowujemy w EOG: serwery, baza danych i pliki w Google Cloud, region europe-central2 (Warszawa); SMS-y przez SMSAPI (Polska).
+2. Salon poleca przekazywanie danych do USA w zakresie załącznika A: e-maile z Aplikacji przez Resend (Plus Five Five, Inc.).
+3. Podstawą przekazania jest decyzja wykonawcza Komisji Europejskiej (UE) 2023/1795 w sprawie **EU-U.S. Data Privacy Framework**. Resend (Plus Five Five, Inc.) jest na oficjalnej liście tego programu. Gdyby odbiorca przestał być na tej liście, MyHelper zmienia podstawę przekazania na **standardowe klauzule umowne, moduł 3 (podmiot przetwarzający → podmiot przetwarzający)**, przyjęte decyzją wykonawczą Komisji (UE) 2021/914, dokumentuje ocenę skutków transferu i informuje Salon w trybie § 7 ust. 2.
 4. MyHelper nie przekazuje danych do innych państw trzecich bez zmiany listy w trybie § 7.
 
 ## § 9. Obowiązki MyHelper (art. 28 ust. 3 lit. b–h RODO)
@@ -115,7 +119,7 @@ Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane
 
 ## § 13. Postanowienia końcowe
 
-1. Odpowiedzialność stron wobec osób, których dane dotyczą, określa art. 82 RODO. Odpowiedzialność między stronami określa Regulamin, pkt 17.
+1. Odpowiedzialność stron wobec osób, których dane dotyczą, określa art. 82 RODO. Odpowiedzialność między stronami, w tym za roszczenia Salonu z art. 82 ust. 5 RODO, określa Regulamin, pkt 17. Limit z pkt 17.5 Regulaminu wynosi co najmniej 500 zł i nie dotyczy szkód wyrządzonych umyślnie ani z rażącego niedbalstwa. Wobec salonów z pkt 17.4 Regulaminu limit nie obowiązuje.
 2. W sprawach nieuregulowanych stosuje się RODO, Regulamin i prawo polskie.
 3. Jeśli ta umowa i Regulamin różnią się w sprawie ochrony danych, pierwszeństwo ma ta umowa.
 4. Kontakt w sprawach umowy: **kontakt@nordsignal.cc**. MyHelper nie wyznaczył inspektora ochrony danych.
@@ -123,16 +127,15 @@ Dane kont użytkowników (logowanie, sesje), zapisy akceptacji dokumentów, dane
 
 ---
 
-## Załącznik A. Podprocesorzy (stan na 26.11.2026)
+## Załącznik A. Podprocesorzy (stan na 28.11.2026)
 
-Lista jest taka sama jak na stronie [/podprocesorzy](/podprocesorzy).
+Ci sami podprocesorzy są na stronie [/podprocesorzy](/podprocesorzy). Strona wymienia też Upstash, Inc., który przetwarza wyłącznie dane techniczne ochrony przed nadużyciami w imieniu MyHelper jako administratora (§ 3), a nie dane powierzone przez Salon.
 
 | Podprocesor | Siedziba / miejsce przetwarzania | Zakres powierzonych danych | Cel | Podstawa transferu poza EOG |
 |---|---|---|---|---|
 | Google Cloud (Google Cloud Poland sp. z o.o., Warszawa) | region europe-central2 (Warszawa) | wszystkie powierzone dane, w tym pliki i kopie zapasowe | serwery, baza danych, przechowywanie plików, logi | brak transferu |
-| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy, treść SMS-a | wysyłka SMS (potwierdzenia, dane wpłaty, lista oczekujących) | brak transferu |
-| Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat, treść wiadomości | e-maile z Aplikacji | EU-U.S. DPF, jeśli odbiorca jest na liście; w przeciwnym razie SCC moduł 3 (2021/914) |
-| Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt); spółka w USA | numer telefonu gościa (ostatnie 9 cyfr) albo identyfikator Salonu jako klucz licznika | ochrona Salonu przed fałszywymi rezerwacjami | dostęp z USA: EU-U.S. DPF, jeśli odbiorca jest na liście; w przeciwnym razie SCC moduł 3 |
+| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy, treść SMS-a | wysyłka SMS (potwierdzenia, lista oczekujących, a po włączeniu zadatków (obecnie niedostępne) także dane wpłaty) | brak transferu |
+| Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat, treść wiadomości | e-maile z Aplikacji | EU-U.S. DPF (decyzja (UE) 2023/1795); odbiorca jest na oficjalnej liście (§ 8 ust. 3) |
 
 Płatności kartą i funkcje AI są wyłączone, więc ich dostawcy nie przetwarzają powierzonych danych. Ich włączenie wymaga zmiany listy w trybie § 7.
 
@@ -142,7 +145,7 @@ Płatności kartą i funkcje AI są wyłączone, więc ich dostawcy nie przetwar
 2. Szyfrowanie bazy danych, plików i kopii zapasowych u dostawcy infrastruktury (Google Cloud), kluczami zarządzanymi przez Google.
 3. Rozdzielenie danych salonów: personel ma dostęp tylko do danych własnego Salonu. Numer BLIK w ustawieniach widzi tylko właściciel.
 4. Hasła wyłącznie jako skrót (hash). Sesja wygasa po 15 minutach bezczynności.
-5. Ochrona formularzy przed podszyciem (token CSRF) oraz limity żądań, prób logowania i rezerwacji z zadatkiem.
+5. Ochrona formularzy przed podszyciem (token CSRF) oraz limity żądań i prób logowania, a po włączeniu zadatków (obecnie niedostępne) także limity rezerwacji z zadatkiem.
 6. Numery BLIK i numery telefonów klientów nie są zapisywane w logach aplikacji. Linki z jednorazowymi tokenami (potwierdzenie e-mail, reset hasła) są wyłączone z logów serwera.
 7. Pola o zdrowiu, zgoda i notatki nie trafiają do szkiców formularzy w przeglądarce. Szkice starsze niż 24 godziny nie są odtwarzane i są usuwane.
 8. Sekrety (klucze dostawców) są przechowywane poza kodem, w menedżerze sekretów, a odczyty sekretów są zapisywane w dzienniku audytu.

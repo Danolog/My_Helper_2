@@ -4,11 +4,11 @@
  * Znaczniki `[DO UZUPEŁNIENIA: …]` wypełnia właściciel produktu. Dopóki
  * zostają w treści, test bramki publikacji nie pozwoli włączyć flagi.
  */
-export const TERMS_CONTENT = `Wersja: 27.11.2026 · obowiązuje od: 27.11.2026
+export const TERMS_CONTENT = `Wersja: 28.11.2026 · obowiązuje od: 28.11.2026
 
 ## 1. Kim jesteśmy
 
-Usługę MyHelper świadczy AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 Nowogard, NIP 8561293713, REGON 811103360, e-mail: **kontakt@nordsignal.cc** (dalej „my” albo „MyHelper”).
+Usługę MyHelper świadczy AMD Dariusz Gradzik, przedsiębiorca wpisany do Centralnej Ewidencji i Informacji o Działalności Gospodarczej (CEIDG), ul. T. Kościuszki 19, 72-200 Nowogard, NIP 8561293713, REGON 811103360, e-mail: **kontakt@nordsignal.cc**, telefon: **+48 669 149 383** (dalej „my” albo „MyHelper”).
 
 **Punkt kontaktowy** dla użytkowników oraz dla organów państw UE, Komisji Europejskiej i Europejskiej Rady ds. Usług Cyfrowych (art. 11 i 12 aktu o usługach cyfrowych, DSA): **kontakt@nordsignal.cc**. Piszesz do człowieka, nie do automatu. Kontakt prowadzimy w języku polskim.
 
@@ -64,7 +64,7 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 
 ### 8.1. Rezerwacja wizyty
 1. Rezerwujesz wizytę w konkretnym salonie. Umowę o usługę (np. zabieg, strzyżenie) zawierasz **z salonem, nie z MyHelper**. MyHelper udostępnia tylko narzędzie do rezerwacji. Dla klienta jest ono bezpłatne.
-2. Jako gość podajesz imię i nazwisko oraz numer telefonu. Na ten numer dostaniesz SMS z potwierdzeniem i, jeśli salon wymaga zadatku, z danymi wpłaty.
+2. Jako gość podajesz imię i nazwisko oraz numer telefonu. Na ten numer dostaniesz SMS z potwierdzeniem. Po włączeniu zadatków (obecnie niedostępne, pkt 8.2) SMS będzie zawierał też dane wpłaty, jeśli salon wymaga zadatku.
 3. Podawaj tylko własny numer telefonu albo numer osoby, która się na to zgodziła.
 4. Wizytę odwołasz w portalu klienta albo kontaktując się z salonem.
 5. Zapis na listę oczekujących zakłada Twoją kartotekę w tym salonie (Polityka prywatności, pkt 2). Powiadomienia SMS z listy oczekujących nie wychodzą między 21:00 a 8:00.
@@ -73,7 +73,7 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 Zadatki są obecnie niedostępne. Salon nie może w Aplikacji wymagać zadatku, a rezerwacja przez Aplikację nie wymaga wpłaty i nie pokazuje danych do przelewu. Do czasu włączenia zadatków nie stosuje się tego punktu ani pkt 5.3, 11.4 i 11.5. Zadatki włączymy tylko zmianą regulaminu w trybie pkt 19. Zmiana nie obejmie rezerwacji złożonych przed jej wejściem w życie (pkt 19.4).
 
 1. Salon może wymagać zadatku za wizytę. Kwotę wylicza Aplikacja według ustawień salonu.
-2. Zasady zadatku i odwołania wizyty ustala salon i powinien Ci je przekazać przed rezerwacją. Jeśli salon ich nie określił, zadatek działa według art. 394 Kodeksu cywilnego. Gdy nie przyjdziesz na wizytę z przyczyn, za które odpowiadasz, salon może zatrzymać zadatek. Gdy wizyta nie dojdzie do skutku z przyczyn, za które odpowiada salon, możesz żądać zwrotu dwukrotności zadatku. Gdy umowa zostanie rozwiązana albo wizyta nie dojdzie do skutku z przyczyn, za które nikt nie odpowiada lub odpowiadają obie strony, zadatek wraca do Ciebie.
+2. Zasady zadatku i odwołania wizyty ustala salon i powinien Ci je przekazać przed rezerwacją. Jeśli salon ich nie określił, zadatek działa według art. 394 Kodeksu cywilnego. Gdy nie przyjdziesz na wizytę z przyczyn, za które odpowiadasz, salon może zatrzymać zadatek. Gdy wizyta nie dojdzie do skutku z przyczyn, za które odpowiada salon, możesz żądać zwrotu dwukrotności zadatku. Gdy umowa zostanie rozwiązana albo wizyta nie dojdzie do skutku z przyczyn, za które nikt nie odpowiada lub odpowiadają obie strony, zadatek wraca do Ciebie. Jeśli jesteś konsumentem, Twoje prawa wobec salonu wynikają z ustawy o prawach konsumenta. Zasady salonu ich nie ograniczają.
 3. Zadatek wpłacasz **przelewem BLIK na numer telefonu podany przez salon**. Numer, kwotę i tytuł przelewu zobaczysz na ekranie po rezerwacji i w SMS-ie.
 4. **Pieniądze trafiają bezpośrednio do salonu, poza MyHelper.** MyHelper nie przyjmuje, nie przechowuje ani nie zwraca tych pieniędzy i nie jest stroną tej płatności. Płatność zadatku kartą jest wyłączona.
 5. Wpłatę potwierdza salon, oznaczając ją w Aplikacji. Do tego czasu wizyta czeka na zadatek.
@@ -151,12 +151,12 @@ Nie wolno:
 2. SMS-y wysyłamy przez zewnętrznego dostawcę. Nie odpowiadamy za opóźnienia po stronie operatorów telefonii.
 3. Nie jesteśmy stroną umów między klientem a salonem (usługa salonu, zadatek). Nie zwalnia nas to z odpowiedzialności za działanie samej Aplikacji.
 4. **Wobec konsumentów i przedsiębiorców na prawach konsumenta** odpowiadamy na zasadach ogólnych, bez ograniczeń.
-5. **Wobec pozostałych salonów** odpowiadamy za szkody z niewykonania lub nienależytego wykonania umowy do łącznej kwoty opłat, które salon zapłacił nam w ciągu 12 miesięcy przed zdarzeniem, które wywołało szkodę. Ograniczenie nie dotyczy szkód wyrządzonych umyślnie ani z rażącego niedbalstwa.
+5. **Wobec pozostałych salonów** odpowiadamy za szkody z niewykonania lub nienależytego wykonania umowy do wyższej z dwóch kwot: łącznej kwoty opłat, które salon zapłacił nam w ciągu 12 miesięcy przed zdarzeniem, które wywołało szkodę, albo 500 zł. Ograniczenie nie dotyczy szkód wyrządzonych umyślnie ani z rażącego niedbalstwa.
 
 ## 18. Reklamacje
 
 1. Reklamację dotyczącą działania Aplikacji wyślij na kontakt@nordsignal.cc albo na adres z pkt 1. Opisz problem i podaj adres e-mail konta, jeśli je masz.
-2. Odpowiadamy e-mailem **w ciągu 14 dni** od otrzymania reklamacji. **Jeśli nie odpowiemy w tym terminie, reklamację uważa się za uznaną.** Ta zasada dotyczy wszystkich: klientów i salonów.
+2. Odpowiadamy e-mailem **w ciągu 14 dni** od otrzymania reklamacji. **Jeśli nie odpowiemy w tym terminie, reklamację uważa się za uznaną.** Ta zasada dotyczy wszystkich: klientów i salonów. Jeśli nie uwzględnimy reklamacji konsumenta, w odpowiedzi poinformujemy, czy zgadzamy się na pozasądowe rozwiązanie sporu.
 3. Reklamacje usługi salonu (zabieg, zadatek) kieruj do salonu.
 4. Konsument może skorzystać z pozasądowych sposobów rozwiązywania sporów, np. zwrócić się do miejskiego albo powiatowego rzecznika konsumentów albo do wojewódzkiego inspektoratu Inspekcji Handlowej.
 
@@ -180,7 +180,7 @@ Nie wolno:
 
 (formularz ten należy wypełnić i odesłać tylko w przypadku chęci odstąpienia od umowy)
 
-Adresat: AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 Nowogard, e-mail: kontakt@nordsignal.cc
+Adresat: AMD Dariusz Gradzik, ul. T. Kościuszki 19, 72-200 Nowogard, e-mail: kontakt@nordsignal.cc, telefon: +48 669 149 383
 
 Ja/My(*) niniejszym informuję/informujemy(*) o moim/naszym odstąpieniu od umowy o świadczenie następującej usługi: MyHelper, [konto salonu / konto klienta](*)
 

@@ -44,19 +44,19 @@ export const LEGAL_DOCUMENTS: LegalDocuments = {
     href: "/privacy",
     title: "Polityka prywatności",
     requiresVersion: true,
-    version: "2026-11-26",
+    version: "2026-11-28",
   },
   terms: {
     href: "/terms",
     title: "Regulamin",
     requiresVersion: true,
-    version: "2026-11-27",
+    version: "2026-11-28",
   },
   dpa: {
     href: "/dpa",
     title: "Umowa powierzenia przetwarzania danych",
     requiresVersion: true,
-    version: "2026-11-26",
+    version: "2026-11-28",
   },
   subprocessors: {
     href: "/podprocesorzy",
