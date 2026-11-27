@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   CalendarDays,
   Clock,
@@ -18,14 +17,15 @@ import {
   Timer,
   Wallet,
 } from "lucide-react";
+import { SessionCheckError } from "@/components/client/session-check-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { useSession } from "@/lib/auth-client";
-import { clientLoginPath, isModuleFrozen } from "@/lib/features";
+import { useClientPortalSession } from "@/hooks/use-client-portal-session";
+import { isModuleFrozen } from "@/lib/features";
 
 interface ClientAppointment {
   id: string;
@@ -119,8 +119,8 @@ function isUpcoming(startTime: string): boolean {
 }
 
 export default function ClientAppointmentsPage() {
-  const { data: session, isPending } = useSession();
-  const router = useRouter();
+  const { session, isPending, signedOut, checkFailed, retry } =
+    useClientPortalSession("/appointments");
   const [appointments, setAppointments] = useState<ClientAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
@@ -138,15 +138,12 @@ export default function ClientAppointmentsPage() {
     }
   }, []);
 
+  // Przekierowanie bez sesji robi useClientPortalSession.
   useEffect(() => {
-    if (!isPending && !session) {
-      router.push(clientLoginPath("/appointments"));
-      return;
-    }
     if (session) {
       fetchAppointments();
     }
-  }, [session, isPending, router, fetchAppointments]);
+  }, [session, fetchAppointments]);
 
   const upcomingAppointments = appointments.filter(
     (a) => isUpcoming(a.startTime) && a.status !== "cancelled" && a.status !== "completed" && a.status !== "no_show"
@@ -159,7 +156,11 @@ export default function ClientAppointmentsPage() {
   const displayedAppointments = activeTab === "upcoming" ? upcomingAppointments : pastAppointments;
   const catalogOpen = !isModuleFrozen("salonCatalog");
 
-  if (isPending || loading) {
+  if (checkFailed) {
+    return <SessionCheckError onRetry={retry} />;
+  }
+
+  if (isPending || loading || signedOut) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex justify-center items-center py-12">

@@ -40,9 +40,13 @@ export default function SalonProfilePage() {
       <div className="container mx-auto p-6">
         <div className="text-center py-12">
           <h2 className="text-xl font-semibold mb-2">Salon nie znaleziony</h2>
-          {catalogOpen && (
+          {catalogOpen ? (
             <Button asChild>
               <Link href="/salons">Powrot do listy salonow</Link>
+            </Button>
+          ) : (
+            <Button asChild>
+              <Link href="/">Strona główna</Link>
             </Button>
           )}
         </div>

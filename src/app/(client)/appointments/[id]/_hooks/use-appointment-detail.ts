@@ -1,18 +1,25 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import { toast } from "sonner";
+import { useClientPortalSession } from "@/hooks/use-client-portal-session";
 import { mutationFetch } from "@/lib/api-client";
-import { useSession } from "@/lib/auth-client";
-import { clientLoginPath, isModuleFrozen } from "@/lib/features";
+import { isModuleFrozen } from "@/lib/features";
 import type { AppointmentDetail, CancelInfo, ReviewInfo } from "../_types";
 
 export function useAppointmentDetail() {
   const params = useParams();
   const appointmentId = params.id as string;
-  const { data: session, isPending } = useSession();
-  const router = useRouter();
+  const {
+    session,
+    isPending: sessionPending,
+    signedOut,
+    checkFailed: sessionCheckFailed,
+    retry: retrySessionCheck,
+  } = useClientPortalSession(`/appointments/${appointmentId}`);
+  // Do czasu przekierowania na logowanie strona pokazuje ładowanie.
+  const isPending = sessionPending || signedOut;
 
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(
     null,
@@ -194,16 +201,12 @@ export function useAppointmentDetail() {
   // Effects
   // -----------------------------------------------------------------------
 
-  // Redirect unauthenticated users and fetch appointment data
+  // Fetch appointment data (przekierowanie bez sesji robi useClientPortalSession)
   useEffect(() => {
-    if (!isPending && !session) {
-      router.push(clientLoginPath(`/appointments/${appointmentId}`));
-      return;
-    }
     if (session) {
       fetchAppointment();
     }
-  }, [session, isPending, router, fetchAppointment, appointmentId]);
+  }, [session, fetchAppointment]);
 
   // Fetch review once appointment is loaded and is completed
   // (moduł opinii zamrożony — bez zapytania, sekcji opinii też nie ma)
@@ -239,6 +242,8 @@ export function useAppointmentDetail() {
     loading,
     error,
     isPending,
+    sessionCheckFailed,
+    retrySessionCheck,
 
     // Cancel dialog
     cancelDialogOpen,

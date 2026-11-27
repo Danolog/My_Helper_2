@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Clock,
   ArrowLeft,
@@ -17,12 +16,15 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react";
+import { SessionCheckError } from "@/components/client/session-check-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { useClientPortalSession } from "@/hooks/use-client-portal-session";
 import { mutationFetch } from "@/lib/api-client";
-import { useSession } from "@/lib/auth-client";
-import { clientLoginPath } from "@/lib/features";
+
+const SESSION_REJECTED_MESSAGE =
+  "Nie udało się potwierdzić logowania. Spróbuj ponownie za chwilę.";
 
 interface WaitingListEntry {
   id: string;
@@ -86,10 +88,19 @@ function getStatusInfo(entry: WaitingListEntry) {
 }
 
 export default function WaitingListPage() {
-  const { data: session, isPending: sessionLoading } = useSession();
-  const router = useRouter();
+  const {
+    session,
+    isPending: sessionLoading,
+    signedOut,
+    checkFailed,
+    retry,
+    confirmSession,
+  } = useClientPortalSession("/waiting-list");
+  const hasSession = session != null;
   const [entries, setEntries] = useState<WaitingListEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  // API odrzuciło sesję (401), choć po odświeżeniu sesja nadal jest.
+  const [sessionRejected, setSessionRejected] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     message: string;
@@ -101,11 +112,17 @@ export default function WaitingListPage() {
       const res = await fetch("/api/client/waiting-list");
       if (!res.ok) {
         if (res.status === 401) {
-          router.push(clientLoginPath("/waiting-list"));
+          // Sesja w przeglądarce mogła być nieaktualna. Bez przekierowania
+          // w ciemno: odświeżamy sesję z serwera. Gdy jej nie ma,
+          // useClientPortalSession przekieruje raz na logowanie. Gdy jest,
+          // pokazujemy komunikat, bo logowanie odesłałoby tu z powrotem.
+          await confirmSession();
+          setSessionRejected(true);
           return;
         }
         throw new Error("Blad pobierania danych");
       }
+      setSessionRejected(false);
       const data = await res.json();
       if (data.success) {
         setEntries(data.data);
@@ -114,17 +131,21 @@ export default function WaitingListPage() {
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [confirmSession]);
 
+  // Zależność od `hasSession`, nie od obiektu sesji: odświeżenie po 401 może
+  // podmienić obiekt i ponowne pobranie wpisów zapętliłoby 401 → odświeżenie.
   useEffect(() => {
-    if (!sessionLoading) {
-      if (!session) {
-        router.push(clientLoginPath("/waiting-list"));
-      } else {
-        fetchEntries();
-      }
+    if (hasSession) {
+      fetchEntries();
     }
-  }, [session, sessionLoading, router, fetchEntries]);
+  }, [hasSession, fetchEntries]);
+
+  const retryEntries = () => {
+    setSessionRejected(false);
+    setLoading(true);
+    void fetchEntries();
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -223,7 +244,15 @@ export default function WaitingListPage() {
     }
   };
 
-  if (sessionLoading || loading) {
+  if (checkFailed) {
+    return <SessionCheckError onRetry={retry} />;
+  }
+
+  if (sessionRejected && hasSession) {
+    return <SessionCheckError onRetry={retryEntries} message={SESSION_REJECTED_MESSAGE} />;
+  }
+
+  if (sessionLoading || loading || signedOut) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
