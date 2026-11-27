@@ -40,6 +40,8 @@ const mockTx = {
   update: (...a: unknown[]) => mockDbUpdate(...a),
   delete: (...a: unknown[]) => mockDbDelete(...a),
 };
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...a: unknown[]) => mockDbSelect(...a),

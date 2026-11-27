@@ -78,6 +78,8 @@ const h = vi.hoisted(() => {
   };
 });
 
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/db", () => ({ db: h.db }));
 vi.mock("@/lib/session", () => ({ getOptionalSession: h.getOptionalSession }));
 vi.mock("@/lib/salon-context", () => ({ getSalonContext: h.getSalonContext }));

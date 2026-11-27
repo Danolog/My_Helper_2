@@ -49,6 +49,12 @@ const mockTx = {
   delete: (...a: unknown[]) => mockDbDelete(...a),
 };
 
+// Dopasowanie karty z blokadą sprawdza online-booking-block.test.ts; tu tylko
+// miejsce wywołania w trasie (domyślnie: brak blokady).
+const mockBlockResponse = vi.fn();
+vi.mock("@/lib/online-booking-block", () => ({
+  onlineBookingBlockResponse: (...a: unknown[]) => mockBlockResponse(...a),
+}));
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...a: unknown[]) => mockDbSelect(...a),
@@ -741,5 +747,84 @@ describe("POST /api/deposits/create-session — numer telefonu BLIK z żądania 
 
     expect(response.status).toBe(201);
     expect(paymentValues().blikPhoneNumber).toBeNull();
+  });
+});
+
+describe("POST /api/deposits/create-session — blokada rezerwacji online", () => {
+  const BLOCKED = () =>
+    new Response(
+      JSON.stringify({
+        success: false,
+        code: "ONLINE_BOOKING_UNAVAILABLE",
+        error: "Rezerwacja online jest niedostępna. Zadzwoń do salonu: +48 000 600 704",
+      }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    primeHappyPathDb();
+    primeExpectedDeposit(50);
+    mockIsStripeConfigured.mockReturnValue(true);
+  });
+
+  it("gość z numerem z zablokowanej karty → 403 przed wyliczeniem kwoty, zapisem i Stripe", async () => {
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null as never);
+    mockBlockResponse.mockResolvedValueOnce(BLOCKED());
+
+    const res = await createSession(
+      makeRequest({ ...validBody, guestName: "Anna Test", guestPhone: "000 600 700" })
+    );
+    const { status, body } = await parseResponse<{ code: string; error: string }>(res);
+
+    expect(status).toBe(403);
+    expect(body.code).toBe("ONLINE_BOOKING_UNAVAILABLE");
+    expect(mockBlockResponse).toHaveBeenCalledWith({
+      salonId: SALON_UUID,
+      sessionUser: null,
+      phone: "+48000600700",
+    });
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockGetStripe).not.toHaveBeenCalled();
+  });
+
+  it("zalogowany klient → sprawdzenie z użytkownikiem sesji; 403 bez zapisu", async () => {
+    mockBlockResponse.mockResolvedValueOnce(BLOCKED());
+
+    const res = await createSession(makeRequest());
+
+    expect(res.status).toBe(403);
+    expect(mockBlockResponse).toHaveBeenCalledWith({
+      salonId: SALON_UUID,
+      sessionUser: expect.objectContaining({ email: "klient@test.pl" }),
+      phone: null,
+    });
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockGetStripe).not.toHaveBeenCalled();
+  });
+
+  it("personel tego salonu → bez sprawdzenia blokady", async () => {
+    vi.mocked(getSalonContext).mockResolvedValueOnce({ salonId: SALON_UUID } as never);
+    mockGetStripe.mockReturnValue({
+      checkout: { sessions: { create: vi.fn().mockResolvedValue({ id: "cs_1", url: "https://checkout.stripe.com/x" }) } },
+    });
+
+    const res = await createSession(makeRequest({ ...validBody, clientId: CLIENT_UUID }));
+
+    expect(res.status).toBe(201);
+    expect(mockBlockResponse).not.toHaveBeenCalled();
+  });
+
+  it("błąd sprawdzenia (baza) → 500, bez zapisu i bez Stripe", async () => {
+    mockBlockResponse.mockRejectedValueOnce(new Error("connection refused"));
+
+    const res = await createSession(makeRequest());
+
+    expect(res.status).toBe(500);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockGetStripe).not.toHaveBeenCalled();
   });
 });

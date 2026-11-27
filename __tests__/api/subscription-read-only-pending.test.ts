@@ -22,6 +22,8 @@ const { mockSubscriptionRows, mockInsertRows, mockGetOptionalSession } = vi.hois
 
 // Każde select() to osobny łańcuch; wynik zależy od tabeli przekazanej do from().
 // Tabela salon_subscriptions -> wiersze przypadku, pozostałe -> brak wierszy.
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/db", async () => {
   const { salonSubscriptions } = await import("@/lib/schema");
   const selectChain = () => {

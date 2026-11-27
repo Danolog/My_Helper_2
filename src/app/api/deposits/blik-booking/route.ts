@@ -13,6 +13,7 @@ import {
   depositDecision,
 } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
+import { onlineBookingBlockResponse } from "@/lib/online-booking-block";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
@@ -447,6 +448,17 @@ export async function POST(request: Request) {
       variantId: variantId ?? null,
     });
     if (refsError) return refsError;
+
+    // Blokada rezerwacji online — przed wyliczeniem kwoty i zapisem wizyty
+    // z zadatkiem. Personel z panelu dodaje wizytę mimo blokady.
+    if (!isSalonStaff) {
+      const blocked = await onlineBookingBlockResponse({
+        salonId,
+        sessionUser: session?.user ?? null,
+        phone: guestPhone ?? null,
+      });
+      if (blocked) return blocked;
+    }
 
     // Kwota liczona przez serwer. Błąd wyliczenia = 503, nic nie zapisane.
     let expected: Awaited<ReturnType<typeof calculateExpectedDeposit>>;

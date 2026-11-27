@@ -10,6 +10,7 @@ import {
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { depositGuardResponse } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
+import { onlineBookingBlockResponse } from "@/lib/online-booking-block";
 import { checkPromotionApplicable, computePromoDiscount, type PromotionRejection } from "@/lib/promo-discount";
 import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
@@ -316,6 +317,17 @@ export async function POST(request: Request) {
       variantId: booking.variantId,
     });
     if (refsError) return refsError;
+
+    // Blokada rezerwacji online (karta klienta z blokadą: e-mail konta albo
+    // telefon z formularza). Personel z panelu dodaje wizytę mimo blokady.
+    if (!isStaff) {
+      const blocked = await onlineBookingBlockResponse({
+        salonId,
+        sessionUser: session?.user ?? null,
+        phone: guestPhone ?? null,
+      });
+      if (blocked) return blocked;
+    }
 
     // #63: usługa z deposit_required / klient z require_deposit nie powstaje
     // tu bez wpłaty — jedyną drogą jest /api/deposits/create-session.
