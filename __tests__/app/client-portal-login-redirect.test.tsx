@@ -148,9 +148,12 @@ describe("/portal/login: returnTo z przekierowania przechodzi walidację", () =>
     const { default: ClientLoginPage } = await import("@/app/(client)/portal/login/page");
     const { returnTo } = parsePush(clientLoginPath("/appointments"));
 
-    await expect(
-      ClientLoginPage({ searchParams: Promise.resolve({ returnTo: returnTo ?? undefined }) }),
-    ).rejects.toThrow("NEXT_REDIRECT:/appointments");
+    // Przy exactOptionalPropertyTypes pole nie może dostać jawnego `undefined`.
+    const searchParams = returnTo === null ? {} : { returnTo };
+
+    await expect(ClientLoginPage({ searchParams: Promise.resolve(searchParams) })).rejects.toThrow(
+      "NEXT_REDIRECT:/appointments",
+    );
   });
 
   it("adres spoza domeny (//) wraca na stronę domową klienta", async () => {
