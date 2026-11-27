@@ -11,6 +11,7 @@ import {
   NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
   NO_SHOW_STATUS,
 } from "@/lib/no-show";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import {
   appointments,
@@ -50,6 +51,22 @@ class AppointmentNotCompletableError extends Error {
     this.name = "AppointmentNotCompletableError";
     this.currentStatus = currentStatus;
   }
+}
+
+/**
+ * Nazwa ograniczenia z błędu sterownika, także opakowanego w `cause` przez
+ * Drizzle (postgres.js podaje ją w `constraint_name`, node-postgres w `constraint`).
+ * Sama nazwa, bez wartości — bezpieczna do logu.
+ */
+function dbConstraintName(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth++) {
+    const e = current as { constraint_name?: unknown; constraint?: unknown; cause?: unknown };
+    const name = e.constraint_name ?? e.constraint;
+    if (typeof name === "string") return name;
+    current = e.cause;
+  }
+  return undefined;
 }
 
 function noShowConflictResponse() {
@@ -640,7 +657,13 @@ export async function POST(
       if (error.currentStatus === null) return appointmentNotFoundResponse();
       return notCompletableResponse(error.currentStatus) ?? noShowConflictResponse();
     }
-    logger.error("Failed to complete appointment", { error });
+    // Bez `message` i `stack`: treść błędu zapytania niesie SQL i parametry
+    // (m.in. kwotę i metodę płatności). Tylko nazwa, SQLSTATE i ograniczenie.
+    const constraint = dbConstraintName(error);
+    logger.error("Failed to complete appointment", {
+      ...toErrorIdentity(error),
+      ...(constraint ? { constraint } : {}),
+    });
     return NextResponse.json(
       { success: false, error: "Failed to complete appointment" },
       { status: 500 }

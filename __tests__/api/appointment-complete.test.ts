@@ -1696,5 +1696,49 @@ describe("POST /api/appointments/[id]/complete", () => {
       expect(status).toBe(500);
       expect(body).toEqual({ success: false, error: "Failed to complete appointment" });
     });
+
+    it("500: błąd UPDATE z parametrami w treści — log błędu bez kwoty i metody, z kodem i ograniczeniem", async () => {
+      const { logger } = await import("@/lib/logger");
+      const errorSpy = vi.spyOn(logger, "error");
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      // Kształt jak DrizzleQueryError: SQL i parametry w `message`, błąd
+      // sterownika w `cause` (postgres.js: `code`, `constraint_name`).
+      const driverError = Object.assign(new Error("new row violates check constraint"), {
+        code: "23514",
+        constraint_name: "appointments_paid_amount_nonneg",
+      });
+      const queryError = new Error(
+        'Failed query: update "appointments" set "status" = $1, "paid_amount" = $2, "payment_method" = $3 where ...' +
+          "\nparams: completed,4321.09,blik," +
+          TEST_IDS.APPOINTMENT_UUID,
+        { cause: driverError }
+      );
+      const failingUpdate: Record<string, unknown> = {};
+      for (const m of ["set", "where", "returning"]) {
+        failingUpdate[m] = vi.fn().mockReturnValue(failingUpdate);
+      }
+      failingUpdate.then = (_: unknown, reject: (err: Error) => void) => reject(queryError);
+      mockDbUpdate.mockReturnValueOnce(failingUpdate);
+
+      const { status } = await parseResponse(
+        await completeWith({ paidAmount: "4321.09", paymentMethod: "blik" })
+      );
+
+      expect(status).toBe(500);
+      expect(errorSpy).toHaveBeenCalledWith("Failed to complete appointment", {
+        errorName: "Error",
+        errorCode: "23514",
+        constraint: "appointments_paid_amount_nonneg",
+      });
+      const logged = JSON.stringify(errorSpy.mock.calls);
+      expect(logged).not.toContain("4321.09");
+      expect(logged).not.toContain("blik");
+      expect(logged).not.toContain("params");
+      expect(logged).not.toContain("Failed query");
+      errorSpy.mockRestore();
+    });
   });
 });

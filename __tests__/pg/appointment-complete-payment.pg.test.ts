@@ -7,8 +7,11 @@
  *   z nazwą ograniczenia, wiersz bez zmian;
  * - wizyta salonu B nietknięta: zakończenie wizyty A jej nie zmienia, a sesja A
  *   kończąca wizytę B dostaje 404 i nic nie zapisuje;
- * - błąd w dalszej części transakcji (zapis prowizji po UPDATE statusu) wycofuje
- *   także kwotę i metodę: status, płatność i zabieg bez zmian.
+ * - błąd w dalszej części transakcji (testowy trigger na INSERT prowizji, po UPDATE
+ *   statusu) wycofuje także kwotę i metodę: trigger potwierdza, że UPDATE był
+ *   widoczny w transakcji, a po błędzie status, płatność, zabieg i prowizja bez zmian;
+ *   log błędu bez kwoty i metody;
+ * - trzy CHECK płatności zwalidowane (`convalidated = true`).
  *
  * Trasa wołana bezpośrednio; atrapa sesji (`auth.api.getSession`), nagłówków i loggera;
  * `@/lib/db` wskazuje bazę testową. Kontekst salonu i `forSalon` prawdziwe.
@@ -17,10 +20,18 @@
  * w każdym, wizyty z terminami w 2097. Salony usuwane w `afterAll` (kaskada).
  */
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as completeRoute from "@/app/api/appointments/[id]/complete/route";
-import { appointments, employees, services, salons, treatmentHistory, user } from "@/lib/schema";
+import {
+  appointments,
+  employeeCommissions,
+  employees,
+  services,
+  salons,
+  treatmentHistory,
+  user,
+} from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { createMockRequest, createRouteParams, parseResponse } from "../api/helpers";
 
@@ -57,7 +68,13 @@ const suite = h ? describe : describe.skip;
 const RUN = randomUUID().slice(0, 8);
 const OWNER_A = `it-t3-pay-a-${RUN}`;
 const OWNER_B = `it-t3-pay-b-${RUN}`;
-const ids = { salonA: "", salonB: "", empA: "", empB: "", serviceA: "", serviceB: "" };
+const ids = { salonA: "", salonB: "", empA: "", empB: "", serviceA: "", serviceB: "", rollbackAppt: "" };
+/** Testowy trigger wycofania (nazwy z przebiegu, żeby nie kolidować z innym uruchomieniem). */
+const ROLLBACK_FN = `it_t3_pay_fail_${RUN.replace(/[^0-9a-f]/g, "")}`;
+const ROLLBACK_TRIGGER = `${ROLLBACK_FN}_trg`;
+/** SQLSTATE triggera: UPDATE wizyty widoczny w transakcji / niewidoczny. */
+const ROLLBACK_SEEN_CODE = "XT001";
+const ROLLBACK_UNSEEN_CODE = "XT002";
 let slot = 0;
 
 /** Wizyta salonu (rola migracji); każda w osobnym terminie. */
@@ -152,11 +169,47 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
       .returning({ id: services.id });
     ids.serviceA = sa!.id;
     ids.serviceB = sb!.id;
+
+    // Testowy trigger (rola migracji, jak reszta danych testu): INSERT prowizji
+    // wizyty `rollbackAppt` kończy się błędem. Kod błędu mówi, czy trigger widział
+    // w tej transakcji wynik UPDATE (status completed z kwotą 120.00 i kartą).
+    // Inne wizyty, także z równoległych testów, nie są dotknięte.
+    ids.rollbackAppt = await appointment("A");
+    if (!/^[0-9a-f-]{36}$/.test(ids.rollbackAppt)) throw new Error("nieoczekiwany format id wizyty");
+    await db.execute(
+      sql.raw(`
+        create function ${ROLLBACK_FN}() returns trigger language plpgsql as $fn$
+        begin
+          if new.appointment_id = '${ids.rollbackAppt}'::uuid then
+            if exists (
+              select 1 from public.appointments a
+              where a.id = new.appointment_id
+                and a.status = 'completed'
+                and a.paid_amount = 120.00
+                and a.payment_method = 'card'
+            ) then
+              raise exception 'it-t3 pay: wymuszony błąd po UPDATE' using errcode = '${ROLLBACK_SEEN_CODE}';
+            end if;
+            raise exception 'it-t3 pay: UPDATE niewidoczny' using errcode = '${ROLLBACK_UNSEEN_CODE}';
+          end if;
+          return new;
+        end
+        $fn$
+      `)
+    );
+    await db.execute(
+      sql.raw(
+        `create trigger ${ROLLBACK_TRIGGER} before insert on public.employee_commissions ` +
+          `for each row execute function ${ROLLBACK_FN}()`
+      )
+    );
   });
 
   afterAll(async () => {
     if (!h) return;
     try {
+      await h.db.execute(sql.raw(`drop trigger if exists ${ROLLBACK_TRIGGER} on public.employee_commissions`));
+      await h.db.execute(sql.raw(`drop function if exists ${ROLLBACK_FN}()`));
       for (const s of [ids.salonA, ids.salonB]) if (s) await h.db.delete(salons).where(eq(salons.id, s));
       await h.db.delete(user).where(inArray(user.id, [OWNER_A, OWNER_B]));
     } finally {
@@ -242,6 +295,7 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
 
       expect(err.code).toBe("23514");
       expect(err.constraint_name).toBe("appointments_paid_amount_nonneg");
+      expect(await rowOf(appt)).toEqual({ status: "scheduled", paidAmount: null, paymentMethod: null });
     });
   });
 
@@ -282,20 +336,49 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
 
   describe("transakcja", () => {
     it("błąd zapisu prowizji po UPDATE statusu → 500; status, płatność i zabieg wycofane", async () => {
-      const appt = await appointment("A");
+      const appt = ids.rollbackAppt;
       ctl.userId = OWNER_A;
 
-      // Prowizja 1000% nie mieści się w employee_commissions.percentage numeric(5,2):
-      // INSERT prowizji (krok po UPDATE statusu z płatnością) kończy się błędem bazy.
+      // Testowy trigger na employee_commissions rzuca błąd przy INSERT prowizji tej
+      // wizyty, czyli po UPDATE statusu z płatnością w tej samej transakcji.
       const res = await parseResponse(
-        await complete(appt, { paidAmount: "120.00", paymentMethod: "card", commissionPercentage: "1000", notes: "it-pay wycofanie" })
+        await complete(appt, { paidAmount: "120.00", paymentMethod: "card", notes: "it-pay wycofanie" })
       );
 
       expect(res.status, JSON.stringify(res.body)).toBe(500);
       expect(res.body).toEqual({ success: false, error: "Failed to complete appointment" });
+      // UPDATE się wykonał: trasa zalogowała zakończenie, a trigger zobaczył w tej
+      // transakcji status i płatność wizyty (kod ROLLBACK_SEEN_CODE, nie UNSEEN).
+      expect(mocks.info).toHaveBeenCalledWith("Appointment marked as completed", { appointmentId: appt });
+      expect(mocks.error).toHaveBeenCalledWith(
+        "Failed to complete appointment",
+        expect.objectContaining({ errorCode: ROLLBACK_SEEN_CODE })
+      );
+      // ...a potem został wycofany razem z zabiegiem.
       expect(await rowOf(appt)).toEqual({ status: "scheduled", paidAmount: null, paymentMethod: null });
       expect(await h!.db.select().from(treatmentHistory).where(eq(treatmentHistory.appointmentId, appt))).toHaveLength(0);
-      expect(mocks.error).toHaveBeenCalled();
+      expect(await h!.db.select().from(employeeCommissions).where(eq(employeeCommissions.appointmentId, appt))).toHaveLength(0);
+      // Log błędu bez kwoty i metody.
+      const logged = JSON.stringify(mocks.error.mock.calls);
+      expect(logged).not.toContain("120");
+      expect(logged).not.toContain("card");
+    });
+  });
+
+  describe("migracja", () => {
+    it("trzy CHECK płatności są zwalidowane (VALIDATE po NOT VALID)", async () => {
+      const rows = (await h!.db.execute(sql`
+        select conname, convalidated from pg_constraint
+        where conrelid = 'appointments'::regclass
+          and conname in ('appointments_payment_method_valid', 'appointments_payment_pair', 'appointments_paid_amount_nonneg')
+        order by conname
+      `)) as unknown as Array<{ conname: string; convalidated: boolean }>;
+
+      expect(Array.from(rows)).toEqual([
+        { conname: "appointments_paid_amount_nonneg", convalidated: true },
+        { conname: "appointments_payment_method_valid", convalidated: true },
+        { conname: "appointments_payment_pair", convalidated: true },
+      ]);
     });
   });
 });
