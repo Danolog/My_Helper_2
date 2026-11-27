@@ -10,9 +10,9 @@ import { DlaSalonowTrustBar } from "./dla-salonow/_components/DlaSalonowTrustBar
 
 /**
  * Strona główna `/` — strona sprzedażowa dla właścicieli salonów. Bez wyboru
- * roli i bez sekcji dla klientów: katalog salonów jest zamrożony
- * (`salonCatalog` w src/lib/features.ts), a klient wchodzi na stronę salonu
- * z linku od salonu. Dawny adres `/dla-salonow` przekierowuje tutaj.
+ * roli i bez sekcji dla klientów: lista salonów jest zamrożona
+ * (`salonCatalog` w src/lib/features.ts), a klient rezerwuje z linku
+ * swojego salonu. Dawny adres `/dla-salonow` przekierowuje tutaj.
  */
 export default function Home() {
   return (
