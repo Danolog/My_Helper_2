@@ -2,8 +2,8 @@
 /**
  * Krótki adres salonu `/s/<slug>` w `src/proxy.ts` i rejestrze modułów.
  *
- * Klient trafia do salonu wyłącznie z linku, kodu QR albo przycisku na
- * Instagramie i Facebooku, często bez konta. Proxy ma przepuścić `/s/...` bez
+ * Klient trafia do salonu wyłącznie z linku albo przycisku na Instagramie
+ * i Facebooku, często bez konta. Proxy ma przepuścić `/s/...` bez
  * sesji (bez przekierowania na logowanie) i bez blokady modułu zamrożonego
  * (katalog salonów `salonCatalog` obejmuje tylko listę `/salons`). O 404 dla
  * nieznanego adresu decyduje sama strona, nie proxy.

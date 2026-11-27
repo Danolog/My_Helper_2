@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { findPublicSalonIdBySlug } from "@/lib/server/system";
 
 /**
- * Krótki adres salonu `/s/<slug>` — link, kod QR i przycisk „Zarezerwuj”
+ * Krótki adres salonu `/s/<slug>` — link i przycisk „Zarezerwuj”
  * z Instagrama i Facebooka prowadzą tutaj.
  *
  * Przekierowanie (307) na `/salons/<id>`, a nie rewrite:

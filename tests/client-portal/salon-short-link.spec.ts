@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures';
 
-// Krotki adres salonu `/s/<slug>`: link, kod QR i przycisk "Zarezerwuj" z Instagrama
+// Krotki adres salonu `/s/<slug>`: link i przycisk "Zarezerwuj" z Instagrama
 // i Facebooka. Klient bez konta (projekt client-portal biegnie bez storageState)
 // ma trafic na strone salonu i przejsc do rezerwacji.
 //
