@@ -1,11 +1,43 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, type RefObject } from "react";
 import { toast } from "sonner";
+import { useSalonRole } from "@/components/dashboard/role-provider";
+import { mutationFetch } from "@/lib/api-client";
 import { getStartOfWeek, getEndOfWeek } from "@/lib/date-utils";
+import { NO_SHOW_LABEL, canMarkNoShow } from "@/lib/no-show";
 import type { CalendarEvent, CalendarView, Employee, TimeBlock } from "@/types/calendar";
 
-export function useCalendarNavigation() {
+const NO_SHOW_GENERIC_ERROR = "Nie udalo sie oznaczyc wizyty";
+
+interface CalendarNavigationOptions {
+  /**
+   * Odświeżenie wizyt po zmianie z okienka wizyty („Nie przyszedł”). Ref, nie
+   * funkcja: dane kalendarza powstają po tym hooku, a stały obiekt nie
+   * odtwarza `handleEventClick` (memo wizyt w siatce) przy każdym renderze.
+   */
+  appointmentsChangedRef?: RefObject<(() => void) | null>;
+}
+
+/** POST /api/appointments/[id]/no-show z okienka wizyty w kalendarzu. */
+async function markNoShowFromCalendar(appointmentId: string, onChanged: () => void) {
+  try {
+    const res = await mutationFetch(`/api/appointments/${appointmentId}/no-show`, { method: "POST" });
+    const data = (await res.json().catch(() => null)) as { success?: boolean; error?: unknown } | null;
+    if (res.ok && data?.success === true) {
+      toast.success(`Wizyta oznaczona: „${NO_SHOW_LABEL}”`);
+      onChanged();
+      return;
+    }
+    toast.error(typeof data?.error === "string" && data.error.trim() !== "" ? data.error : NO_SHOW_GENERIC_ERROR);
+  } catch {
+    toast.error(NO_SHOW_GENERIC_ERROR);
+  }
+}
+
+export function useCalendarNavigation(options: CalendarNavigationOptions = {}) {
+  const { appointmentsChangedRef } = options;
+  const role = useSalonRole();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [currentView, setCurrentView] = useState<CalendarView>("day");
 
@@ -149,7 +181,7 @@ export function useCalendarNavigation() {
       confirmed: "Potwierdzona",
       completed: "Zakonczona",
       cancelled: "Anulowana",
-      no_show: "Niestawienie sie",
+      no_show: NO_SHOW_LABEL,
     };
 
     const clientName = event.appointment.client
@@ -177,6 +209,24 @@ export function useCalendarNavigation() {
     // Show "Complete" button for completable appointments (scheduled/confirmed)
     const isCompletable = event.appointment.status === "scheduled" || event.appointment.status === "confirmed";
 
+    // Drugi przycisk okienka: „Nie przyszedł” dla wizyty minionej albo
+    // dzisiejszej (właściciel i recepcja). Podpowiedź — decyduje serwer.
+    // Cofnięcie jest w szczegółach wizyty.
+    const noShowButton = canMarkNoShow({
+      role,
+      status: event.appointment.status,
+      startTime: event.start,
+    })
+      ? {
+          cancel: {
+            label: NO_SHOW_LABEL,
+            onClick: () => {
+              void markNoShowFromCalendar(event.id, () => appointmentsChangedRef?.current?.());
+            },
+          },
+        }
+      : {};
+
     if (hasAllergies) {
       toast.warning(`Wizyta: ${event.title}`, {
         description,
@@ -188,6 +238,7 @@ export function useCalendarNavigation() {
           label: "Szczegoly",
           onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
         },
+        ...noShowButton,
       });
     } else if (hasPreferences) {
       toast.info(`Wizyta: ${event.title}`, {
@@ -200,6 +251,7 @@ export function useCalendarNavigation() {
           label: "Szczegoly",
           onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
         },
+        ...noShowButton,
       });
     } else {
       toast.info(`Wizyta: ${event.title}`, {
@@ -211,9 +263,10 @@ export function useCalendarNavigation() {
           label: "Szczegoly",
           onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
         },
+        ...noShowButton,
       });
     }
-  }, [handleCompleteAppointment]);
+  }, [handleCompleteAppointment, role, appointmentsChangedRef]);
 
   // Cancel reschedule
   const handleCancelReschedule = () => {

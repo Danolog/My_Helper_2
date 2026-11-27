@@ -321,7 +321,7 @@ describe("CalendarEventComponent", () => {
       />
     );
 
-    expect(screen.getByText("Niestawienie sie")).toBeInTheDocument();
+    expect(screen.getByText("Nie przyszedł")).toBeInTheDocument();
   });
 
   it("sets data-event-id and data-status attributes", () => {

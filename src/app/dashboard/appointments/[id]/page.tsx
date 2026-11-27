@@ -25,6 +25,8 @@ import type {
   RefundStatus,
   InvoiceData,
 } from "@/components/appointments/detail";
+// Wprost z pliku, nie z indeksu: przycisk ma własną logikę widoczności (rola, status, dzień wizyty).
+import { NoShowButton } from "@/components/appointments/detail/no-show-button";
 import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useTabSync } from "@/hooks/use-tab-sync";
@@ -265,6 +267,12 @@ export default function AppointmentDetailPage() {
         onEdit={() => setEditDialogOpen(true)}
         onComplete={() => setCompleteDialogOpen(true)}
         onInvoiceAction={handleOpenInvoiceDialog}
+      />
+
+      <NoShowButton
+        appointment={appointment}
+        onChanged={refreshAppointmentAndDeposit}
+        notifyChange={notifyAppointmentsChanged}
       />
 
       <AppointmentInfoCard appointment={appointment} />

@@ -31,7 +31,7 @@ export function getStatusLabel(status: string): string {
     confirmed: "Potwierdzona",
     completed: "Zakonczona",
     cancelled: "Anulowana",
-    no_show: "Nieobecnosc",
+    no_show: "Nie przyszedł",
   };
   return labels[status] || status;
 }

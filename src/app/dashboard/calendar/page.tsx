@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Lock } from "lucide-react";
 import { CalendarDialogs } from "./_components/calendar-dialogs";
 import { CalendarGrid } from "./_components/calendar-grid";
@@ -8,7 +9,10 @@ import { useCalendarData } from "./_hooks/use-calendar-data";
 import { useCalendarNavigation } from "./_hooks/use-calendar-navigation";
 
 export default function CalendarPage() {
-  const nav = useCalendarNavigation();
+  // Okienko wizyty („Nie przyszedł”) odświeża wizyty przez ref: nawigacja
+  // powstaje przed danymi kalendarza, które zależą od jej daty i widoku.
+  const appointmentsChangedRef = useRef<(() => void) | null>(null);
+  const nav = useCalendarNavigation({ appointmentsChangedRef });
 
   const {
     session,
@@ -25,6 +29,12 @@ export default function CalendarPage() {
     currentDate: nav.currentDate,
     currentView: nav.currentView,
   });
+
+  useEffect(() => {
+    appointmentsChangedRef.current = () => {
+      void fetchAppointments();
+    };
+  }, [fetchAppointments]);
 
   // Compute filtered data
   const { filteredEmployees, filteredEvents, filteredTimeBlocks } =
