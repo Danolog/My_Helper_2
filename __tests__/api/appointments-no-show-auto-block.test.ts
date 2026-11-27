@@ -5,9 +5,14 @@
  * Blokada zapisuje się w tej samej transakcji co oznaczenie „Nie przyszedł”.
  * Cofnięcie (DELETE) blokady nie zdejmuje.
  *
- * Kolejność wyników txRows w transakcji POST z kartą klienta:
- *   [wizyta], [update wizyty], [próg salonu], [karta klienta FOR NO KEY UPDATE],
- *   [licznik no_show], [update karty RETURNING].
+ * Kolejność wyników txRows w transakcji POST:
+ *   [wizyta], [update wizyty], [próg salonu], [karty FOR NO KEY UPDATE w kolejności id],
+ *   potem dla każdej karty: [licznik no_show], [update karty RETURNING] (tylko po progu).
+ * Wizyta z kartą: jedna karta, ta z wizyty. Wizyta online (bez karty): karty
+ * salonu ze zweryfikowanym e-mailem konta rezerwującego (reguła blokady, bez
+ * telefonu; telefon liczy tylko licznik na karcie) — dopasowanie robi baza, więc tu
+ * sprawdzamy kształt zapytań; działanie na danych dowodzi test pg
+ * (__tests__/pg/no-show-online-auto-block.pg.test.ts).
  *
  * Mockowane tylko krawędzie z salon-staff-harness; forSalon prawdziwe.
  */
@@ -22,8 +27,12 @@ const h = await vi.hoisted(async () => {
   const selectWheres: unknown[] = [];
   const setArgs: Record<string, unknown>[] = [];
   const lockModes: string[] = [];
-  /** failSelectNo: numer odczytu w transakcji (od 1), który odrzuca baza. */
-  const state = { transactions: 0, failSelectNo: 0 };
+  const orderBys: unknown[][] = [];
+  /**
+   * failSelectNo: numer odczytu w transakcji (od 1), który odrzuca baza;
+   * failCode: kod SQLSTATE tego błędu (pusty = błąd bez kodu).
+   */
+  const state = { transactions: 0, failSelectNo: 0, failCode: "" };
 
   type Tx = Parameters<Parameters<typeof m.db.transaction>[0]>[0];
   type Chain = Record<string, (...args: unknown[]) => unknown>;
@@ -39,8 +48,9 @@ const h = await vi.hoisted(async () => {
               selects += 1;
               const chain = tx.select() as Chain;
               if (selects === state.failSelectNo) {
+                const error = Object.assign(new Error("deadlock detected"), state.failCode ? { code: state.failCode } : {});
                 chain.then = (_resolve: unknown, reject: unknown) =>
-                  Promise.reject(new Error("deadlock detected")).catch(reject as (e: unknown) => unknown);
+                  Promise.reject(error).catch(reject as (e: unknown) => unknown);
               }
               chain.where = (w: unknown) => {
                 selectWheres.push(w);
@@ -48,6 +58,10 @@ const h = await vi.hoisted(async () => {
               };
               chain.for = (mode: unknown) => {
                 lockModes.push(String(mode));
+                return chain;
+              };
+              chain.orderBy = (...columns: unknown[]) => {
+                orderBys.push(columns);
                 return chain;
               };
               return chain;
@@ -67,7 +81,7 @@ const h = await vi.hoisted(async () => {
   };
 
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-  return { m, selectWheres, setArgs, lockModes, state, db, logger };
+  return { m, selectWheres, setArgs, lockModes, orderBys, state, db, logger };
 });
 
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
@@ -111,13 +125,67 @@ function clientUpdates() {
   return h.setArgs.filter((s) => "blockedAt" in s);
 }
 
+/**
+ * Reguła blokady: zweryfikowany e-mail konta rezerwującego równy e-mailowi
+ * karty. Bez telefonu — numer z formularza nie wskazuje kart do blokady.
+ */
+function verifiedAccountSql(card: string, appt: string, verifiedParam: number): string {
+  return (
+    `exists (select 1 from "user" "booking_account" where ("booking_account"."id" = ${appt}."booked_by_user_id" ` +
+    `and "booking_account"."email_verified" = $${verifiedParam} ` +
+    `and lower(nullif(btrim("booking_account"."email"), '')) = lower(nullif(btrim(${card}."email"), ''))))`
+  );
+}
+
+/**
+ * Próg blokady: wizyty no_show karty plus wizyty online tego samego klienta
+ * dopasowane TYLKO po zweryfikowanym e-mailu konta (bez guest_phone).
+ */
+const COUNT_WHERE_SQL =
+  '("appointments"."salon_id" = $1 and "appointments"."status" = $2 and ("appointments"."client_id" = $3 or ' +
+  '("appointments"."client_id" is null and exists (select 1 from "clients" "no_show_card" where ' +
+  '("no_show_card"."id" = $4 and "no_show_card"."salon_id" = $5 and ' +
+  verifiedAccountSql('"no_show_card"', '"appointments"', 6) +
+  ')))))';
+const COUNT_WHERE_PARAMS = (clientId: string) => [SALON_A, "no_show", clientId, clientId, SALON_A, true];
+
+/** Karty wizyty online do blokady: wizyta bez karty, zweryfikowany e-mail konta, salon z sesji. */
+const ONLINE_CARDS_WHERE_SQL =
+  '(exists (select 1 from "appointments" "online_appointment" where ("online_appointment"."id" = $1 ' +
+  'and "online_appointment"."salon_id" = $2 and "online_appointment"."client_id" is null and ' +
+  verifiedAccountSql('"clients"', '"online_appointment"', 3) +
+  ')) and "clients"."salon_id" = $4)';
+
+/** Wizyta online (bez karty) i odpowiedzi bazy: próg, pasujące karty, licznik i UPDATE każdej. */
+function givenOnline(opts: {
+  threshold: unknown;
+  cards?: { id: string; noShowCount: number; blockedNow?: boolean }[];
+}) {
+  m.txRows.push(
+    [{ id: APPT_ID, status: "scheduled", startTime: YESTERDAY, clientId: null }],
+    [], // update wizyty
+    [{ threshold: opts.threshold }]
+  );
+  if (opts.threshold === null || ![1, 2, 3].includes(opts.threshold as number)) return;
+  const cards = opts.cards ?? [];
+  m.txRows.push(cards.map((c) => ({ id: c.id })));
+  for (const card of cards) {
+    m.txRows.push([{ noShowCount: card.noShowCount }]);
+    if (card.noShowCount >= (opts.threshold as number)) {
+      m.txRows.push(card.blockedNow === false ? [] : [{ id: card.id }]);
+    }
+  }
+}
+
 beforeEach(() => {
   m.reset();
   h.selectWheres.length = 0;
   h.setArgs.length = 0;
   h.lockModes.length = 0;
+  h.orderBys.length = 0;
   h.state.transactions = 0;
   h.state.failSelectNo = 0;
+  h.state.failCode = "";
   vi.clearAllMocks();
   m.hasTemporaryAccess.mockResolvedValue(false);
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -176,7 +244,7 @@ describe("próg osiągnięty → blokada 'auto' w tej samej transakcji", () => {
     expect(where.params).toEqual([CLIENT_ID, SALON_A]);
   });
 
-  it("licznik liczy tylko no_show tej karty w salonie z sesji", async () => {
+  it("licznik: no_show tej karty i wizyt online tego samego klienta, w salonie z sesji", async () => {
     m.asOwnerOf(SALON_A);
     givenMarkable({ threshold: 2, noShowCount: 2 });
 
@@ -186,11 +254,12 @@ describe("próg osiągnięty → blokada 'auto' w tej samej transakcji", () => {
     const salonWhere = dialect.sqlToQuery(h.selectWheres[1] as SQL);
     expect(salonWhere.sql).toBe('"salons"."id" = $1');
     expect(salonWhere.params).toEqual([SALON_A]);
+    const cardWhere = dialect.sqlToQuery(h.selectWheres[2] as SQL);
+    expect(cardWhere.sql).toBe('("clients"."id" = $1 and "clients"."salon_id" = $2)');
+    expect(cardWhere.params).toEqual([CLIENT_ID, SALON_A]);
     const countWhere = dialect.sqlToQuery(h.selectWheres[3] as SQL);
-    expect(countWhere.sql).toBe(
-      '("appointments"."salon_id" = $1 and "appointments"."client_id" = $2 and "appointments"."status" = $3)'
-    );
-    expect(countWhere.params).toEqual([SALON_A, CLIENT_ID, "no_show"]);
+    expect(countWhere.sql).toBe(COUNT_WHERE_SQL);
+    expect(countWhere.params).toEqual(COUNT_WHERE_PARAMS(CLIENT_ID));
   });
 
   it("karta już zablokowana (UPDATE bez wiersza) → 200, bez logu blokady", async () => {
@@ -238,15 +307,6 @@ describe("bez blokady", () => {
     expect(clientUpdates()).toEqual([]);
   });
 
-  it("wizyta gościa bez karty → próg nieczytany", async () => {
-    m.asOwnerOf(SALON_A);
-    m.txRows.push([{ id: APPT_ID, status: "scheduled", startTime: YESTERDAY, clientId: null }]);
-
-    expect((await call(POST)).status).toBe(200);
-    expect(h.selectWheres).toHaveLength(1);
-    expect(clientUpdates()).toEqual([]);
-  });
-
   it("karta usunięta w międzyczasie → 200, bez blokady", async () => {
     m.asOwnerOf(SALON_A);
     givenMarkable({ threshold: 1, clientMissing: true });
@@ -262,6 +322,194 @@ describe("bez blokady", () => {
     expect((await call(POST)).status).toBe(200);
     expect(h.selectWheres).toHaveLength(1);
     expect(h.setArgs).toEqual([]);
+  });
+});
+
+describe("wizyta online bez karty → karty salonu tego samego klienta", () => {
+  const CARD_1 = "33333333-3333-4333-8333-333333333331";
+  const CARD_2 = "33333333-3333-4333-8333-333333333332";
+
+  it("zalogowany ze zweryfikowanym e-mailem dochodzi do progu → pasująca karta zablokowana", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 2, cards: [{ id: CARD_1, noShowCount: 2 }] });
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({
+      appointmentId: APPT_ID,
+      noShow: true,
+      changed: true,
+      clientAutoBlocked: true,
+    });
+    expect(clientUpdates()).toEqual([
+      { blockedAt: NOW, blockedBy: "auto", blockNote: null, updatedAt: NOW },
+    ]);
+    // Wizyta nie dostaje karty: jedyny zapis wizyty to status.
+    expect(h.setArgs[0]).toEqual({ status: "no_show", updatedAt: NOW });
+    expect(h.lockModes).toEqual(["update", "no key update"]);
+    expect(h.logger.info).toHaveBeenCalledWith("[AppointmentNoShow API] Online booking auto-blocked", {
+      salonId: SALON_A,
+      appointmentId: APPT_ID,
+      clientId: CARD_1,
+      threshold: 2,
+      noShowCount: 2,
+    });
+  });
+
+  it("karty do blokady szuka baza: tylko zweryfikowany e-mail konta, ten salon, kolejność id", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 1, cards: [{ id: CARD_1, noShowCount: 1 }] });
+
+    expect((await call(POST)).status).toBe(200);
+
+    // [wizyta], [próg], [karty], [licznik]
+    const cardsWhere = dialect.sqlToQuery(h.selectWheres[2] as SQL);
+    expect(cardsWhere.sql).toBe(ONLINE_CARDS_WHERE_SQL);
+    expect(cardsWhere.params).toEqual([APPT_ID, SALON_A, true, SALON_A]);
+    expect(h.orderBys).toHaveLength(1);
+    expect(dialect.sqlToQuery(h.orderBys[0]![0] as SQL).sql).toBe('"clients"."id" asc');
+    const countWhere = dialect.sqlToQuery(h.selectWheres[3] as SQL);
+    expect(countWhere.sql).toBe(COUNT_WHERE_SQL);
+    expect(countWhere.params).toEqual(COUNT_WHERE_PARAMS(CARD_1));
+    // Próg i wybór kart bez dopasowania po telefonie.
+    expect(cardsWhere.sql).not.toMatch(/guest_phone|"phone"/);
+    expect(countWhere.sql).not.toMatch(/guest_phone|"phone"/);
+    const clientWrite = m.writes.filter((w) => w.op === "update")[1]!;
+    const where = dialect.sqlToQuery(clientWrite.where as SQL);
+    expect(where.params).toEqual([CARD_1, SALON_A]);
+  });
+
+  it("licznik ponad progiem → karta zablokowana, log bez e-maila i telefonu", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 3, cards: [{ id: CARD_2, noShowCount: 4 }] });
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.clientAutoBlocked).toBe(true);
+    expect(clientUpdates()).toHaveLength(1);
+    // Trasa nie czyta e-maila ani telefonu: tylko id, status, termin i karta wizyty.
+    expect(JSON.stringify(h.logger.info.mock.calls)).not.toMatch(/@|guest|phone|email/i);
+  });
+
+  it("brak pasującej karty → bez licznika i bez blokady", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 1, cards: [] });
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, noShow: true, changed: true });
+    // [wizyta], [próg], [karty] — licznika już nie ma.
+    expect(h.selectWheres).toHaveLength(3);
+    expect(clientUpdates()).toEqual([]);
+    expect(h.logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it("gość z numerem karty (sam telefon) → zapytanie o karty bez telefonu → bez blokady", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 1, cards: [] });
+
+    expect((await call(POST)).status).toBe(200);
+
+    // Numer z formularza nikt nie sprawdził: ani wybór kart, ani próg nie
+    // porównują telefonu wizyty z numerem karty. Karty innego salonu odcina
+    // jawny salon_id (i RLS). Na danych: test pg.
+    const cardsWhere = dialect.sqlToQuery(h.selectWheres[2] as SQL);
+    expect(cardsWhere.params).not.toContain("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(cardsWhere.sql).not.toMatch(/guest_phone|"phone"/);
+    expect(clientUpdates()).toEqual([]);
+  });
+
+  it("dwie pasujące karty → nieobecność liczy się do obu i obie dostają blokadę", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({
+      threshold: 2,
+      cards: [
+        { id: CARD_1, noShowCount: 2 },
+        { id: CARD_2, noShowCount: 3 },
+      ],
+    });
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.clientAutoBlocked).toBe(true);
+    expect(clientUpdates()).toHaveLength(2);
+    const cardWrites = m.writes.filter((w) => w.op === "update").slice(1);
+    expect(cardWrites.map((w) => dialect.sqlToQuery(w.where as SQL).params[0])).toEqual([CARD_1, CARD_2]);
+    // Jeden FOR NO KEY UPDATE na wszystkie karty (w kolejności id).
+    expect(h.lockModes).toEqual(["update", "no key update"]);
+    const blockedLogs = h.logger.info.mock.calls.filter((c) => c[0] === "[AppointmentNoShow API] Online booking auto-blocked");
+    expect(blockedLogs.map((c) => (c[1] as { clientId: string }).clientId)).toEqual([CARD_1, CARD_2]);
+  });
+
+  it("dwie karty, tylko jedna po progu → blokada tylko tej jednej", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({
+      threshold: 3,
+      cards: [
+        { id: CARD_1, noShowCount: 2 },
+        { id: CARD_2, noShowCount: 3 },
+      ],
+    });
+
+    expect((await (await call(POST)).json()).data.clientAutoBlocked).toBe(true);
+    const cardWrites = m.writes.filter((w) => w.op === "update").slice(1);
+    expect(cardWrites.map((w) => dialect.sqlToQuery(w.where as SQL).params[0])).toEqual([CARD_2]);
+  });
+
+  it("dwie karty już zablokowane → 200 bez clientAutoBlocked", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({
+      threshold: 1,
+      cards: [
+        { id: CARD_1, noShowCount: 1, blockedNow: false },
+        { id: CARD_2, noShowCount: 1, blockedNow: false },
+      ],
+    });
+
+    expect((await (await call(POST)).json()).data).not.toHaveProperty("clientAutoBlocked");
+    expect(h.logger.info).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, 0, 4, "1"])("próg wyłączony albo niepoprawny (%j) → bez szukania kart", async (threshold) => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold });
+
+    expect((await call(POST)).status).toBe(200);
+    // [wizyta], [próg] — bez zapytania o karty i bez blokady wierszy kart.
+    expect(h.selectWheres).toHaveLength(2);
+    expect(h.lockModes).toEqual(["update"]);
+    expect(clientUpdates()).toEqual([]);
+  });
+
+  it("błąd bazy przy szukaniu kart → 500, oznaczenie wycofane razem z transakcją", async () => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 1, cards: [{ id: CARD_1, noShowCount: 1 }] });
+    // Trzeci odczyt: karty wizyty online.
+    h.state.failSelectNo = 3;
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "Nie udało się zmienić oznaczenia wizyty" });
+    expect(clientUpdates()).toEqual([]);
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["40P01", "40001"])("zakleszczenie albo konflikt serializacji (%s) przy kartach → 409 RETRY", async (code) => {
+    m.asOwnerOf(SALON_A);
+    givenOnline({ threshold: 1, cards: [{ id: CARD_1, noShowCount: 1 }] });
+    h.state.failSelectNo = 3;
+    h.state.failCode = code;
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("RETRY");
+    expect(h.logger.error).not.toHaveBeenCalled();
   });
 });
 

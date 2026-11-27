@@ -29,15 +29,24 @@
 // Wystarczy jedna zablokowana karta. Telefon służy tylko do sprawdzenia:
 // rezerwacja nie zostaje przez to przypięta do karty.
 //
+// Ten sam klucz numeru i e-maila przypisuje karcie nieobecności wizyt online
+// (bez karty, `client_id IS NULL`), w dwóch regułach (`OnlineNoShowMatch`):
+// - licznik „Nie przyszedł”: telefon wizyty (`guest_phone`) w tym samym
+//   kluczu 9 cyfr co numer karty albo zweryfikowany e-mail konta
+//   rezerwującego (`booked_by_user_id`) równy e-mailowi karty;
+// - próg i automatyczna blokada: tylko zweryfikowany e-mail konta.
+// Wyrażenia `onlineAppointmentOfCard` i `cardOfOnlineAppointment` służą obu
+// (src/lib/server/client-auto-block.ts).
+//
 // Błąd bazy wychodzi do trasy (500): rezerwacja nie przechodzi bez sprawdzenia.
 import { NextResponse } from "next/server";
-import { and, eq, isNotNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, eq, isNotNull, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { alias, type AnyPgTable } from "drizzle-orm/pg-core";
 import { onlineBookingUnavailableMessage, ONLINE_BOOKING_UNAVAILABLE_CODE } from "@/lib/client-block";
 import { verifiedClientMatchEmail, type SessionUserLike } from "@/lib/client-match";
 import { logger } from "@/lib/logger";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
-import { clients, salons } from "@/lib/schema";
+import { appointments, clients, salons, user } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 /** Prefiks numeru PL w E.164 (wynik normalizePolishPhoneNumber). */
@@ -64,17 +73,24 @@ export type OnlineBookingBlockResult =
   | { blocked: false }
   | { blocked: true; salonPhone: string | null; matchedBy: "email" | "phone" | "card" };
 
-/** Aliasy tabeli kart w podzapytaniach (zewnętrzne zapytanie też czyta `clients`). */
+/** Aliasy tabel w podzapytaniach (zewnętrzne zapytanie czyta tę samą tabelę). */
 const LINKED_CARD_ALIAS = "linked_card";
 const BLOCKED_CARD_ALIAS = "blocked_card";
+const NO_SHOW_CARD_ALIAS = "no_show_card";
+const ONLINE_APPOINTMENT_ALIAS = "online_appointment";
+const BOOKING_ACCOUNT_ALIAS = "booking_account";
 
 /**
- * `"clients" "<alias>"` do klauzuli FROM podzapytania. Sam alias wstawiony do
+ * `"<tabela>" "<alias>"` do klauzuli FROM podzapytania. Sam alias wstawiony do
  * szablonu `sql` renderuje się jako nazwa aliasu bez tabeli, więc tabela
- * i alias idą osobno; kolumny aliasu (`alias(clients, ...)`) wskazują ten alias.
+ * i alias idą osobno; kolumny aliasu (`alias(tabela, ...)`) wskazują ten alias.
  */
+function tableAs(table: AnyPgTable, aliasName: string): SQL {
+  return sql`${table} ${sql.identifier(aliasName)}`;
+}
+
 function clientsAs(aliasName: string): SQL {
-  return sql`${clients} ${sql.identifier(aliasName)}`;
+  return tableAs(clients, aliasName);
 }
 
 /** Kolumny karty potrzebne do porównania „ten sam klient”. */
@@ -86,9 +102,10 @@ function cardPhoneDigits(phone: AnyColumn): SQL {
 }
 
 /**
- * Numer PL z karty jako 9 cyfr albo NULL (inny prefiks kraju, inna długość,
- * brak numeru). Te same trzy postaci co w `phoneMatches`; NULL nie jest równy
- * niczemu, więc karta z nierozpoznanym numerem nie pasuje do żadnej innej.
+ * Numer PL z karty (albo telefon gościa z wizyty) jako 9 cyfr albo NULL (inny
+ * prefiks kraju, inna długość, brak numeru). Te same trzy postaci co
+ * w `phoneMatches`; NULL nie jest równy niczemu, więc nierozpoznany numer
+ * nie pasuje do żadnej karty.
  */
 function cardPhoneKey(phone: AnyColumn): SQL {
   const digits = cardPhoneDigits(phone);
@@ -151,6 +168,87 @@ export function sameCustomerOnlineBookingBlocked(salonId: string): SQL<boolean> 
     eq(blocked.salonId, salonId),
     isNotNull(blocked.blockedAt),
     sameCustomer(blocked, clients)
+  )})`;
+}
+
+/** Kolumny wizyty online potrzebne do porównania „ten sam klient” z kartą. */
+type OnlineAppointmentColumns = { guestPhone: AnyColumn; bookedByUserId: AnyColumn };
+
+/**
+ * Do czego dopasowujemy nieobecność wizyty online (bez karty) do karty:
+ * - `"counter"` — licznik „Nie przyszedł” na karcie: telefon wizyty albo
+ *   zweryfikowany e-mail konta rezerwującego. Właściciel widzi wszystko
+ *   i sam ocenia, czy to ten klient;
+ * - `"autoBlock"` — próg i wybór kart do automatycznej blokady: TYLKO
+ *   zweryfikowany e-mail konta. Numeru z formularza nikt nie sprawdził, więc
+ *   automat nie może na jego podstawie zablokować osoby trzeciej — także
+ *   wtedy, gdy zalogowany klient wpisał telefon cudzej karty.
+ */
+export type OnlineNoShowMatch = "counter" | "autoBlock";
+
+/**
+ * Zweryfikowany e-mail konta rezerwującego (`booked_by_user_id`) równy
+ * e-mailowi karty — jak `verifiedClientMatchEmail`: `email_verified = true`,
+ * bez wielkości liter i spacji na brzegach, pusty e-mail nie pasuje. E-mail
+ * konta czyta baza, wołający go nie dostaje.
+ */
+function bookingAccountMatchesCard(card: Pick<CardColumns, "email">, appt: OnlineAppointmentColumns): SQL {
+  const account = alias(user, BOOKING_ACCOUNT_ALIAS);
+  return sql`exists (select 1 from ${tableAs(user, BOOKING_ACCOUNT_ALIAS)} where ${and(
+    eq(account.id, appt.bookedByUserId),
+    eq(account.emailVerified, true),
+    sql`${cardEmailKey(account.email)} = ${cardEmailKey(card.email)}`
+  )})`;
+}
+
+/**
+ * Wizyta online i karta to ten sam klient według reguły `match`. Telefon
+ * wizyty porównujemy w kluczu 9 cyfr z numerem karty (numer nierozpoznany =
+ * NULL, nie pasuje) — tylko dla licznika.
+ */
+function onlineAppointmentMatchesCard(
+  card: Pick<CardColumns, "email" | "phone">,
+  appt: OnlineAppointmentColumns,
+  match: OnlineNoShowMatch
+): SQL {
+  const byAccount = bookingAccountMatchesCard(card, appt);
+  if (match === "autoBlock") return byAccount;
+  return or(sql`${cardPhoneKey(appt.guestPhone)} = ${cardPhoneKey(card.phone)}`, byAccount)!;
+}
+
+/**
+ * Warunek na wizytę `appointments` w zapytaniu: to wizyta online (bez karty)
+ * tego samego klienta co karta `clientId` salonu `salonId`, według reguły
+ * `match`. Telefon i e-mail karty czyta podzapytanie z jawnym `id`
+ * i `salon_id`. Zapytanie musi iść przez `forSalon(salonId)` i mieć własny
+ * warunek `salon_id` wizyty.
+ */
+export function onlineAppointmentOfCard(salonId: string, clientId: string, match: OnlineNoShowMatch): SQL {
+  const card = alias(clients, NO_SHOW_CARD_ALIAS);
+  return and(
+    isNull(appointments.clientId),
+    sql`exists (select 1 from ${clientsAs(NO_SHOW_CARD_ALIAS)} where ${and(
+      eq(card.id, clientId),
+      eq(card.salonId, salonId),
+      onlineAppointmentMatchesCard(card, appointments, match)
+    )})`
+  )!;
+}
+
+/**
+ * Warunek na kartę `clients` w zapytaniu: wizyta `appointmentId` salonu
+ * `salonId` jest wizytą online (bez karty) tego samego klienta, według reguły
+ * `match`. Wizyta z kartą nie pasuje do żadnej karty tą drogą — liczy się do
+ * własnej karty. Zapytanie musi iść przez `forSalon(salonId)` i mieć warunek
+ * `salon_id` karty.
+ */
+export function cardOfOnlineAppointment(salonId: string, appointmentId: string, match: OnlineNoShowMatch): SQL {
+  const appt = alias(appointments, ONLINE_APPOINTMENT_ALIAS);
+  return sql`exists (select 1 from ${tableAs(appointments, ONLINE_APPOINTMENT_ALIAS)} where ${and(
+    eq(appt.id, appointmentId),
+    eq(appt.salonId, salonId),
+    isNull(appt.clientId),
+    onlineAppointmentMatchesCard(clients, appt, match)
   )})`;
 }
 

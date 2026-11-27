@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { and, count, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
-import { NO_SHOW_STATUS } from "@/lib/no-show";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
-import { appointments, clients } from "@/lib/schema";
+import { clients } from "@/lib/schema";
+import { countCardNoShows } from "@/lib/server/client-auto-block";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
@@ -14,8 +14,12 @@ import { isValidUuid } from "@/lib/validations";
  * „Nie przyszedł” (status `no_show`) w salonie z sesji.
  *
  * Licznik nie jest zapisywany osobno: liczymy wizyty z tym statusem, więc
- * cofnięcie oznaczenia od razu zmniejsza wynik. Wizyty gościa bez karty
- * klienta (sam telefon na wizycie) nie trafiają do żadnej karty.
+ * cofnięcie oznaczenia od razu zmniejsza wynik. Liczy `countCardNoShows`
+ * z regułą `"counter"`: wizyty z tą kartą plus wizyty online bez karty tego
+ * samego klienta (telefon wizyty albo zweryfikowany e-mail konta równy danym
+ * karty). Próg automatycznej blokady liczy to samo zapytanie z regułą
+ * `"autoBlock"` (bez dopasowań po telefonie), więc licznik może być wyższy
+ * niż liczba nieobecności, które blokują automatycznie.
  *
  * Kolejność: sesja (401) → kontekst salonu (404) → rola (403: kartoteka
  * klientów to właściciel i recepcja, jak GET /api/clients/[id]) → format id
@@ -58,17 +62,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .limit(1);
       if (!client) return null;
 
-      const [row] = await tx
-        .select({ noShowCount: count() })
-        .from(appointments)
-        .where(
-          and(
-            eq(appointments.salonId, scopedSalonId),
-            eq(appointments.clientId, id),
-            eq(appointments.status, NO_SHOW_STATUS)
-          )
-        );
-      return { noShowCount: Number(row?.noShowCount ?? 0) };
+      return { noShowCount: await countCardNoShows(tx, scopedSalonId, id, "counter") };
     });
 
     if (!result) {

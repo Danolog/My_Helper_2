@@ -43,8 +43,12 @@ import { isValidUuid } from "@/lib/validations";
  * Automatyczna blokada rezerwacji online: po nowym oznaczeniu (POST z zapisem)
  * w tej samej transakcji `applyNoShowAutoBlock` — gdy licznik karty klienta
  * dojdzie do progu salonu, karta dostaje blokadę `blocked_by = 'auto'`
- * (osobny log `info`), a odpowiedź ma `data.clientAutoBlocked: true`. Kolejność blokad
- * wierszy: wizyta, potem karta klienta. Usuwanie karty bierze je odwrotnie
+ * (osobny log `info` na kartę), a odpowiedź ma `data.clientAutoBlocked: true`.
+ * Wizyta online bez karty liczy się do progu tylko kart salonu ze
+ * zweryfikowanym e-mailem konta rezerwującego; dopasowanie po samym telefonie
+ * widać na liczniku karty, ale nie blokuje automatycznie. Dopasowanie robi
+ * baza, trasa nie czyta telefonu ani e-maila. Kolejność blokad wierszy: wizyta,
+ * potem karty w kolejności `id`. Usuwanie karty bierze je odwrotnie
  * (karta, potem wizyty); zakleszczenie rozstrzyga baza (40P01) i jedna
  * z transakcji się wycofuje — nic nie zapisane, trasa zwraca 409 `RETRY`
  * (także przy konflikcie serializacji 40001), żeby panel mógł ponowić.
@@ -54,7 +58,7 @@ type NoShowOutcome =
   | { kind: "not_found" }
   | { kind: "wrong_status" }
   | { kind: "too_early" }
-  | { kind: "ok"; changed: boolean; autoBlock: { clientId: string; result: NoShowAutoBlockOutcome } | null };
+  | { kind: "ok"; changed: boolean; autoBlock: NoShowAutoBlockOutcome | null };
 
 const WRONG_STATUS_MESSAGE: Record<"POST" | "DELETE", string> = {
   POST: "„Nie przyszedł” można oznaczyć tylko przy wizycie zaplanowanej lub potwierdzonej",
@@ -137,13 +141,11 @@ async function changeNoShow(
 
       // Próg automatycznej blokady rezerwacji online — w tej samej transakcji,
       // więc blokada i oznaczenie zapisują się razem albo wcale. Tylko przy
-      // nowym oznaczeniu wizyty z kartą klienta (gość bez karty nie ma czego
-      // blokować). Cofnięcie (DELETE) blokady nie zdejmuje.
-      const clientId = appointment.clientId;
-      const autoBlock =
-        markAsNoShow && clientId
-          ? { clientId, result: await applyNoShowAutoBlock(tx, scopedSalonId, clientId) }
-          : null;
+      // nowym oznaczeniu; wizyta online bez pasującej karty nie ma czego
+      // blokować. Cofnięcie (DELETE) blokady nie zdejmuje.
+      const autoBlock = markAsNoShow
+        ? await applyNoShowAutoBlock(tx, scopedSalonId, { id, clientId: appointment.clientId })
+        : null;
       return { kind: "ok", changed: true, autoBlock };
     });
 
@@ -172,20 +174,23 @@ async function changeNoShow(
       noShow: markAsNoShow,
       changed: outcome.changed,
     });
-    if (outcome.autoBlock?.result.kind === "blocked") {
+    const checked = outcome.autoBlock?.kind === "checked" ? outcome.autoBlock : null;
+    const blockedCards = checked ? checked.cards.filter((card) => card.result === "blocked") : [];
+    for (const card of blockedCards) {
       // Bez danych klienta: id karty, próg i licznik wystarczą do śladu.
       logger.info("[AppointmentNoShow API] Online booking auto-blocked", {
         salonId: scopedSalonId,
         appointmentId: id,
-        clientId: outcome.autoBlock.clientId,
-        threshold: outcome.autoBlock.result.threshold,
-        noShowCount: outcome.autoBlock.result.noShowCount,
+        clientId: card.clientId,
+        threshold: checked!.threshold,
+        noShowCount: card.noShowCount,
       });
     }
 
     // `clientAutoBlocked: true` tylko wtedy, gdy to oznaczenie założyło
-    // blokadę — panel pokazuje wtedy osobny komunikat. Inne odpowiedzi bez zmian.
-    const clientAutoBlocked = outcome.autoBlock?.result.kind === "blocked";
+    // blokadę (choć jednej karty) — panel pokazuje wtedy osobny komunikat.
+    // Inne odpowiedzi bez zmian.
+    const clientAutoBlocked = blockedCards.length > 0;
     return NextResponse.json({
       success: true,
       data: {
