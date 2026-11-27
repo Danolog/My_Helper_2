@@ -343,6 +343,10 @@ export const appointments = pgTable(
     guestName: text("guest_name"),
     guestPhone: text("guest_phone"),
     guestEmail: text("guest_email"),
+    // Migracja 0020: płatność zapisana przy zakończeniu wizyty (bez terminala).
+    // NULL w obu = wizyta bez zapisu płatności (sprzed zmiany); para pilnowana CHECK.
+    paidAmount: numeric("paid_amount", { precision: 10, scale: 2 }),
+    paymentMethod: text("payment_method"), // 'cash', 'card', 'blik'
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -374,6 +378,17 @@ export const appointments = pgTable(
       "appointments_status_valid",
       sql`${table.status} IN ('scheduled', 'confirmed', 'completed', 'cancelled', 'no_show')`
     ),
+    // Migracja 0020: metoda płatności z zamkniętej listy, kwota i metoda
+    // wyłącznie razem, kwota nieujemna (0 = wizyta gratis).
+    check(
+      "appointments_payment_method_valid",
+      sql`${table.paymentMethod} IN ('cash', 'card', 'blik')`
+    ),
+    check(
+      "appointments_payment_pair",
+      sql`(${table.paidAmount} IS NULL) = (${table.paymentMethod} IS NULL)`
+    ),
+    check("appointments_paid_amount_nonneg", sql`${table.paidAmount} >= 0`),
     // Cel złożonego FK z deposit_status_events: zdarzenie nie wskaże salonu innego
     // niż salon wizyty (id jest już unikalne, para jest potrzebna jako cel FK).
     uniqueIndex("appointments_id_salon_id_uidx").on(table.id, table.salonId),

@@ -421,15 +421,79 @@ export const updateAppointmentSchema = z.object({
   depositPaid: z.boolean().optional(),
 });
 
+/** Metody płatności przy zakończeniu wizyty — ta sama lista co CHECK `appointments_payment_method_valid`. */
+export const APPOINTMENT_PAYMENT_METHODS = ["cash", "card", "blik"] as const;
+
+/**
+ * Kwota zapłacona w złotych: do 8 cyfr przed kropką i najwyżej 2 po niej, czyli
+ * 0 … 99 999 999,99 — zakres `numeric(10,2)`. Bez znaku: kwota ujemna nie pasuje.
+ */
+const PAID_AMOUNT_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
+
+/**
+ * Kwota zapłacona: tekst albo liczba, wynik zawsze tekstem dla kolumny numeric.
+ * Bez parseFloat — wartość nie przechodzi przez liczbę zmiennoprzecinkową.
+ * Liczba z JSON zamieniana na tekst przez String(); zapis wykładniczy (1e21),
+ * NaN i Infinity nie pasują do wzorca i dają 400.
+ */
+const paidAmountField = z
+  .union([z.string(), z.number()], { message: "Kwota musi byc liczba" })
+  .transform((val) => (typeof val === "number" ? String(val) : val.trim()))
+  .superRefine((val, ctx) => {
+    if (val.startsWith("-")) {
+      ctx.addIssue({ code: "custom", message: "Kwota nie moze byc ujemna" });
+      return;
+    }
+    if (/^\d+\.\d{3,}$/.test(val)) {
+      ctx.addIssue({ code: "custom", message: "Kwota moze miec najwyzej 2 miejsca po przecinku" });
+      return;
+    }
+    if (!PAID_AMOUNT_PATTERN.test(val)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Kwota musi byc liczba od 0 do 99 999 999,99",
+      });
+    }
+  });
+
 /**
  * Schema for POST /api/appointments/[id]/complete — complete an appointment.
+ *
+ * `paidAmount` i `paymentMethod` idą parą: oba albo żadne (null = brak).
+ * Brak obu = zakończenie bez zapisu płatności (do czasu, gdy dialog zacznie
+ * je wysyłać); para w bazie pilnowana przez CHECK `appointments_payment_pair`.
  */
-export const completeAppointmentSchema = z.object({
-  recipe: z.string().nullable().optional(),
-  techniques: z.string().nullable().optional(),
-  notes: z.string().nullable().optional(),
-  commissionPercentage: z.union([z.string(), z.number()]).nullable().optional(),
-});
+export const completeAppointmentSchema = z
+  .object({
+    recipe: z.string().nullable().optional(),
+    techniques: z.string().nullable().optional(),
+    notes: z.string().nullable().optional(),
+    commissionPercentage: z.union([z.string(), z.number()]).nullable().optional(),
+    paidAmount: paidAmountField.nullable().optional(),
+    paymentMethod: z
+      .enum(APPOINTMENT_PAYMENT_METHODS, {
+        message: "Metoda platnosci musi byc jedna z: gotowka, karta, BLIK",
+      })
+      .nullable()
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasAmount = data.paidAmount !== undefined && data.paidAmount !== null;
+    const hasMethod = data.paymentMethod !== undefined && data.paymentMethod !== null;
+    if (hasAmount && !hasMethod) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["paymentMethod"],
+        message: "Podaj metode platnosci razem z kwota",
+      });
+    } else if (hasMethod && !hasAmount) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["paidAmount"],
+        message: "Podaj kwote razem z metoda platnosci",
+      });
+    }
+  });
 
 /**
  * Schema for POST /api/appointments/[id]/materials — add material to an appointment.

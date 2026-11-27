@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, like, notInArray, sql } from "drizzle-orm";
 import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
-import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
+import { parseBody, completeAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { resolveModules } from "@/lib/features";
@@ -11,6 +11,7 @@ import {
   NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
   NO_SHOW_STATUS,
 } from "@/lib/no-show";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import {
   appointments,
@@ -50,6 +51,22 @@ class AppointmentNotCompletableError extends Error {
     this.name = "AppointmentNotCompletableError";
     this.currentStatus = currentStatus;
   }
+}
+
+/**
+ * Nazwa ograniczenia z błędu sterownika, także opakowanego w `cause` przez
+ * Drizzle (postgres.js podaje ją w `constraint_name`, node-postgres w `constraint`).
+ * Sama nazwa, bez wartości — bezpieczna do logu.
+ */
+function dbConstraintName(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth++) {
+    const e = current as { constraint_name?: unknown; constraint?: unknown; cause?: unknown };
+    const name = e.constraint_name ?? e.constraint;
+    if (typeof name === "string") return name;
+    current = e.cause;
+  }
+  return undefined;
 }
 
 function noShowConflictResponse() {
@@ -185,13 +202,19 @@ export async function POST(
     const { id } = await params;
     const body = await request.json();
 
-    // Server-side validation with Zod schema
-    const validationError = validateBody(completeAppointmentSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    // Server-side validation with Zod schema. Sparsowane dane, nie surowe body:
+    // schemat zamienia kwotę na tekst dla kolumny numeric.
+    const parsed = parseBody(completeAppointmentSchema, body);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.error, { status: 400 });
     }
 
-    const { recipe, techniques, notes, commissionPercentage } = body;
+    const { recipe, techniques, notes, commissionPercentage, paidAmount, paymentMethod } =
+      parsed.data;
+    // Para (oba albo żadne) sprawdzona w schemacie. Brak = bez zapisu płatności:
+    // pola nie trafiają do SET, więc istniejąca wartość kolumn zostaje.
+    const payment =
+      paidAmount != null && paymentMethod != null ? { paidAmount, paymentMethod } : {};
 
     // Fetch the appointment with service info, scoped to the caller's salon
     const result = await forSalon(salonId).raw((tx) =>
@@ -274,9 +297,11 @@ export async function POST(
       // a trasa „Nie przyszedł” zmienia status pod blokadą wiersza. UPDATE czeka
       // na tę blokadę i sprawdza warunek ponownie, więc zmiana statusu wstawiona
       // między odczytem a zapisem wycofuje całą transakcję.
+      // Kwota i metoda płatności w tym samym SET co status: zapisują się tylko
+      // razem z zakończeniem i wycofują razem z resztą transakcji. Nie logujemy ich.
       const [updatedAppointment] = await tx
         .update(appointments)
-        .set({ status: "completed" })
+        .set({ status: "completed", ...payment })
         .where(
           and(
             eq(appointments.id, id),
@@ -305,7 +330,7 @@ export async function POST(
       // Determine commission percentage: use provided value, or employee's default, or fallback
       let commPct = DEFAULT_COMMISSION_RATE;
       if (commissionPercentage !== undefined && commissionPercentage !== null) {
-        commPct = parseFloat(commissionPercentage);
+        commPct = parseFloat(String(commissionPercentage));
       } else if (appointment.employeeId) {
         // Look up employee's default commission rate
         const [emp] = await tx
@@ -608,6 +633,11 @@ export async function POST(
 
       return {
         appointment: updatedAppointment,
+        // Wartości zapisane w bazie (z RETURNING), nie echo żądania.
+        payment: {
+          paidAmount: updatedAppointment.paidAmount ?? null,
+          paymentMethod: updatedAppointment.paymentMethod ?? null,
+        },
         treatment,
         commission,
         stockDeductions,
@@ -627,7 +657,13 @@ export async function POST(
       if (error.currentStatus === null) return appointmentNotFoundResponse();
       return notCompletableResponse(error.currentStatus) ?? noShowConflictResponse();
     }
-    logger.error("Failed to complete appointment", { error });
+    // Bez `message` i `stack`: treść błędu zapytania niesie SQL i parametry
+    // (m.in. kwotę i metodę płatności). Tylko nazwa, SQLSTATE i ograniczenie.
+    const constraint = dbConstraintName(error);
+    logger.error("Failed to complete appointment", {
+      ...toErrorIdentity(error),
+      ...(constraint ? { constraint } : {}),
+    });
     return NextResponse.json(
       { success: false, error: "Failed to complete appointment" },
       { status: 500 }
