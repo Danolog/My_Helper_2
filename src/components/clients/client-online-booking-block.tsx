@@ -34,6 +34,9 @@ interface BlockResponse {
 const BLOCK_ERROR = "Nie udało się zablokować rezerwacji online";
 const UNBLOCK_ERROR = "Nie udało się odblokować rezerwacji online";
 
+/** Id licznika znaków notatki (aria-describedby pola). */
+const NOTE_COUNTER_ID = "client-block-note-counter";
+
 /**
  * Blokada rezerwacji online na karcie klienta (POST/DELETE /api/clients/[id]/block).
  *
@@ -151,8 +154,17 @@ export function ClientOnlineBookingBlock({ clientId, client, onChange }: ClientO
           onChange={(e) => setNote(e.target.value)}
           maxLength={CLIENT_BLOCK_NOTE_MAX_LENGTH}
           rows={2}
+          aria-describedby={NOTE_COUNTER_ID}
           data-testid="client-block-note-input"
         />
+        <p
+          id={NOTE_COUNTER_ID}
+          className="text-xs text-muted-foreground text-right"
+          data-testid="client-block-note-counter"
+        >
+          {note.length}/{CLIENT_BLOCK_NOTE_MAX_LENGTH}
+          <span className="sr-only"> znaków (najwyżej {CLIENT_BLOCK_NOTE_MAX_LENGTH})</span>
+        </p>
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={() => setFormOpen(false)} disabled={pending}>

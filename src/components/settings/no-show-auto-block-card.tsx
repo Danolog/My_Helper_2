@@ -30,7 +30,7 @@ interface NoShowAutoBlockCardProps {
 }
 
 /**
- * Ustawienie „Blokuj rezerwację online po N nieobecnościach”
+ * Ustawienie „Automatyczna blokada rezerwacji online” (po 1, 2 albo 3 nieobecnościach)
  * (GET/PUT /api/salons/[id]/no-show-settings). Tylko właściciel: dla innych
  * ról karta się nie pokazuje (serwer i tak odpowiada 403). Zmiana zapisuje
  * się od razu po wyborze i działa od następnego oznaczenia „Nie przyszedł”.
@@ -105,7 +105,7 @@ export function NoShowAutoBlockCard({ salonId }: NoShowAutoBlockCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        <Label htmlFor="no-show-auto-block">Blokuj rezerwację online po N nieobecnościach</Label>
+        <Label htmlFor="no-show-auto-block">Automatyczna blokada rezerwacji online</Label>
         {state.status === "error" ? (
           <p className="text-sm text-muted-foreground">Nie udało się wczytać ustawienia. Odśwież stronę.</p>
         ) : (
@@ -121,12 +121,12 @@ export function NoShowAutoBlockCard({ salonId }: NoShowAutoBlockCardProps) {
                 <SelectValue placeholder="Wczytywanie..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={OFF_VALUE}>Nie blokuj automatycznie</SelectItem>
                 {NO_SHOW_AUTO_BLOCK_THRESHOLDS.map((t) => (
                   <SelectItem key={t} value={String(t)}>
                     Po {t} {t === 1 ? "nieobecności" : "nieobecnościach"}
                   </SelectItem>
                 ))}
+                <SelectItem value={OFF_VALUE}>Nie blokuj automatycznie</SelectItem>
               </SelectContent>
             </Select>
             {saving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden="true" />}
