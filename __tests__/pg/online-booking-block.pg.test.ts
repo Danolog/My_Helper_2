@@ -18,8 +18,14 @@
  *    - niezablokowana karta z tym samym numerem → brak dopasowania;
  *    - RLS: w kontekście salonu A karta salonu B jest niewidoczna nawet bez
  *      warunku `salon_id` w zapytaniu.
+ * c2) Zapisy numeru na karcie z nawiasami, kropkami, `0048` i `48` pasują;
+ *    karta z prefiksem innego kraju (`+49`) i tymi samymi 9 cyframi nie pasuje.
  * d) To samo sprawdzenie po zweryfikowanym e-mailu konta (dołączenie do listy
- *    oczekujących): zablokowana karta z tym e-mailem w innym salonie nie blokuje.
+ *    oczekujących): zablokowana karta z tym e-mailem w innym salonie nie blokuje;
+ *    wielkość liter w e-mailu nie ma znaczenia.
+ * e) Karta wpisu (`clientId`) i kolumna `sameCustomerOnlineBookingBlocked`:
+ *    blokuje sama karta albo inna zablokowana karta salonu z tym samym e-mailem
+ *    (inna wielkość liter) lub numerem (inny zapis); karta innego salonu nie.
  *
  * Mocki: tylko logger. `@/lib/db` → pula testu, `forSalon` prawdziwe.
  * Dane: użytkownicy `it-t3-oblock-…` (prefiks z notatki sprzątania w pg-harness.ts);
@@ -28,9 +34,9 @@
  * Wymaga bazy po `pnpm db:migrate` (RLS, rola aplikacji, migracja 0019).
  */
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { findOnlineBookingBlock } from "@/lib/online-booking-block";
+import { findOnlineBookingBlock, sameCustomerOnlineBookingBlocked } from "@/lib/online-booking-block";
 import { appointments, clients, employees, salons, user } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
@@ -70,6 +76,25 @@ const PHONE_BARE = "600100202";
 const PHONE_OTHER_SALON = "600100203";
 const PHONE_UNBLOCKED = "600100204";
 const PHONE_NO_CARD = "600100205";
+
+/**
+ * Zapisy numeru, które karta przyjmuje (`phoneField`: cyfry, spacje, `+ - ( ) .`)
+ * i zapisuje bez zmian. Każdy zapis ma własny numer, żeby dopasowanie dowodziło
+ * rozpoznania właśnie tego zapisu.
+ */
+const CARD_FORMATS = [
+  ["(+48) 600 100 210", "600100210"],
+  ["600.100.211", "600100211"],
+  ["0048600100212", "600100212"],
+  ["48 600 100 213", "600100213"],
+  ["+48-600-100-214", "600100214"],
+] as const;
+/** Zablokowana karta z prefiksem innego kraju i tymi samymi 9 cyframi. */
+const PHONE_OTHER_COUNTRY = "600100215";
+
+/** Karty do dopasowania „ten sam klient” przez kartę wpisu (clientId). */
+const PHONE_LINKED = "600100220";
+const PHONE_LINKED_OTHER_COUNTRY = "600100221";
 
 const ids = { salonA: "", salonB: "", employeeA: "", clientB: "" };
 
@@ -144,6 +169,9 @@ suite("blokada rezerwacji online (migracja 0019), prawdziwy Postgres", () => {
     await insertClient(ids.salonA, { phone: `+48${PHONE_OTHER_SALON}` });
     // Karta bez blokady z numerem scenariusza „niezablokowana”.
     await insertClient(ids.salonA, { phone: PHONE_UNBLOCKED });
+    // Zapisy numeru z nawiasami, kropkami, prefiksem 0048 i 48 (c2).
+    for (const [stored] of CARD_FORMATS) await insertClient(ids.salonA, { phone: stored, ...blocked(OWNER_A) });
+    await insertClient(ids.salonA, { phone: "+49 600 100 215", ...blocked(OWNER_A) });
   });
 
   afterAll(async () => {
@@ -286,6 +314,116 @@ suite("blokada rezerwacji online (migracja 0019), prawdziwy Postgres", () => {
     });
   });
 
+  describe("c2) zapis numeru na karcie: nawiasy, kropki, 0048, 48", () => {
+    it.each(CARD_FORMATS)("zablokowana karta „%s”, gość z 9 cyframi ze spacjami → dopasowanie", async (_stored, nine) => {
+      const spaced = `${nine.slice(0, 3)} ${nine.slice(3, 6)} ${nine.slice(6)}`;
+      expect(await checkGuest(ids.salonA, spaced)).toEqual({
+        blocked: true,
+        salonPhone: SALON_A_PHONE,
+        matchedBy: "phone",
+      });
+    });
+
+    it.each(CARD_FORMATS)("zablokowana karta „%s”, gość w E.164 → dopasowanie", async (_stored, nine) => {
+      expect(await checkGuest(ids.salonA, `+48${nine}`)).toEqual({
+        blocked: true,
+        salonPhone: SALON_A_PHONE,
+        matchedBy: "phone",
+      });
+    });
+
+    it("zablokowana karta „+49 600 100 215” nie pasuje do gościa „+48 600 100 215”", async () => {
+      expect(await checkGuest(ids.salonA, `+48 ${PHONE_OTHER_COUNTRY}`)).toEqual({ blocked: false });
+      expect(await checkGuest(ids.salonA, PHONE_OTHER_COUNTRY)).toEqual({ blocked: false });
+    });
+  });
+
+  describe("e) karta wpisu (clientId): ta karta albo inna karta salonu z tym samym e-mailem lub numerem", () => {
+    const linkedEmail = `it-t3-oblock-linked-${RUN}@example.invalid`;
+    const card = { plain: "", sameEmail: "", samePhone: "", otherCountry: "", self: "", salonB: "" };
+
+    /** Kolumna „ten sam klient ma blokadę” dla jednej karty, przez forSalon. */
+    async function sameCustomerBlocked(salonId: string, clientId: string) {
+      const rows = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ blocked: sameCustomerOnlineBookingBlocked(salonId) })
+          .from(clients)
+          .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
+      );
+      return rows.map((r) => r.blocked);
+    }
+
+    beforeAll(async () => {
+      // Karty bez blokady, wskazywane jako karta wpisu.
+      card.plain = await insertClient(ids.salonA, { phone: "600 100 222" });
+      card.sameEmail = await insertClient(ids.salonA, { email: linkedEmail });
+      card.samePhone = await insertClient(ids.salonA, { phone: `(+48) ${PHONE_LINKED}` });
+      card.otherCountry = await insertClient(ids.salonA, { phone: `+49 ${PHONE_LINKED_OTHER_COUNTRY}` });
+      // Zablokowane karty tego samego klienta: e-mail innej wielkości liter
+      // z odstępem na brzegu oraz numer w innym zapisie.
+      await insertClient(ids.salonA, { email: ` ${linkedEmail.toUpperCase()}`, ...blocked(OWNER_A) });
+      await insertClient(ids.salonA, { phone: `0048 ${PHONE_LINKED}`, ...blocked(OWNER_A) });
+      await insertClient(ids.salonA, { phone: `+48 ${PHONE_LINKED_OTHER_COUNTRY}`, ...blocked(OWNER_A) });
+      // Sama karta wpisu zablokowana.
+      card.self = await insertClient(ids.salonA, { phone: "600 100 223", ...blocked(OWNER_A) });
+      // Zablokowana karta salonu B wskazana w salonie A.
+      card.salonB = await insertClient(ids.salonB, { email: linkedEmail, ...blocked(OWNER_B) });
+    });
+
+    it("inna zablokowana karta z tym samym e-mailem (inna wielkość liter) → blokada", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: null, clientId: card.sameEmail })).toEqual({
+        blocked: true,
+        salonPhone: SALON_A_PHONE,
+        matchedBy: "card",
+      });
+      expect(await sameCustomerBlocked(ids.salonA, card.sameEmail)).toEqual([true]);
+    });
+
+    it("inna zablokowana karta z tym samym numerem w innym zapisie → blokada", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: null, clientId: card.samePhone })).toEqual({
+        blocked: true,
+        salonPhone: SALON_A_PHONE,
+        matchedBy: "card",
+      });
+      expect(await sameCustomerBlocked(ids.salonA, card.samePhone)).toEqual([true]);
+    });
+
+    it("sama karta wpisu zablokowana → blokada", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: null, clientId: card.self })).toEqual({
+        blocked: true,
+        salonPhone: SALON_A_PHONE,
+        matchedBy: "card",
+      });
+      expect(await sameCustomerBlocked(ids.salonA, card.self)).toEqual([true]);
+    });
+
+    it("karta bez zablokowanego odpowiednika → brak blokady", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: null, clientId: card.plain })).toEqual({
+        blocked: false,
+      });
+      expect(await sameCustomerBlocked(ids.salonA, card.plain)).toEqual([false]);
+    });
+
+    it("karta z numerem +49 i zablokowana karta z tymi samymi cyframi po +48 → brak blokady", async () => {
+      expect(
+        await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: null, clientId: card.otherCountry })
+      ).toEqual({ blocked: false });
+      expect(await sameCustomerBlocked(ids.salonA, card.otherCountry)).toEqual([false]);
+    });
+
+    it("karta innego salonu wskazana w salonie A → brak blokady (karta niewidoczna)", async () => {
+      expect(await findOnlineBookingBlock({ salonId: ids.salonA, sessionUser: null, clientId: card.salonB })).toEqual({
+        blocked: false,
+      });
+      // Kontrola fałszywej zieleni: w salonie B ta karta blokuje.
+      expect(await findOnlineBookingBlock({ salonId: ids.salonB, sessionUser: null, clientId: card.salonB })).toEqual({
+        blocked: true,
+        salonPhone: null,
+        matchedBy: "card",
+      });
+    });
+  });
+
   describe("d) zalogowany klient po e-mailu (dołączenie do listy oczekujących)", () => {
     const email = `it-t3-oblock-klient-${RUN}@example.invalid`;
     const account = { email, emailVerified: true };
@@ -306,6 +444,15 @@ suite("blokada rezerwacji online (migracja 0019), prawdziwy Postgres", () => {
         salonPhone: null,
         matchedBy: "email",
       });
+    });
+
+    it("e-mail konta innej wielkości liter niż na karcie → ta sama karta blokuje", async () => {
+      expect(
+        await findOnlineBookingBlock({
+          salonId: ids.salonB,
+          sessionUser: { email: email.toUpperCase(), emailVerified: true },
+        })
+      ).toEqual({ blocked: true, salonPhone: null, matchedBy: "email" });
     });
 
     it("niezweryfikowany e-mail nie dopasowuje karty", async () => {

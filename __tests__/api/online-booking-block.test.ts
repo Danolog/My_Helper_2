@@ -2,14 +2,19 @@
  * Wspólne sprawdzenie blokady rezerwacji online (src/lib/online-booking-block.ts).
  *
  * Prawdziwy forSalon na atrapie db z salon-staff-harness: test sprawdza
- * wyrenderowany WHERE zapytania o kartę (salon, blokada, e-mail albo telefon),
- * parametry (numer w obu zapisach) i to, że bez danych do dopasowania baza
+ * wyrenderowany WHERE zapytania o kartę (salon, blokada, e-mail, telefon albo
+ * karta wpisu), parametry (numer w trzech postaciach: 9 cyfr, 48 i 0048
+ * z przodu) i to, że bez danych do dopasowania baza
  * nie jest pytana. Miejsca wywołania w trasach: testy tras appointments,
  * deposits-create-session i deposits-blik-booking.
  */
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { findOnlineBookingBlock, onlineBookingBlockResponse } from "@/lib/online-booking-block";
+import {
+  findOnlineBookingBlock,
+  onlineBookingBlockResponse,
+  sameCustomerOnlineBookingBlocked,
+} from "@/lib/online-booking-block";
 import { SALON_A, SALON_B } from "./salon-staff-harness";
 import type { SQL } from "drizzle-orm";
 
@@ -57,7 +62,14 @@ const VERIFIED = { id: "u-1", email: "klientka@example.invalid", emailVerified: 
 const UNVERIFIED = { id: "u-2", email: "nowa@example.invalid", emailVerified: false };
 const PHONE_E164 = "+48000600700";
 const PHONE_NINE = "000600700";
+/** Trzy postaci numeru, z którymi baza porównuje cyfry z karty. */
+const PHONE_FORMS = [PHONE_NINE, `48${PHONE_NINE}`, `0048${PHONE_NINE}`];
 const SALON_PHONE = "+48 000 600 704";
+const CARD_ID = "7b0f9f52-3a5e-4c1d-9a63-0f4f1c2d3e4f";
+/** Wyrenderowane porównanie cyfr z karty z trzema postaciami numeru. */
+const PHONE_SQL = "regexp_replace(coalesce(\"clients\".\"phone\", ''), '[^0-9]', '', 'g') in (";
+/** Wyrenderowane porównanie e-maila bez wielkości liter i spacji na brzegach. */
+const EMAIL_SQL = "lower(nullif(btrim(\"clients\".\"email\"), '')) = lower(btrim($2))";
 
 /** WHERE zapytania o kartę (pierwszy select w transakcji). */
 function clientWhere() {
@@ -82,8 +94,9 @@ describe("dopasowanie po e-mailu konta", () => {
     const where = clientWhere();
     expect(where.sql).toContain('"clients"."salon_id" = $1');
     expect(where.sql).toContain('"clients"."blocked_at" is not null');
-    expect(where.sql).toContain('"clients"."email" = $2');
+    expect(where.sql).toContain(EMAIL_SQL);
     expect(where.sql).not.toContain("regexp_replace");
+    expect(where.sql).not.toContain("linked_card");
     expect(where.params).toEqual([SALON_A, VERIFIED.email]);
     expect(m.rlsSalonIds()).toEqual([SALON_A]);
   });
@@ -102,7 +115,7 @@ describe("dopasowanie po e-mailu konta", () => {
 
     const where = clientWhere();
     expect(where.sql).not.toContain('"clients"."email"');
-    expect(where.params).toEqual([SALON_A, PHONE_E164, PHONE_NINE]);
+    expect(where.params).toEqual([SALON_A, ...PHONE_FORMS]);
   });
 
   it("zalogowana z telefonem z formularza → e-mail lub telefon w jednym zapytaniu", async () => {
@@ -113,7 +126,84 @@ describe("dopasowanie po e-mailu konta", () => {
     expect(result).toEqual({ blocked: true, salonPhone: null, matchedBy: "phone" });
     const where = clientWhere();
     expect(where.sql).toContain(" or ");
-    expect(where.params).toEqual([SALON_A, VERIFIED.email, PHONE_E164, PHONE_NINE]);
+    expect(where.params).toEqual([SALON_A, VERIFIED.email, ...PHONE_FORMS]);
+  });
+
+  it("e-mail konta wielkimi literami → porównanie bez rozróżniania wielkości liter", async () => {
+    m.txRows.push([{ byEmail: true }], [{ phone: SALON_PHONE }]);
+    const shouting = { ...VERIFIED, email: "KLIENTKA@Example.Invalid" };
+
+    const result = await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: shouting });
+
+    expect(result).toEqual({ blocked: true, salonPhone: SALON_PHONE, matchedBy: "email" });
+    const where = clientWhere();
+    expect(where.sql).toContain(EMAIL_SQL);
+    // Wartość z sesji idzie bez zmian; lower() po obu stronach robi baza.
+    expect(where.params).toEqual([SALON_A, shouting.email]);
+  });
+});
+
+describe("dopasowanie po karcie (clientId)", () => {
+  it("sama karta bez sesji i telefonu → zapytanie z podzapytaniem o tę kartę w tym salonie", async () => {
+    m.txRows.push([{ byEmail: false, byCard: true }], [{ phone: SALON_PHONE }]);
+
+    const result = await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: null, clientId: CARD_ID });
+
+    expect(result).toEqual({ blocked: true, salonPhone: SALON_PHONE, matchedBy: "card" });
+    const where = clientWhere();
+    expect(where.sql).toContain('"clients"."salon_id" = $1');
+    expect(where.sql).toContain('"clients"."blocked_at" is not null');
+    expect(where.sql).toContain('exists (select 1 from "clients" "linked_card" where ');
+    expect(where.sql).toContain('"linked_card"."id" = $2');
+    expect(where.sql).toContain('"linked_card"."salon_id" = $3');
+    // Ten sam klient: ta karta, e-mail bez wielkości liter albo numer PL z karty.
+    expect(where.sql).toContain('"linked_card"."id" = "clients"."id"');
+    expect(where.sql).toContain(
+      "lower(nullif(btrim(\"linked_card\".\"email\"), '')) = lower(nullif(btrim(\"clients\".\"email\"), ''))"
+    );
+    expect(where.sql).toContain("regexp_replace(coalesce(\"linked_card\".\"phone\", ''), '[^0-9]', '', 'g')");
+    expect(where.params).toEqual([SALON_A, CARD_ID, SALON_A]);
+    expect(m.rlsSalonIds()).toEqual([SALON_A]);
+  });
+
+  it("karta razem z e-mailem konta → oba warunki w jednym zapytaniu, e-mail ma pierwszeństwo w wyniku", async () => {
+    m.txRows.push([{ byEmail: true, byCard: true }], [{ phone: null }]);
+
+    const result = await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: VERIFIED, clientId: CARD_ID });
+
+    expect(result).toEqual({ blocked: true, salonPhone: null, matchedBy: "email" });
+    expect(clientWhere().params).toEqual([SALON_A, VERIFIED.email, CARD_ID, SALON_A]);
+  });
+
+  it("karta bez zablokowanego odpowiednika → brak blokady", async () => {
+    m.txRows.push([]);
+
+    const result = await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: UNVERIFIED, clientId: CARD_ID });
+
+    expect(result).toEqual({ blocked: false });
+    expect(h.state.transactions).toBe(1);
+  });
+
+  it("sameCustomerOnlineBookingBlocked: zablokowana karta tego salonu, ta sama karta, e-mail albo numer", () => {
+    const { sql: rendered, params } = dialect.sqlToQuery(sameCustomerOnlineBookingBlocked(SALON_A));
+
+    expect(rendered).toMatch(/^exists \(select 1 from "clients" "blocked_card" where /);
+    expect(rendered).toContain('"blocked_card"."salon_id" = $1');
+    expect(rendered).toContain('"blocked_card"."blocked_at" is not null');
+    expect(rendered).toContain('"blocked_card"."id" = "clients"."id"');
+    expect(rendered).toContain(
+      "lower(nullif(btrim(\"blocked_card\".\"email\"), '')) = lower(nullif(btrim(\"clients\".\"email\"), ''))"
+    );
+    // Numer PL z obu kart sprowadzony do 9 cyfr (inny prefiks kraju = NULL).
+    expect(rendered).toContain("~ '^0048[0-9]{9}$' then substr(");
+    expect(params).toEqual([SALON_A]);
+  });
+
+  it("pusty clientId bez innych danych → bez zapytania", async () => {
+    const result = await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: null, clientId: "" });
+
+    expect(result).toEqual({ blocked: false });
+    expect(h.state.transactions).toBe(0);
   });
 });
 
@@ -131,12 +221,46 @@ describe("dopasowanie po telefonie gościa", () => {
 
     expect(result).toEqual({ blocked: true, salonPhone: SALON_PHONE, matchedBy: "phone" });
     const where = clientWhere();
-    // Zapis z karty normalizowany w bazie (spacje i myślniki usunięte).
-    expect(where.sql).toContain(
-      "regexp_replace(coalesce(\"clients\".\"phone\", ''), '[[:space:]-]', '', 'g') in ($2, $3)"
-    );
-    expect(where.params).toEqual([SALON_A, PHONE_E164, PHONE_NINE]);
+    // Z zapisu na karcie baza zostawia same cyfry i porównuje je z trzema postaciami numeru.
+    expect(where.sql).toContain(`${PHONE_SQL}$2, $3, $4)`);
+    expect(where.params).toEqual([SALON_A, ...PHONE_FORMS]);
   });
+
+  /**
+   * Zapis na karcie (karta przyjmuje cyfry, spacje i `+ - ( ) .`) po tej samej
+   * operacji co w bazie (`regexp_replace(..., '[^0-9]', '', 'g')`) porównany
+   * z parametrami zapytania dla gościa z „000 600 700”. Sam SQL na prawdziwej
+   * bazie: __tests__/pg/online-booking-block.pg.test.ts (c2).
+   */
+  const cardDigits = (stored: string) => stored.replace(/[^0-9]/g, "");
+
+  it.each([
+    "(+48) 000 600 700",
+    "000.600.700",
+    "0048000600700",
+    "48 000 600 700",
+    "+48-000-600-700",
+    "+48 (000) 600-700",
+  ])("karta z zapisem „%s” → cyfry karty wśród parametrów zapytania", async (stored) => {
+    m.txRows.push([]);
+
+    await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: null, phone: "000 600 700" });
+
+    const { params } = clientWhere();
+    expect(params.slice(1)).toContain(cardDigits(stored));
+  });
+
+  it.each(["+49 000 600 700", "+44 000 600 700", "1 000 600 700", "00 600 700"])(
+    "karta z zapisem „%s” (inny prefiks albo długość) → cyfry karty poza parametrami",
+    async (stored) => {
+      m.txRows.push([]);
+
+      await findOnlineBookingBlock({ salonId: SALON_A, sessionUser: null, phone: "+48 000 600 700" });
+
+      const { params } = clientWhere();
+      expect(params.slice(1)).not.toContain(cardDigits(stored));
+    }
+  );
 
   it.each([
     ["za krótki", "12345"],

@@ -315,23 +315,111 @@ describe("POST /api/client/waiting-list/[id] — akceptacja oferty przy blokadzi
     expect(body).toEqual({ success: false, code: "ONLINE_BOOKING_UNAVAILABLE", error: BLOCKED_MESSAGE });
   });
 
-  it("zablokowana inna karta z tym samym e-mailem albo numerem => 403 przed acceptEarlierSlot", async () => {
+  it("nowa wizyta: zablokowana karta wpisu albo inna z tym samym e-mailem lub numerem => 403 przed acceptEarlierSlot", async () => {
     sessionUser(true);
-    selectResults.push([
-      { entry: { ...entryRowOfB.entry, notifiedAt: new Date() }, client: { email: EMAIL_B, phone: "600700800" } },
-    ]);
+    selectResults.push(notifiedEntryWithToken());
     vi.mocked(onlineBookingBlockResponse).mockResolvedValue(blockedResponse());
 
     const { status, body } = await parseResponse(await accept());
 
     expect(status).toBe(403);
     expect(body).toEqual({ success: false, code: "ONLINE_BOOKING_UNAVAILABLE", error: BLOCKED_MESSAGE });
+    // Telefon i e-mail karty czyta helper w kontekście salonu po id karty —
+    // trasa przekazuje tylko id karty wpisu, bez danych z surowego odczytu.
     expect(vi.mocked(onlineBookingBlockResponse)).toHaveBeenCalledWith({
       salonId: SALON_UUID,
       sessionUser: expect.objectContaining({ email: EMAIL_B, emailVerified: true }),
-      phone: "600700800",
+      clientId: CLIENT_B_UUID,
     });
     expect(vi.mocked(acceptEarlierSlot)).not.toHaveBeenCalled();
+  });
+
+  it("nowa wizyta bez blokady => sprawdzenie po karcie, potem acceptEarlierSlot i 200", async () => {
+    sessionUser(true);
+    selectResults.push(notifiedEntryWithToken());
+    vi.mocked(acceptEarlierSlot).mockResolvedValue({ success: true, message: "Utworzono", appointmentId: "appt-new" });
+
+    const { status, body } = await parseResponse<{ success: boolean; data: { appointmentId: string } }>(
+      await accept()
+    );
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.appointmentId).toBe("appt-new");
+    expect(vi.mocked(onlineBookingBlockResponse)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(acceptEarlierSlot)).toHaveBeenCalledWith(ENTRY_UUID, "sekretny-token");
+  });
+
+  it("przeniesienie istniejącej wizyty (existingAppointmentId) => bez sprawdzenia blokady w trasie, 200", async () => {
+    sessionUser(true);
+    selectResults.push([
+      {
+        entry: { ...entryRowOfB.entry, notifiedAt: new Date(), existingAppointmentId: "appt-old" },
+        client: { email: EMAIL_B },
+      },
+    ]);
+    // Gdyby trasa sprawdzała blokadę, ta odpowiedź zatrzymałaby przyjęcie.
+    vi.mocked(onlineBookingBlockResponse).mockResolvedValue(blockedResponse());
+    vi.mocked(acceptEarlierSlot).mockResolvedValue({
+      success: true,
+      message: "Wizyta przeniesiona",
+      appointmentId: "appt-old",
+    });
+
+    const { status, body } = await parseResponse<{ success: boolean; data: { appointmentId: string } }>(
+      await accept()
+    );
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data.appointmentId).toBe("appt-old");
+    expect(vi.mocked(onlineBookingBlockResponse)).not.toHaveBeenCalled();
+    expect(vi.mocked(acceptEarlierSlot)).toHaveBeenCalledWith(ENTRY_UUID, "sekretny-token");
+  });
+
+  it("wpis jeszcze nie powiadomiony => 400 przed sprawdzeniem blokady", async () => {
+    sessionUser(true);
+    selectResults.push([{ entry: { ...entryRowOfB.entry, notifiedAt: null }, client: { email: EMAIL_B } }]);
+    vi.mocked(onlineBookingBlockResponse).mockResolvedValue(blockedResponse());
+
+    const res = await accept();
+
+    expect(res.status).toBe(400);
+    expect(vi.mocked(onlineBookingBlockResponse)).not.toHaveBeenCalled();
+  });
+
+  it("wpis już rozstrzygnięty => 409 przed sprawdzeniem blokady", async () => {
+    sessionUser(true);
+    selectResults.push([
+      { entry: { ...entryRowOfB.entry, notifiedAt: new Date(), accepted: false }, client: { email: EMAIL_B } },
+    ]);
+    vi.mocked(onlineBookingBlockResponse).mockResolvedValue(blockedResponse());
+
+    const res = await accept();
+
+    expect(res.status).toBe(409);
+    expect(vi.mocked(onlineBookingBlockResponse)).not.toHaveBeenCalled();
+  });
+
+  it("błąd sprawdzenia blokady => 500, bez acceptEarlierSlot", async () => {
+    sessionUser(true);
+    selectResults.push(notifiedEntryWithToken());
+    vi.mocked(onlineBookingBlockResponse).mockRejectedValue(new Error("db down"));
+
+    const res = await accept();
+
+    expect(res.status).toBe(500);
+    expect(vi.mocked(acceptEarlierSlot)).not.toHaveBeenCalled();
+  });
+
+  it("odczyt wpisu nie bierze telefonu karty (surowy odczyt tylko e-mail do własności)", async () => {
+    sessionUser(true);
+    selectResults.push(notifiedEntryWithToken());
+    vi.mocked(acceptEarlierSlot).mockResolvedValue({ success: true, message: "ok" });
+
+    await accept();
+
+    expect(mockSelect).toHaveBeenLastCalledWith({ entry: expect.anything(), client: { email: "clients.email" } });
   });
 
   it("odrzucenie oferty nie sprawdza blokady", async () => {
