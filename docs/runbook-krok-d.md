@@ -1118,6 +1118,20 @@ połączenia z bazą), przygotowanie parametrów dla właściciela (krok 1) oraz
 wpis w dzienniku audytu (krok 5). W ramach tej procedury sesja główna nie
 łączy się z bazą. Agenci nie wykonują żadnego z kroków.
 
+**Co trafia do rozmowy z sesją główną.** Właściciel przekazuje do rozmowy
+wyłącznie liczby i agregaty: liczbę wierszy, wynik kontroli (`t` albo `f`,
+`UPDATE 1`, `COMMIT`, `ROLLBACK`) oraz daty niepowiązane z osobą (stara i nowa
+data końca pilotażu). Nie wkleja wierszy z bazy ani identyfikatorów (salonu,
+subskrypcji, konta, także ich skrótów), nazw, adresów e-mail ani numerów
+telefonów. Wynik kroku 2 właściciel porównuje sam z „Oczekiwane” i przekazuje
+tylko „zgodne” albo nazwę niezgodnego pola oraz starą datę. Wynik zapytania
+z cotygodniowego przeglądu zostaje u właściciela: do rozmowy trafia liczba
+wierszy, a numery porządkowe przedłużeń właściciel ustala w prywatnym systemie
+zadań. Ta sama zasada obowiązuje przy każdym bloku bazy uruchamianym przez
+właściciela (sekcje 7b, 9, 9b i 9c). Logi produkcji: sekcja 9c, „Logi produkcji
+w rozmowie”. Logów hostingu poprzedniej platformy nie czytamy narzędziami;
+obowiązuje tylko filtr maskujący.
+
 **Połączenie z zapisem — uruchamia wyłącznie właściciel, we własnym
 terminalu.** Rola kontroli 7b (`myhelper_7b_ro`, sekcja 9) nie ma zapisu,
 więc do tej procedury się nie nadaje. Właściciel łączy się loginem aplikacji
@@ -1530,12 +1544,13 @@ z podsekcji „Sprawdzenie” w 10b): oczekiwane `DATA_READ` dla
 `secretmanager.googleapis.com`. Bez tego pusty wynik zestawienia niczego
 nie dowodzi, więc brak `DATA_READ` = stop, zestawienia nie robimy.
 
-Odczyt zwraca wyłącznie czas i nazwę zasobu, bez adresów kont:
+Każdy z dwóch odczytów zwraca wyłącznie czas; sekret wynika z filtra. Projekt
+wpisujemy dosłownie, bo zabezpieczenie odczytu logów odrzuca zmienne:
 
 ```bash
 set +x
-: "${P:?}"
-gcloud --project="${P}" logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND (protoPayload.resourceName:"/secrets/postgres-url/" OR protoPayload.resourceName:"/secrets/postgres-admin-password/") AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp,protoPayload.resourceName)'
+gcloud --project=<projekt> logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND protoPayload.resourceName:"/secrets/postgres-url/" AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp)'
+gcloud --project=<projekt> logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion" AND protoPayload.resourceName:"/secrets/postgres-admin-password/" AND NOT protoPayload.authenticationInfo.principalEmail:"myhelper-runtime@"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=8d --format='value(timestamp)'
 ```
 
 Każdy znacznik czasu ma odpowiadający mu wpis w rejestrze (ten sam sekret,
@@ -1547,6 +1562,23 @@ i „wszystkie z wpisem” albo lista czasów bez wpisu. Zestawienie robi sesja
 główna, czyli strona, której odczyty są sprawdzane, więc do czasu osobnego
 konta do zestawień ten sam wynik (liczba odczytów i „wszystkie z wpisem” albo
 lista czasów) trafia także do właściciela.
+
+**Logi produkcji w rozmowie.** Sesja główna i agenci czytają logi produkcji
+wyłącznie na dwa sposoby: przez skrypt maskujący z repozytorium
+(`scripts/logs/read.ts`, skrypt `logs:read` w `package.json`) albo odczytem
+z białą listą pól: czas, poziom, nazwa usługi, rewizja, status, metoda, czas
+odpowiedzi. Skrypt dodaje ścieżkę bez hosta i parametrów, z identyfikatorami
+zastąpionymi `:id`. Treść komunikatu (flaga `--message`) wypisuje po
+zamaskowaniu adresów e-mail i IP, numerów telefonów, identyfikatorów i tokenów.
+Maskowanie nie usuwa imion ani nazwisk z wolnego tekstu, dlatego komunikat
+włączamy tylko do diagnozy konkretnego błędu. Pełnego wpisu logu (adres IP,
+informacja o przeglądarce, adres z parametrami, surowa treść) nie czyta nikt
+poza właścicielem we własnym terminalu. Właściciel nie wkleja go do rozmowy,
+przekazuje z niego tylko liczby (np. liczbę wpisów z danym statusem). Odczyt
+z dziennika audytu w tej sekcji wypisuje wyłącznie czas (sekret wynika z filtra),
+bez danych osobowych. Inne odczyty blokuje hook sesji, a reguła obowiązuje także
+tam, gdzie hook by ich nie złapał. Tę regułę opisuje umowa powierzenia (§ 9
+ust. 1 i załącznik B pkt 10), więc jej zmiana wymaga zmiany umowy.
 
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
