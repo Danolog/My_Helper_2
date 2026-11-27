@@ -117,7 +117,7 @@ Pełna, aktualna lista dostawców, którzy przetwarzają dane w naszym imieniu, 
 | Google Cloud (Google Cloud Poland sp. z o.o., Warszawa) | region europe-central2 (Warszawa, Polska) | wszystkie dane w aplikacji, w tym wgrane zdjęcia, oraz logi serwera | serwery, baza danych, przechowywanie plików, logi |
 | SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy i treść SMS-a, **po włączeniu zadatków także numer BLIK właściciela w SMS-ie z danymi wpłaty** | wysyłka SMS-ów |
 | Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat i treść wiadomości | e-maile z aplikacji, np. potwierdzenie adresu e-mail i reset hasła |
-| Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt, Niemcy); spółka z siedzibą w USA | adres IP, numer telefonu gościa albo identyfikator salonu jako klucz licznika | ochrona przed nadużyciami |
+| Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt, Niemcy); spółka z siedzibą w USA | adres IP osoby sprawdzającej wolne terminy, użyty jako klucz licznika | ochrona przed nadużyciami |
 | **Każda osoba rezerwująca wizytę z zadatkiem w danym salonie, po włączeniu zadatków** (obecnie nikt, bo zadatki są niedostępne) | — | **numer BLIK właściciela salonu** | wpłata zadatku |
 | Personel salonu | — | dane klientów i wizyt własnego salonu, historia powiadomień, opinie | obsługa klientów |
 | Każdy odwiedzający listę salonów | — | dane kontaktowe salonu, zdjęcia z galerii salonu, zaakceptowane opinie z imieniem i pierwszą literą nazwiska autora | wybór salonu |

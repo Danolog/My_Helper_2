@@ -15,7 +15,7 @@ O planowanej zmianie listy informujemy właścicieli salonów e-mailem co najmni
 | Google Cloud (Google Cloud Poland sp. z o.o., Warszawa) | region europe-central2 (Warszawa, Polska) | wszystkie dane w aplikacji, w tym zdjęcia, kopie zapasowe i logi serwera | serwery, baza danych, przechowywanie plików, logi | brak przekazania |
 | SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy i treść SMS-a | wysyłka SMS-ów | brak przekazania |
 | Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat i treść wiadomości | e-maile z aplikacji | EU-U.S. Data Privacy Framework (decyzja Komisji (UE) 2023/1795); firma jest na oficjalnej liście programu |
-| Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt, Niemcy); spółka w USA | adres IP, numer telefonu gościa (ostatnie 9 cyfr) albo identyfikator salonu jako klucz licznika | ochrona przed nadużyciami (dane, za które odpowiada MyHelper) | dostęp z USA: EU-U.S. Data Privacy Framework (decyzja Komisji (UE) 2023/1795); firma jest na oficjalnej liście programu |
+| Upstash, Inc. | dane w regionie eu-central-1 (Frankfurt, Niemcy); spółka w USA | adres IP osoby sprawdzającej wolne terminy, użyty jako klucz licznika | ochrona przed nadużyciami (dane, za które odpowiada MyHelper) | dostęp z USA: EU-U.S. Data Privacy Framework (decyzja Komisji (UE) 2023/1795); firma jest na oficjalnej liście programu |
 
 **Czego nie ma na liście i dlaczego.** Nie korzystamy z narzędzi analitycznych ani reklamowych. Płatności kartą, funkcje AI, generowanie grafik i wideo, powiadomienia push i logowanie kontem Google są wyłączone. Ich dostawcy nie dostają danych. Jeśli którąś z tych funkcji włączymy, najpierw zmienimy tę listę w trybie opisanym wyżej.
 

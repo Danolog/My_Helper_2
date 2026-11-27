@@ -119,7 +119,7 @@ Zadatki są obecnie niedostępne (Regulamin, pkt 8.2). Dopóki ich nie włączym
 
 ## § 13. Postanowienia końcowe
 
-1. Odpowiedzialność stron wobec osób, których dane dotyczą, określa art. 82 RODO. Odpowiedzialność między stronami, w tym za roszczenia Salonu z art. 82 ust. 5 RODO, określa Regulamin, pkt 17. Limit z pkt 17.5 Regulaminu wynosi co najmniej 500 zł i nie dotyczy szkód wyrządzonych umyślnie ani z rażącego niedbalstwa.
+1. Odpowiedzialność stron wobec osób, których dane dotyczą, określa art. 82 RODO. Odpowiedzialność między stronami, w tym za roszczenia Salonu z art. 82 ust. 5 RODO, określa Regulamin, pkt 17. Limit z pkt 17.5 Regulaminu wynosi co najmniej 500 zł i nie dotyczy szkód wyrządzonych umyślnie ani z rażącego niedbalstwa. Wobec salonów z pkt 17.4 Regulaminu limit nie obowiązuje.
 2. W sprawach nieuregulowanych stosuje się RODO, Regulamin i prawo polskie.
 3. Jeśli ta umowa i Regulamin różnią się w sprawie ochrony danych, pierwszeństwo ma ta umowa.
 4. Kontakt w sprawach umowy: **kontakt@nordsignal.cc**. MyHelper nie wyznaczył inspektora ochrony danych.
@@ -134,7 +134,7 @@ Ci sami podprocesorzy są na stronie [/podprocesorzy](/podprocesorzy). Strona wy
 | Podprocesor | Siedziba / miejsce przetwarzania | Zakres powierzonych danych | Cel | Podstawa transferu poza EOG |
 |---|---|---|---|---|
 | Google Cloud (Google Cloud Poland sp. z o.o., Warszawa) | region europe-central2 (Warszawa) | wszystkie powierzone dane, w tym pliki i kopie zapasowe | serwery, baza danych, przechowywanie plików, logi | brak transferu |
-| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy, treść SMS-a | wysyłka SMS (potwierdzenia, dane wpłaty, lista oczekujących) | brak transferu |
+| SMSAPI (LINK Mobility Poland sp. z o.o., Gliwice) | Polska | numer telefonu odbiorcy, treść SMS-a | wysyłka SMS (potwierdzenia, lista oczekujących, a po włączeniu zadatków (obecnie niedostępne) także dane wpłaty) | brak transferu |
 | Resend (Plus Five Five, Inc.) | USA | adres e-mail odbiorcy, temat, treść wiadomości | e-maile z Aplikacji | EU-U.S. DPF (decyzja (UE) 2023/1795); odbiorca jest na oficjalnej liście (§ 8 ust. 3) |
 
 Płatności kartą i funkcje AI są wyłączone, więc ich dostawcy nie przetwarzają powierzonych danych. Ich włączenie wymaga zmiany listy w trybie § 7.

@@ -64,7 +64,7 @@ Korzystanie z usług przez internet wiąże się z zagrożeniami. Uprzedzamy o t
 
 ### 8.1. Rezerwacja wizyty
 1. Rezerwujesz wizytę w konkretnym salonie. Umowę o usługę (np. zabieg, strzyżenie) zawierasz **z salonem, nie z MyHelper**. MyHelper udostępnia tylko narzędzie do rezerwacji. Dla klienta jest ono bezpłatne.
-2. Jako gość podajesz imię i nazwisko oraz numer telefonu. Na ten numer dostaniesz SMS z potwierdzeniem i, jeśli salon wymaga zadatku, z danymi wpłaty.
+2. Jako gość podajesz imię i nazwisko oraz numer telefonu. Na ten numer dostaniesz SMS z potwierdzeniem. Po włączeniu zadatków (obecnie niedostępne, pkt 8.2) SMS będzie zawierał też dane wpłaty, jeśli salon wymaga zadatku.
 3. Podawaj tylko własny numer telefonu albo numer osoby, która się na to zgodziła.
 4. Wizytę odwołasz w portalu klienta albo kontaktując się z salonem.
 5. Zapis na listę oczekujących zakłada Twoją kartotekę w tym salonie (Polityka prywatności, pkt 2). Powiadomienia SMS z listy oczekujących nie wychodzą między 21:00 a 8:00.
