@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useCallback, type RefObject } from "react";
+import { useState, useCallback, useRef, type RefObject } from "react";
 import { toast } from "sonner";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import { mutationFetch } from "@/lib/api-client";
 import { getStartOfWeek, getEndOfWeek } from "@/lib/date-utils";
-import { NO_SHOW_LABEL, canMarkNoShow } from "@/lib/no-show";
+import { NO_SHOW_LABEL, canMarkNoShow, noShowErrorToastMessage } from "@/lib/no-show";
 import type { CalendarEvent, CalendarView, Employee, TimeBlock } from "@/types/calendar";
 
-const NO_SHOW_GENERIC_ERROR = "Nie udalo sie oznaczyc wizyty";
+const NO_SHOW_GENERIC_ERROR = "Nie udało się oznaczyć wizyty";
 
 interface CalendarNavigationOptions {
   /**
@@ -19,8 +19,21 @@ interface CalendarNavigationOptions {
   appointmentsChangedRef?: RefObject<(() => void) | null>;
 }
 
-/** POST /api/appointments/[id]/no-show z okienka wizyty w kalendarzu. */
-async function markNoShowFromCalendar(appointmentId: string, onChanged: () => void) {
+/**
+ * POST /api/appointments/[id]/no-show z okienka wizyty w kalendarzu.
+ *
+ * `inFlight` blokuje przycisk na czas żądania: przycisk okienka sonnera nie ma
+ * stanu `disabled`, a podwójne kliknięcie (albo kliknięcie w okienku otwartym
+ * ponownie dla tej samej wizyty) wysłałoby drugi POST i drugi toast sukcesu.
+ * Kolejne kliknięcia dla tej wizyty są ignorowane do końca odpowiedzi.
+ */
+async function markNoShowFromCalendar(
+  appointmentId: string,
+  inFlight: Set<string>,
+  onChanged: () => void
+) {
+  if (inFlight.has(appointmentId)) return;
+  inFlight.add(appointmentId);
   try {
     const res = await mutationFetch(`/api/appointments/${appointmentId}/no-show`, { method: "POST" });
     const data = (await res.json().catch(() => null)) as { success?: boolean; error?: unknown } | null;
@@ -29,15 +42,19 @@ async function markNoShowFromCalendar(appointmentId: string, onChanged: () => vo
       onChanged();
       return;
     }
-    toast.error(typeof data?.error === "string" && data.error.trim() !== "" ? data.error : NO_SHOW_GENERIC_ERROR);
+    toast.error(noShowErrorToastMessage(res.status, data?.error, NO_SHOW_GENERIC_ERROR));
   } catch {
     toast.error(NO_SHOW_GENERIC_ERROR);
+  } finally {
+    inFlight.delete(appointmentId);
   }
 }
 
 export function useCalendarNavigation(options: CalendarNavigationOptions = {}) {
   const { appointmentsChangedRef } = options;
   const role = useSalonRole();
+  // Wizyty, dla których trwa POST „Nie przyszedł” z okienka (blokada na czas żądania).
+  const noShowInFlightRef = useRef<Set<string>>(new Set());
   const [currentDate, setCurrentDate] = useState(new Date());
   const [currentView, setCurrentView] = useState<CalendarView>("day");
 
@@ -221,7 +238,9 @@ export function useCalendarNavigation(options: CalendarNavigationOptions = {}) {
           cancel: {
             label: NO_SHOW_LABEL,
             onClick: () => {
-              void markNoShowFromCalendar(event.id, () => appointmentsChangedRef?.current?.());
+              void markNoShowFromCalendar(event.id, noShowInFlightRef.current, () =>
+                appointmentsChangedRef?.current?.()
+              );
             },
           },
         }

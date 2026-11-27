@@ -6,15 +6,15 @@ import { toast } from "sonner";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Button } from "@/components/ui/button";
 import { mutationFetch } from "@/lib/api-client";
-import { NO_SHOW_LABEL, canMarkNoShow, canUndoNoShow } from "@/lib/no-show";
+import { NO_SHOW_LABEL, canMarkNoShow, canUndoNoShow, noShowErrorToastMessage } from "@/lib/no-show";
 
-const NO_SHOW_GENERIC_ERROR = "Nie udalo sie zmienic oznaczenia wizyty";
+const NO_SHOW_GENERIC_ERROR = "Nie udało się zmienić oznaczenia wizyty";
 
 interface NoShowButtonProps {
   appointment: { id: string; status: string; startTime: string };
-  /** Wywolywane po udanej zmianie: strona odswieza wizyte. */
+  /** Wywoływane po udanej zmianie: strona odświeża wizytę. */
   onChanged: () => void | Promise<void>;
-  /** notifyChange z useTabSync strony — odswieza kalendarz w innych kartach. */
+  /** notifyChange z useTabSync strony — odświeża kalendarz w innych kartach. */
   notifyChange: () => void;
 }
 
@@ -28,7 +28,8 @@ interface NoShowResponse {
  * (POST/DELETE /api/appointments/[id]/no-show).
  *
  * Widoczność to tylko podpowiedź (rola, status, dzień wizyty z `@/lib/no-show`);
- * decyduje serwer, a jego komunikat błędu trafia do toastu.
+ * decyduje serwer. Jego komunikat trafia do toastu tylko przy 400, 404 i 409
+ * (`noShowErrorToastMessage`), przy innych błędach toast ma stały tekst.
  */
 export function NoShowButton({ appointment, onChanged, notifyChange }: NoShowButtonProps) {
   const role = useSalonRole();
@@ -48,15 +49,15 @@ export function NoShowButton({ appointment, onChanged, notifyChange }: NoShowBut
       const data = await readJson(res);
 
       if (res.ok && data?.success === true) {
-        toast.success(canUndo ? "Cofnieto oznaczenie „Nie przyszedł”" : "Wizyta oznaczona: „Nie przyszedł”");
+        toast.success(canUndo ? "Cofnięto oznaczenie „Nie przyszedł”" : "Wizyta oznaczona: „Nie przyszedł”");
         notifyChange();
-        // Przycisk zostaje wylaczony do konca odswiezenia, zeby drugie
-        // klikniecie nie poszlo ze starym statusem wizyty.
+        // Przycisk zostaje wyłączony do końca odświeżenia, żeby drugie
+        // kliknięcie nie poszło ze starym statusem wizyty.
         await onChanged();
         return;
       }
 
-      toast.error(typeof data?.error === "string" && data.error.trim() !== "" ? data.error : NO_SHOW_GENERIC_ERROR);
+      toast.error(noShowErrorToastMessage(res.status, data?.error, NO_SHOW_GENERIC_ERROR));
     } catch {
       toast.error(NO_SHOW_GENERIC_ERROR);
     } finally {
@@ -73,14 +74,15 @@ export function NoShowButton({ appointment, onChanged, notifyChange }: NoShowBut
         size="sm"
         onClick={handleClick}
         disabled={pending}
+        aria-busy={pending}
         data-testid={canUndo ? "no-show-undo-btn" : "no-show-mark-btn"}
       >
         {pending ? (
-          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          <Loader2 className="h-4 w-4 mr-1 animate-spin" aria-hidden="true" />
         ) : canUndo ? (
-          <RotateCcw className="h-4 w-4 mr-1" />
+          <RotateCcw className="h-4 w-4 mr-1" aria-hidden="true" />
         ) : (
-          <UserX className="h-4 w-4 mr-1" />
+          <UserX className="h-4 w-4 mr-1" aria-hidden="true" />
         )}
         {canUndo ? `Cofnij „${NO_SHOW_LABEL}”` : NO_SHOW_LABEL}
       </Button>
@@ -88,7 +90,7 @@ export function NoShowButton({ appointment, onChanged, notifyChange }: NoShowBut
   );
 }
 
-/** Odpowiedz bledu (np. strona 500 z proxy) nie musi byc JSON-em. */
+/** Odpowiedź błędu (np. strona 500 z proxy) nie musi być JSON-em. */
 async function readJson(res: Response): Promise<NoShowResponse | null> {
   try {
     return (await res.json()) as NoShowResponse;

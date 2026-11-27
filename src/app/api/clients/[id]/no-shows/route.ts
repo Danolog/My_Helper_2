@@ -32,17 +32,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     const ctx = await getSalonContext();
     if (!ctx) {
-      return NextResponse.json({ success: false, error: "Salon not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Nie znaleziono salonu" }, { status: 404 });
     }
     salonId = ctx.salonId;
 
     if (ctx.role === "employee") {
-      return NextResponse.json({ success: false, error: "Brak uprawnien" }, { status: 403 });
+      return NextResponse.json({ success: false, error: "Brak uprawnień" }, { status: 403 });
     }
 
     const { id } = await params;
     if (!isValidUuid(id)) {
-      return NextResponse.json({ success: false, error: "Invalid client ID format" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy identyfikator klienta" },
+        { status: 400 }
+      );
     }
     clientId = id;
     const scopedSalonId = ctx.salonId;
@@ -69,7 +72,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     });
 
     if (!result) {
-      return NextResponse.json({ success: false, error: "Client not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Nie znaleziono klienta" }, { status: 404 });
     }
 
     return NextResponse.json({
@@ -80,7 +83,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // Sama tożsamość błędu: treść błędu bazy może nieść parametry zapytania.
     logger.error("[ClientNoShows API] GET failed", { salonId, clientId, ...toErrorIdentity(error) });
     return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac liczby nieobecnosci" },
+      { success: false, error: "Nie udało się pobrać liczby nieobecności" },
       { status: 500 }
     );
   }

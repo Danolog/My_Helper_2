@@ -41,6 +41,35 @@ export const NO_SHOW_COMPLETE_BLOCKED_MESSAGE =
   "Wizyta oznaczona jako »Nie przyszedł«. Najpierw cofnij oznaczenie.";
 
 /**
+ * Statusy HTTP, przy których toast pokazuje komunikat z serwera: to opisy
+ * stanu wizyty pisane dla salonu (zły status, dzień wizyty, brak wizyty,
+ * konflikt z zakończeniem). Przy pozostałych (401 z warstwy sesji, 403, 500,
+ * odpowiedź z proxy) treść bywa techniczna, więc toast ma stały tekst.
+ */
+const NO_SHOW_SERVER_MESSAGE_STATUSES: readonly number[] = [400, 404, 409];
+
+const NO_SHOW_FIXED_ERROR_MESSAGES: Readonly<Record<number, string>> = {
+  401: "Sesja wygasła. Zaloguj się ponownie.",
+  403: "Brak uprawnień",
+};
+
+/** Tekst toastu po nieudanej zmianie oznaczenia „Nie przyszedł”. */
+export function noShowErrorToastMessage(
+  httpStatus: number,
+  serverError: unknown,
+  fallback: string
+): string {
+  if (
+    NO_SHOW_SERVER_MESSAGE_STATUSES.includes(httpStatus) &&
+    typeof serverError === "string" &&
+    serverError.trim() !== ""
+  ) {
+    return serverError;
+  }
+  return NO_SHOW_FIXED_ERROR_MESSAGES[httpStatus] ?? fallback;
+}
+
+/**
  * Produkt działa tylko w Polsce (PLN, SMSAPI), a godziny wizyt panel buduje
  * w czasie lokalnym — dzień wizyty liczymy w strefie salonu, nie serwera (UTC).
  */

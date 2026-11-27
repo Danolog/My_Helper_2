@@ -272,6 +272,7 @@ describe("400", () => {
     m.asOwnerOf(SALON_A);
     const res = await call(POST, id);
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: "Nieprawidłowy identyfikator wizyty" });
     expect(h.state.transactions).toBe(0);
   });
 
@@ -326,7 +327,7 @@ describe("401 / 403 / 404", () => {
     givenAppointment();
     const res = await call(handler);
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ success: false, error: "Brak uprawnien" });
+    expect(await res.json()).toEqual({ success: false, error: "Brak uprawnień" });
     expect(h.state.transactions).toBe(0);
     expect(updates()).toEqual([]);
   });
@@ -340,7 +341,9 @@ describe("401 / 403 / 404", () => {
   it("404 konto bez salonu", async () => {
     m.signIn("client-1");
     m.ctxRows.push([], []);
-    expect((await call(POST)).status).toBe(404);
+    const res = await call(POST);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ success: false, error: "Nie znaleziono salonu" });
     expect(h.state.transactions).toBe(0);
   });
 
@@ -351,7 +354,7 @@ describe("401 / 403 / 404", () => {
     const res = await call(POST);
 
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ success: false, error: "Appointment not found" });
+    expect(await res.json()).toEqual({ success: false, error: "Nie znaleziono wizyty" });
     expect(rendered(h.selectWheres[0]).params).toEqual([APPT_ID, SALON_A]);
     expect(updates()).toEqual([]);
   });
@@ -365,7 +368,7 @@ describe("500 i logi", () => {
     const res = await call(POST);
 
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ success: false, error: "Nie udalo sie zmienic oznaczenia wizyty" });
+    expect(await res.json()).toEqual({ success: false, error: "Nie udało się zmienić oznaczenia wizyty" });
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     const [, meta] = h.logger.error.mock.calls[0]!;
     expect(meta).toEqual({ salonId: SALON_A, appointmentId: APPT_ID, errorName: "Error" });

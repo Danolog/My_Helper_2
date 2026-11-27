@@ -48,6 +48,13 @@ const WRONG_STATUS_MESSAGE: Record<"POST" | "DELETE", string> = {
 
 const TOO_EARLY_MESSAGE = "„Nie przyszedł” można oznaczyć dopiero w dniu wizyty albo później";
 
+// Teksty 400/404 trafiają do toastu w panelu, więc są po polsku.
+const SALON_NOT_FOUND_MESSAGE = "Nie znaleziono salonu";
+const FORBIDDEN_MESSAGE = "Brak uprawnień";
+const INVALID_ID_MESSAGE = "Nieprawidłowy identyfikator wizyty";
+const APPOINTMENT_NOT_FOUND_MESSAGE = "Nie znaleziono wizyty";
+const SERVER_ERROR_MESSAGE = "Nie udało się zmienić oznaczenia wizyty";
+
 async function changeNoShow(
   action: { method: "POST" | "DELETE"; logLabel: string },
   params: Promise<{ id: string }>
@@ -63,20 +70,17 @@ async function changeNoShow(
 
     const ctx = await getSalonContext();
     if (!ctx) {
-      return NextResponse.json({ success: false, error: "Salon not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: SALON_NOT_FOUND_MESSAGE }, { status: 404 });
     }
     salonId = ctx.salonId;
 
     if (!isNoShowMarkRole(ctx.role)) {
-      return NextResponse.json({ success: false, error: "Brak uprawnien" }, { status: 403 });
+      return NextResponse.json({ success: false, error: FORBIDDEN_MESSAGE }, { status: 403 });
     }
 
     const { id } = await params;
     if (!isValidUuid(id)) {
-      return NextResponse.json(
-        { success: false, error: "Invalid appointment ID format" },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: INVALID_ID_MESSAGE }, { status: 400 });
     }
     appointmentId = id;
     const scopedSalonId = ctx.salonId;
@@ -117,7 +121,10 @@ async function changeNoShow(
 
     switch (outcome.kind) {
       case "not_found":
-        return NextResponse.json({ success: false, error: "Appointment not found" }, { status: 404 });
+        return NextResponse.json(
+          { success: false, error: APPOINTMENT_NOT_FOUND_MESSAGE },
+          { status: 404 }
+        );
       case "wrong_status":
         return NextResponse.json(
           { success: false, error: WRONG_STATUS_MESSAGE[action.method] },
@@ -149,10 +156,7 @@ async function changeNoShow(
       appointmentId,
       ...toErrorIdentity(error),
     });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie zmienic oznaczenia wizyty" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: SERVER_ERROR_MESSAGE }, { status: 500 });
   }
 }
 

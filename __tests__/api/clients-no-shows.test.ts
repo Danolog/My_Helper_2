@@ -140,13 +140,16 @@ describe("400 / 401 / 403 / 404", () => {
     m.asStaffOf(SALON_A, "employee");
     const res = await call();
     expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ success: false, error: "Brak uprawnień" });
     expect(h.state.transactions).toBe(0);
   });
 
   it("konto bez salonu → 404", async () => {
     m.signIn("client-1");
     m.ctxRows.push([], []);
-    expect((await call()).status).toBe(404);
+    const res = await call();
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ success: false, error: "Nie znaleziono salonu" });
     expect(h.state.transactions).toBe(0);
   });
 
@@ -157,7 +160,7 @@ describe("400 / 401 / 403 / 404", () => {
     const res = await call();
 
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ success: false, error: "Client not found" });
+    expect(await res.json()).toEqual({ success: false, error: "Nie znaleziono klienta" });
     expect(h.selectWheres).toHaveLength(1);
   });
 });
@@ -170,7 +173,7 @@ describe("500", () => {
     const res = await call();
 
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ success: false, error: "Nie udalo sie pobrac liczby nieobecnosci" });
+    expect(await res.json()).toEqual({ success: false, error: "Nie udało się pobrać liczby nieobecności" });
     const [, meta] = h.logger.error.mock.calls[0]!;
     expect(meta).toEqual({ salonId: SALON_A, clientId: CLIENT_ID, errorName: "Error" });
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("connection refused");

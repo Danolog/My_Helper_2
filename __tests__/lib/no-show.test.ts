@@ -4,6 +4,7 @@ import {
   canUndoNoShow,
   hasNoShowDayArrived,
   isNoShowMarkRole,
+  noShowErrorToastMessage,
   salonDayKey,
 } from "@/lib/no-show";
 
@@ -83,5 +84,31 @@ describe("role i podpowiedzi interfejsu", () => {
     expect(canUndoNoShow({ role: "receptionist", status: "no_show" })).toBe(true);
     expect(canUndoNoShow({ role: "employee", status: "no_show" })).toBe(false);
     expect(canUndoNoShow({ role: "owner", status: "scheduled" })).toBe(false);
+  });
+});
+
+describe("noShowErrorToastMessage", () => {
+  const FALLBACK = "Nie udało się oznaczyć wizyty";
+
+  it.each([400, 404, 409])("%i: komunikat z serwera", (status) => {
+    expect(noShowErrorToastMessage(status, "Nie znaleziono wizyty", FALLBACK)).toBe("Nie znaleziono wizyty");
+  });
+
+  it.each([400, 404, 409])("%i bez tekstu albo z tekstem nie-napisem → tekst zastępczy", (status) => {
+    expect(noShowErrorToastMessage(status, "  ", FALLBACK)).toBe(FALLBACK);
+    expect(noShowErrorToastMessage(status, { message: "x" }, FALLBACK)).toBe(FALLBACK);
+    expect(noShowErrorToastMessage(status, undefined, FALLBACK)).toBe(FALLBACK);
+  });
+
+  it("401: stały tekst, nie komunikat techniczny z warstwy sesji", () => {
+    expect(noShowErrorToastMessage(401, "Unauthorized", FALLBACK)).toBe("Sesja wygasła. Zaloguj się ponownie.");
+  });
+
+  it("403: stały tekst", () => {
+    expect(noShowErrorToastMessage(403, "Forbidden", FALLBACK)).toBe("Brak uprawnień");
+  });
+
+  it.each([500, 502, 0])("%i: tekst zastępczy, bez treści z odpowiedzi", (status) => {
+    expect(noShowErrorToastMessage(status, "connection refused", FALLBACK)).toBe(FALLBACK);
   });
 });
