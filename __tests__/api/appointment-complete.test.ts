@@ -80,6 +80,7 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
   like: vi.fn((...args: unknown[]) => ({ type: "like", args })),
+  notInArray: vi.fn((...args: unknown[]) => ({ type: "notInArray", args })),
   // sql`...` (set_config) + sql.raw (SET LOCAL ROLE) — oba używa forSalon.
   sql: Object.assign(
     vi.fn((...args: unknown[]) => ({ type: "sql", args })),
@@ -159,6 +160,12 @@ function chainMock(result: unknown[] = []) {
 // -------------------------------------------------------
 
 import { POST as completeAppointment } from "@/app/api/appointments/[id]/complete/route";
+import {
+  NO_SHOW_COMPLETE_BLOCKED_CODE,
+  NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
+  NO_SHOW_RESTORED_STATUS,
+  NO_SHOW_STATUS,
+} from "@/lib/no-show";
 
 // -------------------------------------------------------
 // Tests
@@ -285,6 +292,87 @@ describe("POST /api/appointments/[id]/complete", () => {
     expect(status).toBe(400);
     expect(body.success).toBe(false);
     expect(body.error).toContain("anulowanej");
+  });
+
+  describe("wizyta „Nie przyszedł”", () => {
+    function completeRequest() {
+      return completeAppointment(
+        createMockRequest(
+          `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+          { method: "POST", body: {} }
+        ),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    it("409 APPOINTMENT_NO_SHOW i żadnego zapisu", async () => {
+      const appointment = makeAppointment({ status: NO_SHOW_STATUS });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+
+      const { status, body } = await parseResponse(await completeRequest());
+
+      expect(status).toBe(409);
+      expect(body.success).toBe(false);
+      expect((body as any).code).toBe(NO_SHOW_COMPLETE_BLOCKED_CODE);
+      expect(body.error).toBe(NO_SHOW_COMPLETE_BLOCKED_MESSAGE);
+      // Odmowa przed transakcją zapisów: brak zabiegu, statusu, prowizji, zużycia.
+      expect(mockDbSelect).toHaveBeenCalledTimes(1);
+      expect(mockDbInsert).not.toHaveBeenCalled();
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    });
+
+    it("200 po cofnięciu oznaczenia (status przywrócony przez trasę no-show)", async () => {
+      const appointment = makeAppointment({ status: NO_SHOW_RESTORED_STATUS, employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+
+      const { status, body } = await parseResponse(await completeRequest());
+
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect((body as any).data.appointment.status).toBe("completed");
+    });
+
+    it("zapis statusu ma warunek wykluczający „Nie przyszedł”, zakończoną i anulowaną", async () => {
+      const { notInArray } = await import("drizzle-orm");
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+
+      const response = await completeRequest();
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(notInArray)).toHaveBeenCalledWith(
+        "appointments.status",
+        expect.arrayContaining([NO_SHOW_STATUS, "completed", "cancelled"])
+      );
+    });
+
+    it("oznaczenie wstawione między odczytem a zapisem: 409, transakcja przerwana", async () => {
+      // Odczyt widzi „zaplanowaną”, ale UPDATE z warunkiem statusu nie trafia
+      // w wiersz (równoległe „Nie przyszedł” pod blokadą wiersza).
+      const appointment = makeAppointment({ status: "scheduled" });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([]));
+
+      const { status, body } = await parseResponse(await completeRequest());
+
+      expect(status).toBe(409);
+      expect((body as any).code).toBe(NO_SHOW_COMPLETE_BLOCKED_CODE);
+      // Po nieudanym zapisie statusu nic dalej: bez prowizji i zużycia materiałów.
+      expect(mockDbInsert).toHaveBeenCalledTimes(1);
+      expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("should return 500 when database throws", async () => {

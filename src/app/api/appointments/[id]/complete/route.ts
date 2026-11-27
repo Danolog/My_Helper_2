@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { eq, and, like, sql } from "drizzle-orm";
+import { eq, and, like, notInArray, sql } from "drizzle-orm";
 import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { resolveModules } from "@/lib/features";
 import { logger } from "@/lib/logger";
+import {
+  NO_SHOW_COMPLETE_BLOCKED_CODE,
+  NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
+  NO_SHOW_STATUS,
+} from "@/lib/no-show";
 import { getSalonContext } from "@/lib/salon-context";
 import {
   appointments,
@@ -23,6 +28,35 @@ import {
   salons,
 } from "@/lib/schema";
 import { forSalon, type DbTx } from "@/lib/server/repository";
+
+/**
+ * Statusy, których nie da się zakończyć. Zakończona i anulowana mają własne
+ * komunikaty 400 przy odczycie; „Nie przyszedł” — 409 (najpierw cofnięcie).
+ */
+const NOT_COMPLETABLE_STATUSES = ["completed", "cancelled", NO_SHOW_STATUS];
+
+/**
+ * Zapis statusu nie trafił w wiersz: status zmienił się po odczycie (w praktyce
+ * równoległe oznaczenie „Nie przyszedł”). Rzucany w transakcji, żeby wycofać
+ * zapisy wykonane przed zmianą statusu.
+ */
+class AppointmentNotCompletableError extends Error {
+  constructor() {
+    super("Appointment status changed before completion");
+    this.name = "AppointmentNotCompletableError";
+  }
+}
+
+function noShowConflictResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      code: NO_SHOW_COMPLETE_BLOCKED_CODE,
+      error: NO_SHOW_COMPLETE_BLOCKED_MESSAGE,
+    },
+    { status: 409 }
+  );
+}
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -164,6 +198,9 @@ export async function POST(
         { status: 400 }
       );
     }
+    if (appointment.status === NO_SHOW_STATUS) {
+      return noShowConflictResponse();
+    }
 
     // All mutating operations are wrapped in a single transaction so that
     // a failure at any step (e.g. stock deduction, commission insert) rolls
@@ -210,11 +247,24 @@ export async function POST(
       });
 
       // 2. Mark appointment as completed
+      // Warunek statusu w samym UPDATE: odczyt wyżej jest w osobnej transakcji,
+      // a trasa „Nie przyszedł” zmienia status pod blokadą wiersza. UPDATE czeka
+      // na tę blokadę i sprawdza warunek ponownie, więc oznaczenie wstawione
+      // między odczytem a zapisem kończy się 409 i wycofaniem całej transakcji.
       const [updatedAppointment] = await tx
         .update(appointments)
         .set({ status: "completed" })
-        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .where(
+          and(
+            eq(appointments.id, id),
+            eq(appointments.salonId, salonId),
+            notInArray(appointments.status, NOT_COMPLETABLE_STATUSES)
+          )
+        )
         .returning();
+      if (!updatedAppointment) {
+        throw new AppointmentNotCompletableError();
+      }
 
       logger.info("Appointment marked as completed", { appointmentId: id });
 
@@ -540,6 +590,9 @@ export async function POST(
       message: "Wizyta zakonczona pomyslnie",
     });
   } catch (error) {
+    if (error instanceof AppointmentNotCompletableError) {
+      return noShowConflictResponse();
+    }
     logger.error("Failed to complete appointment", { error });
     return NextResponse.json(
       { success: false, error: "Failed to complete appointment" },

@@ -32,6 +32,15 @@ export const NO_SHOW_RESTORED_STATUS = "scheduled";
 export const NO_SHOW_DEDICATED_ROUTE_CODE = "NO_SHOW_DEDICATED_ROUTE";
 
 /**
+ * Kod 409 z POST /api/appointments/[id]/complete dla wizyty „Nie przyszedł”.
+ * Nieobecność nie może być naraz zrealizowaną usługą (przychód, prowizja,
+ * zużycie materiałów) — najpierw cofnięcie oznaczenia.
+ */
+export const NO_SHOW_COMPLETE_BLOCKED_CODE = "APPOINTMENT_NO_SHOW";
+export const NO_SHOW_COMPLETE_BLOCKED_MESSAGE =
+  "Wizyta oznaczona jako »Nie przyszedł«. Najpierw cofnij oznaczenie.";
+
+/**
  * Produkt działa tylko w Polsce (PLN, SMSAPI), a godziny wizyt panel buduje
  * w czasie lokalnym — dzień wizyty liczymy w strefie salonu, nie serwera (UTC).
  */
