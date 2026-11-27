@@ -199,6 +199,13 @@ export const clients = pgTable(
     // usunięcie konta personelu.
     healthDataConsentAt: timestamp("health_data_consent_at", { withTimezone: true }),
     healthDataConsentBy: text("health_data_consent_by"),
+    // Blokada rezerwacji online (migracja 0019, src/lib/client-block.ts).
+    // NULL = klient rezerwuje online jak zwykle. `blocked_by` to 'auto' (próg
+    // nieobecności z ustawień salonu) albo konto właściciela; bez FK, ślad ma
+    // przetrwać usunięcie konta. Personel w panelu dodaje wizytę mimo blokady.
+    blockedAt: timestamp("blocked_at", { withTimezone: true }),
+    blockedBy: text("blocked_by"),
+    blockNote: text("block_note"),
     favoriteEmployeeId: text("favorite_employee_id"),
     birthday: text("birthday"), // ISO date string "YYYY-MM-DD" for birthday
     requireDeposit: boolean("require_deposit").default(false),
@@ -219,6 +226,13 @@ export const clients = pgTable(
     // zgodzie, a czas i konto zgody występują wyłącznie razem.
     check("clients_allergies_require_consent", sql`${table.allergies} IS NULL OR ${table.healthDataConsentAt} IS NOT NULL`),
     check("clients_health_consent_pair", sql`(${table.healthDataConsentAt} IS NULL) = (${table.healthDataConsentBy} IS NULL)`),
+    // Blokada: czas i autor wyłącznie razem; notatka tylko przy blokadzie i do
+    // 500 znaków (CLIENT_BLOCK_NOTE_MAX_LENGTH w src/lib/client-block.ts).
+    check("clients_block_pair", sql`(${table.blockedAt} IS NULL) = (${table.blockedBy} IS NULL)`),
+    check("clients_block_note_requires_block", sql`${table.blockNote} IS NULL OR ${table.blockedAt} IS NOT NULL`),
+    check("clients_block_note_length", sql`${table.blockNote} IS NULL OR length(${table.blockNote}) <= 500`),
+    // Sprawdzenie przy rezerwacji online czyta tylko zablokowane karty salonu.
+    index("clients_salon_blocked_idx").on(table.salonId).where(sql`${table.blockedAt} IS NOT NULL`),
   ]
 );
 
@@ -354,6 +368,12 @@ export const appointments = pgTable(
     // Obok niego w bazie EXCLUDE "appointments_no_overlap" (gist, tsrange '[)',
     // bez cancelled) — Drizzle nie wyraża EXCLUDE, jest tylko w drizzle/0009.
     check("appointments_end_after_start", sql`${table.endTime} > ${table.startTime}`),
+    // Migracja 0019: zamknięta lista statusów. Licznik nieobecności (`no_show`)
+    // decyduje o blokadzie rezerwacji online, więc liczy wartość pilnowaną przez bazę.
+    check(
+      "appointments_status_valid",
+      sql`${table.status} IN ('scheduled', 'confirmed', 'completed', 'cancelled', 'no_show')`
+    ),
     // Cel złożonego FK z deposit_status_events: zdarzenie nie wskaże salonu innego
     // niż salon wizyty (id jest już unikalne, para jest potrzebna jako cel FK).
     uniqueIndex("appointments_id_salon_id_uidx").on(table.id, table.salonId),
