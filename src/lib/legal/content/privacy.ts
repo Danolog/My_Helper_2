@@ -130,11 +130,11 @@ Organy publiczne dostają dane tylko wtedy, gdy wymaga tego prawo.
 
 ## 5. Przekazywanie danych poza Europejski Obszar Gospodarczy
 
-Serwery i baza danych (Google Cloud, Warszawa), SMS-y (SMSAPI, Polska) i liczniki nadużyć (Upstash, Frankfurt) przetwarzają dane w EOG.
+Serwery i baza danych (Google Cloud, Warszawa) i SMS-y (SMSAPI, Polska) przetwarzają dane w EOG. Liczniki nadużyć (Upstash) są przechowywane we Frankfurcie.
 
 Do USA mogą trafić dane przekazywane:
 - **Resend (Plus Five Five, Inc.)**: e-maile z aplikacji;
-- **Upstash, Inc.**: tylko gdy spółka z USA ma dostęp do danych przechowywanych we Frankfurcie, np. przy wsparciu technicznym.
+- **Upstash, Inc.**: dane liczników są przechowywane we Frankfurcie, ale umowa z Upstash dopuszcza ich przetwarzanie także poza EOG, w tym przez spółkę w USA (np. przy wsparciu technicznym).
 
 Podstawą przekazania danych do Resend jest decyzja wykonawcza Komisji Europejskiej (UE) 2023/1795 o odpowiednim stopniu ochrony w ramach **EU-U.S. Data Privacy Framework**. Resend jest na oficjalnej liście tego programu. Podstawą przekazania danych do Upstash są **standardowe klauzule umowne** (decyzja wykonawcza Komisji (UE) 2021/914, moduł 2), włączone do umowy powierzenia z Upstash. Kopię zabezpieczeń dostaniesz, pisząc na kontakt@nordsignal.cc.
 
