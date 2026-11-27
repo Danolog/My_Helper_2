@@ -364,14 +364,75 @@ describe("POST /api/appointments/[id]/complete", () => {
       mockDbSelect.mockReturnValueOnce(chainMock([]));
       mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
       mockDbUpdate.mockReturnValueOnce(chainMock([]));
+      // Ponowny odczyt statusu w tej samej transakcji.
+      mockDbSelect.mockReturnValueOnce(chainMock([{ status: NO_SHOW_STATUS }]));
 
       const { status, body } = await parseResponse(await completeRequest());
 
       expect(status).toBe(409);
       expect((body as any).code).toBe(NO_SHOW_COMPLETE_BLOCKED_CODE);
+      expect(body.error).toBe(NO_SHOW_COMPLETE_BLOCKED_MESSAGE);
       // Po nieudanym zapisie statusu nic dalej: bez prowizji i zużycia materiałów.
       expect(mockDbInsert).toHaveBeenCalledTimes(1);
       expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+      // Odczyt wizyty, odczyt zabiegu, ponowny odczyt statusu.
+      expect(mockDbSelect).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("zapis statusu nie trafił w wiersz — odpowiedź według bieżącego statusu", () => {
+    function completeRequest() {
+      return completeAppointment(
+        createMockRequest(
+          `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+          { method: "POST", body: {} }
+        ),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    /** Odczyt widzi „zaplanowaną”, UPDATE z warunkiem statusu daje 0 wierszy. */
+    function givenRaceWithCurrentRows(currentRows: unknown[]) {
+      const appointment = makeAppointment({ status: "scheduled" });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock(currentRows));
+    }
+
+    it.each([
+      ["completed", "Wizyta jest juz zakonczona"],
+      ["cancelled", "Nie mozna zakonczyc anulowanej wizyty"],
+    ])("równolegle %s → 400 z tym samym komunikatem co przy odczycie, bez kodu no-show", async (current, error) => {
+      givenRaceWithCurrentRows([{ status: current }]);
+
+      const { status, body } = await parseResponse(await completeRequest());
+
+      expect(status).toBe(400);
+      expect(body).toEqual({ success: false, error });
+      expect(mockDbInsert).toHaveBeenCalledTimes(1);
+      expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("ponowny odczyt z jawnym eq(salonId)", async () => {
+      const { eq } = await import("drizzle-orm");
+      givenRaceWithCurrentRows([{ status: "completed" }]);
+
+      await completeRequest();
+
+      expect(vi.mocked(eq)).toHaveBeenCalledWith("appointments.salonId", TEST_IDS.SALON_UUID);
+      const selectCalls = mockDbSelect.mock.calls;
+      expect(selectCalls[selectCalls.length - 1]?.[0]).toEqual({ status: "appointments.status" });
+    });
+
+    it("wiersz zniknął po odczycie → 404", async () => {
+      givenRaceWithCurrentRows([]);
+
+      const { status, body } = await parseResponse(await completeRequest());
+
+      expect(status).toBe(404);
+      expect(body.success).toBe(false);
     });
   });
 

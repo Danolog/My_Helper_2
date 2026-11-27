@@ -36,14 +36,19 @@ import { forSalon, type DbTx } from "@/lib/server/repository";
 const NOT_COMPLETABLE_STATUSES = ["completed", "cancelled", NO_SHOW_STATUS];
 
 /**
- * Zapis statusu nie trafił w wiersz: status zmienił się po odczycie (w praktyce
- * równoległe oznaczenie „Nie przyszedł”). Rzucany w transakcji, żeby wycofać
- * zapisy wykonane przed zmianą statusu.
+ * Zapis statusu nie trafił w wiersz: status zmienił się po odczycie
+ * (równoległe zakończenie, anulowanie albo oznaczenie „Nie przyszedł”) lub
+ * wiersz zniknął. Rzucany w transakcji, żeby wycofać zapisy wykonane przed
+ * zmianą statusu. `currentStatus` to status odczytany ponownie w tej samej
+ * transakcji (`null`, gdy wiersza już nie ma) — od niego zależy odpowiedź.
  */
 class AppointmentNotCompletableError extends Error {
-  constructor() {
+  readonly currentStatus: string | null;
+
+  constructor(currentStatus: string | null) {
     super("Appointment status changed before completion");
     this.name = "AppointmentNotCompletableError";
+    this.currentStatus = currentStatus;
   }
 }
 
@@ -56,6 +61,38 @@ function noShowConflictResponse() {
     },
     { status: 409 }
   );
+}
+
+function appointmentNotFoundResponse() {
+  return NextResponse.json(
+    { success: false, error: "Appointment not found" },
+    { status: 404 }
+  );
+}
+
+/**
+ * Odpowiedź dla wizyty, której nie da się zakończyć — wspólna dla
+ * sprawdzenia przy odczycie i dla zapisu, który nie trafił w wiersz, żeby
+ * wyścig dawał ten sam komunikat co zwykły przypadek. `null` dla statusu
+ * spoza listy (nie powinien wystąpić: UPDATE odrzuca tylko te statusy).
+ */
+function notCompletableResponse(status: string): NextResponse | null {
+  if (status === "completed") {
+    return NextResponse.json(
+      { success: false, error: "Wizyta jest juz zakonczona" },
+      { status: 400 }
+    );
+  }
+  if (status === "cancelled") {
+    return NextResponse.json(
+      { success: false, error: "Nie mozna zakonczyc anulowanej wizyty" },
+      { status: 400 }
+    );
+  }
+  if (status === NO_SHOW_STATUS) {
+    return noShowConflictResponse();
+  }
+  return null;
 }
 
 /**
@@ -176,30 +213,16 @@ export async function POST(
       (ctx.role === "employee" &&
         (!ctx.employeeId || row.appointment.employeeId !== ctx.employeeId))
     ) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
+      return appointmentNotFoundResponse();
     }
 
     const appointment = row.appointment;
     const service = row.service;
 
-    // Don't allow completing already completed or cancelled appointments
-    if (appointment.status === "completed") {
-      return NextResponse.json(
-        { success: false, error: "Wizyta jest juz zakonczona" },
-        { status: 400 }
-      );
-    }
-    if (appointment.status === "cancelled") {
-      return NextResponse.json(
-        { success: false, error: "Nie mozna zakonczyc anulowanej wizyty" },
-        { status: 400 }
-      );
-    }
-    if (appointment.status === NO_SHOW_STATUS) {
-      return noShowConflictResponse();
+    // Wizyta zakończona, anulowana albo „Nie przyszedł” — bez zapisu.
+    const notCompletable = notCompletableResponse(appointment.status);
+    if (notCompletable) {
+      return notCompletable;
     }
 
     // All mutating operations are wrapped in a single transaction so that
@@ -249,8 +272,8 @@ export async function POST(
       // 2. Mark appointment as completed
       // Warunek statusu w samym UPDATE: odczyt wyżej jest w osobnej transakcji,
       // a trasa „Nie przyszedł” zmienia status pod blokadą wiersza. UPDATE czeka
-      // na tę blokadę i sprawdza warunek ponownie, więc oznaczenie wstawione
-      // między odczytem a zapisem kończy się 409 i wycofaniem całej transakcji.
+      // na tę blokadę i sprawdza warunek ponownie, więc zmiana statusu wstawiona
+      // między odczytem a zapisem wycofuje całą transakcję.
       const [updatedAppointment] = await tx
         .update(appointments)
         .set({ status: "completed" })
@@ -263,7 +286,15 @@ export async function POST(
         )
         .returning();
       if (!updatedAppointment) {
-        throw new AppointmentNotCompletableError();
+        // Bieżący status z tej samej transakcji: w READ COMMITTED kolejne
+        // zapytanie widzi zmianę zatwierdzoną przez równoległą transakcję,
+        // więc odpowiedź mówi, co faktycznie stało się z wizytą.
+        const [current] = await tx
+          .select({ status: appointments.status })
+          .from(appointments)
+          .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+          .limit(1);
+        throw new AppointmentNotCompletableError(current?.status ?? null);
       }
 
       logger.info("Appointment marked as completed", { appointmentId: id });
@@ -591,7 +622,10 @@ export async function POST(
     });
   } catch (error) {
     if (error instanceof AppointmentNotCompletableError) {
-      return noShowConflictResponse();
+      // Wiersz zniknął po odczycie → 404; status spoza listy (nie powinien
+      // wystąpić) → 409 jak dotąd, bo zakończenie i tak nie zostało zapisane.
+      if (error.currentStatus === null) return appointmentNotFoundResponse();
+      return notCompletableResponse(error.currentStatus) ?? noShowConflictResponse();
     }
     logger.error("Failed to complete appointment", { error });
     return NextResponse.json(
