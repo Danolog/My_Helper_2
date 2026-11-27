@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   Sparkles,
   ArrowRight,
-  Search,
+  Tag,
   Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -65,9 +65,9 @@ export function DlaSalonowHero() {
               </Link>
             </Button>
             <Button asChild variant="outline" size="lg" className="h-14 px-10 text-lg rounded-full border-border/80 hover:bg-primary/5 hover:text-primary transition-all backdrop-blur-sm">
-              <Link href="/salons">
-                <Search className="h-5 w-5 mr-2" />
-                Przeglądaj salony
+              <Link href="#pricing">
+                <Tag className="h-5 w-5 mr-2" />
+                Zobacz cennik
               </Link>
             </Button>
           </motion.div>

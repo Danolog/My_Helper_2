@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { isModuleFrozen } from "@/lib/features";
 import type { SalonDetail } from "../_types";
 
 interface SalonHeaderProps {
@@ -64,18 +65,21 @@ export function SalonHeader({
               )}
             </div>
           </div>
-          <Button
-            variant={isFavorite ? "default" : "outline"}
-            size="sm"
-            onClick={onToggleFavorite}
-            disabled={favoriteLoading}
-            className="gap-2"
-          >
-            <Heart
-              className={`w-4 h-4 ${isFavorite ? "fill-white" : ""}`}
-            />
-            {isFavorite ? "W ulubionych" : "Dodaj do ulubionych"}
-          </Button>
+          {/* Ulubione zamrożone (`favoriteSalons`) — bez przycisku. */}
+          {!isModuleFrozen("favoriteSalons") && (
+            <Button
+              variant={isFavorite ? "default" : "outline"}
+              size="sm"
+              onClick={onToggleFavorite}
+              disabled={favoriteLoading}
+              className="gap-2"
+            >
+              <Heart
+                className={`w-4 h-4 ${isFavorite ? "fill-white" : ""}`}
+              />
+              {isFavorite ? "W ulubionych" : "Dodaj do ulubionych"}
+            </Button>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">

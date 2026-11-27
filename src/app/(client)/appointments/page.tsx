@@ -25,6 +25,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { useSession } from "@/lib/auth-client";
+import { isModuleFrozen } from "@/lib/features";
 
 interface ClientAppointment {
   id: string;
@@ -156,6 +157,7 @@ export default function ClientAppointmentsPage() {
   );
 
   const displayedAppointments = activeTab === "upcoming" ? upcomingAppointments : pastAppointments;
+  const catalogOpen = !isModuleFrozen("salonCatalog");
 
   if (isPending || loading) {
     return (
@@ -169,15 +171,17 @@ export default function ClientAppointmentsPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-3xl">
-      {/* Back navigation */}
-      <div className="mb-6">
-        <Button variant="ghost" asChild>
-          <Link href="/salons">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Powrot do salonow
-          </Link>
-        </Button>
-      </div>
+      {/* Back navigation — tylko przy otwartym katalogu salonów (`salonCatalog`) */}
+      {catalogOpen && (
+        <div className="mb-6">
+          <Button variant="ghost" asChild>
+            <Link href="/salons">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Powrot do salonow
+            </Link>
+          </Button>
+        </div>
+      )}
 
       {/* Page header */}
       <div className="flex items-center gap-3 mb-6">
@@ -222,12 +226,16 @@ export default function ClientAppointmentsPage() {
             </h2>
             <p className="text-muted-foreground mb-4">
               {activeTab === "upcoming"
-                ? "Zarezerwuj wizyte w jednym z naszych salonow."
+                ? catalogOpen
+                  ? "Zarezerwuj wizyte w jednym z naszych salonow."
+                  : "Wizyte zarezerwujesz z linku, ktory udostepnia Twoj salon."
                 : "Twoja historia wizyt pojawi sie tutaj."}
             </p>
-            <Button asChild>
-              <Link href="/salons">Przegladaj salony</Link>
-            </Button>
+            {catalogOpen && (
+              <Button asChild>
+                <Link href="/salons">Przegladaj salony</Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (

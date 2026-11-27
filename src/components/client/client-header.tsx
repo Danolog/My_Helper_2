@@ -15,6 +15,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useSession, signOut } from "@/lib/auth-client";
+import { clientPortalHomeHref, clientPortalNavLinks } from "@/lib/site-nav-links";
 
 export function ClientHeader() {
   const { data: session } = useSession();
@@ -30,10 +31,7 @@ export function ClientHeader() {
     router.refresh();
   };
 
-  const navLinks = [
-    { href: "/salons", label: "Salony" },
-    ...(session ? [{ href: "/appointments", label: "Moje wizyty" }] : []),
-  ];
+  const navLinks = clientPortalNavLinks(!!session);
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
@@ -42,7 +40,7 @@ export function ClientHeader() {
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
       <div className="container mx-auto flex h-14 items-center justify-between px-4">
         {/* Logo */}
-        <Link href="/dla-klientow" className="flex items-center gap-2 font-bold text-lg">
+        <Link href={clientPortalHomeHref()} className="flex items-center gap-2 font-bold text-lg">
           <Scissors className="h-5 w-5 text-primary" />
           MyHelper
         </Link>

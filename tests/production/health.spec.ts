@@ -10,9 +10,11 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Production Health Checks', () => {
   test('should load the home page', { tag: '@production' }, async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/', { waitUntil: 'load' });
     await expect(page).toHaveTitle(/.+/);
     await expect(page.locator('body')).toBeVisible();
+    // Strona glowna to oferta dla wlascicieli salonow (sekcja cennika).
+    await expect(page.locator('#pricing')).toBeAttached({ timeout: 10000 });
   });
 
   test('should load the login page with form', { tag: '@production' }, async ({ page }) => {
@@ -36,10 +38,12 @@ test.describe('Production Health Checks', () => {
     expect(response.status()).toBe(200);
   });
 
-  test('should load salon browsing page', { tag: '@production' }, async ({ page }) => {
-    await page.goto('/salons');
+  test('salon list is frozen: /salons redirects to home page', { tag: '@production' }, async ({ page }) => {
+    // Katalog salonow zamrozony — lista przekierowuje na strone glowna
+    // (oferta dla salonow). Strona pojedynczego salonu dziala dalej.
+    await page.goto('/salons', { waitUntil: 'load' });
+    await expect(page).toHaveURL((url) => url.pathname === '/');
     await expect(page.locator('body')).toBeVisible();
-    // Page should load without errors — we don't check for specific salons
   });
 
   test('should load forgot password page', { tag: '@production' }, async ({ page }) => {

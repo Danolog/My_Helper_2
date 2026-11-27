@@ -6,7 +6,8 @@
  * Dla modułu zamrożonego (`hardOff` w `src/lib/features.ts`):
  * - trasa API → 404 z kodem `MODULE_DISABLED`, dla KAŻDEJ metody HTTP
  *   i zanim zadziała kontrola CSRF,
- * - strona panelu → przekierowanie na `/dashboard`.
+ * - strona panelu → przekierowanie na `/dashboard`,
+ * - strona publiczna (lista salonów, ulubione) → przekierowanie na `/`.
  * Trasy i strony sąsiednie przechodzą bez zmian.
  *
  * Lista ścieżek pochodzi z rejestru (`API_MODULE_PATTERNS`) — test nie ma
@@ -114,7 +115,13 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     expect(FROZEN_ROUTES).toContain("/api/client/appointments/x1/review");
     expect(FROZEN_ROUTES).toContain("/api/ai/content/generate-review-response");
     expect(FROZEN_ROUTES).toContain("/api/ai/business/review-alerts");
-    // Publiczny katalog zostaje — sam nie zwraca ocen ani opinii.
+    // Katalog salonów (lista) i ulubione
+    expect(FROZEN_ROUTES).toContain("/api/salons");
+    expect(FROZEN_ROUTES).toContain("/api/favorites/salons");
+    expect(FROZEN_ROUTES).toContain("/api/favorites/salons/check");
+    // Strona salonu i rezerwacja zostają (także bez opinii).
+    expect(FROZEN_ROUTES).not.toContain("/api/salons/mine");
+    expect(FROZEN_ROUTES).not.toContain("/api/available-slots");
     expect(FROZEN_ROUTES).not.toContain("/api/salons/x1");
     expect(FROZEN_ROUTES).not.toContain("/api/salons/x1/employees/x1");
   });
@@ -308,6 +315,8 @@ describe("proxy: trasy sąsiednie przechodzą", () => {
     "/api/salons/x1",
     "/api/salons/x1/employees/x1",
     "/api/client/appointments/x1",
+    "/api/salons/mine",
+    "/api/available-slots",
   ];
 
   it("trasy sąsiednie istnieją w repo (kontrola listy)", () => {
@@ -334,6 +343,49 @@ describe("proxy: trasy sąsiednie przechodzą", () => {
   it("POST na trasę sąsiednią nadal podlega CSRF (403 bez tokenu)", async () => {
     const response = await proxy(request("/api/clients", "POST", SESSION));
     expect(response.status).toBe(403);
+  });
+});
+
+describe("proxy: strony publiczne modułów zamrożonych (katalog, ulubione)", () => {
+  it.each([
+    "/salons",
+    "/salons/",
+    "/salons?q=fryzjer",
+    "/Salons",
+    "/dla-klientow",
+    "/favorites",
+    "/favorites/abc",
+  ])("%s → przekierowanie na stronę główną (z sesją i bez)", async (path) => {
+    for (const cookie of [SESSION, undefined]) {
+      const response = await proxy(request(path, "GET", cookie));
+      expect(response.status, path).toBe(307);
+      expect(response.headers.get("location")).toBe(`${ORIGIN}/`);
+    }
+  });
+
+  it.each(["//salons", "/x/../salons", "/salons/abc/..", "/%73alons"])(
+    "surowa ścieżka %s → przekierowanie na stronę główną",
+    async (path) => {
+      const response = await proxy(rawRequest(path));
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(`${ORIGIN}/`);
+    }
+  );
+
+  it.each([
+    "/",
+    "/salons/x1",
+    "/salons/x1/book",
+    "/salons/x1/services",
+    "/salons/x1/employees",
+    "/salons/x1/gallery",
+    "/s/moj-salon",
+    "/appointments",
+    "/pricing",
+  ])("strona salonu i rezerwacja gościa przechodzą: %s (bez sesji)", async (path) => {
+    const response = await proxy(request(path));
+    expect(response.status).toBe(200);
+    expect(passedThrough(response)).toBe(true);
   });
 });
 

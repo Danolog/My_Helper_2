@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
+import { clientNavLinks, guestNavLinks } from "@/lib/site-nav-links";
 
 export function SiteHeaderMobileMenu() {
   const { data: session, isPending } = useSession();
@@ -29,17 +30,8 @@ export function SiteHeaderMobileMenu() {
     { href: "/dashboard/settings/salon", label: "Mój salon" },
   ];
 
-  const clientLinks = [
-    { href: "/salons", label: "Salony" },
-    { href: "/client/appointments", label: "Moje wizyty" },
-    { href: "/client/favorites", label: "Ulubione" },
-  ];
-
-  const guestLinks = [
-    { href: "/dla-salonow#features", label: "Funkcje" },
-    { href: "/dla-salonow#pricing", label: "Cennik" },
-    { href: "/dla-klientow", label: "Dla klientów" },
-  ];
+  const clientLinks = clientNavLinks();
+  const guestLinks = guestNavLinks();
 
   const navLinks = isPending || salonLoading
     ? []

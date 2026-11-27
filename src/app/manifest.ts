@@ -8,7 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "MyHelper",
     // Ten sam opis co w metadanych strony (layout.tsx), cena z funkcji cennika.
     description: `MyHelper — system rezerwacji online dla salonów usługowych. Jeden plan, ${planPriceText(PLANS.basic.priceMonthly)} miesięcznie.`,
-    start_url: "/salons",
+    // Strona główna: katalog salonów (`/salons`) jest zamrożony i przekierowuje.
+    start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait-primary",

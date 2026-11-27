@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { Scissors } from "lucide-react";
+import { isModuleFrozen } from "@/lib/features";
 import { publishedLegalLinks } from "@/lib/legal/documents";
 
 export function SiteFooter() {
   // Tylko opublikowane dokumenty: link do nieopublikowanego dawałby 404.
   const legalLinks = publishedLegalLinks();
+  // Katalog salonów zamrożony (`salonCatalog`): bez linków do listy salonów
+  // i strony dla klientów — obie przekierowują na stronę główną.
+  const catalogOpen = !isModuleFrozen("salonCatalog");
 
   return (
     <footer className="border-t bg-[oklch(0.22_0.03_55)]" role="contentinfo">
@@ -32,13 +36,15 @@ export function SiteFooter() {
               <li><Link href="/login" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Logowanie</Link></li>
             </ul>
           </div>
-          <div>
-            <h3 className="font-semibold text-sm mb-3 text-[oklch(0.95_0.01_70)]">Dla klientow</h3>
-            <ul className="space-y-2 text-sm text-[oklch(0.60_0.03_55)]">
-              <li><Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Przegladaj salony</Link></li>
-              <li><Link href="/dla-klientow" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Portal klienta</Link></li>
-            </ul>
-          </div>
+          {catalogOpen && (
+            <div>
+              <h3 className="font-semibold text-sm mb-3 text-[oklch(0.95_0.01_70)]">Dla klientow</h3>
+              <ul className="space-y-2 text-sm text-[oklch(0.60_0.03_55)]">
+                <li><Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Przegladaj salony</Link></li>
+                <li><Link href="/dla-klientow" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Portal klienta</Link></li>
+              </ul>
+            </div>
+          )}
           {legalLinks.length > 0 && (
             <div>
               <h3 className="font-semibold text-sm mb-3 text-[oklch(0.95_0.01_70)]">Informacje</h3>
@@ -64,7 +70,9 @@ export function SiteFooter() {
             </span>
           </Link>
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-[oklch(0.60_0.03_55)]">
-            <Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Salony</Link>
+            {catalogOpen && (
+              <Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Salony</Link>
+            )}
             <Link href="/pricing" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Cennik</Link>
             {legalLinks.map((link) => (
               <Link key={link.key} href={link.href} className="hover:text-[oklch(0.95_0.01_70)] transition-colors">{link.title}</Link>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { logger } from "@/lib/logger";
 import { toErrorIdentity } from "@/lib/safe-error";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 // GET to publiczny katalog (bez sesji) obejmujący z natury wiele salonów, więc
 // nie ma jednego salonu dla forSalon: odczyt idzie przez nazwaną funkcję puli
 // systemowej z jawną listą kolumn (bez settingsJson i ownerId).
@@ -11,6 +12,10 @@ export const revalidate = 60;
 
 // GET /api/salons - List all salons (filtered to exclude test/incomplete salons)
 export async function GET() {
+  // Katalog salonów zamrożony (`salonCatalog` w src/lib/features.ts): 404
+  // zanim sięgniemy do bazy. Strona salonu czyta `/api/salons/[id]`.
+  const frozen = frozenModuleResponse("salonCatalog");
+  if (frozen) return frozen;
   try {
     // Salony z adresem, telefonem i branżą (odsiewa salony testowe), z liczbą
     // aktywnych usług i statystyką zatwierdzonych opinii; z usługami najpierw.

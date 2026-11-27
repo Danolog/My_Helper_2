@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
+import { isModuleFrozen } from "@/lib/features";
 import type { SalonDetail } from "../_types";
 
 export function useSalonData() {
@@ -32,7 +33,8 @@ export function useSalonData() {
   }, [salonId]);
 
   const checkFavoriteStatus = useCallback(async () => {
-    if (!session) return;
+    // Ulubione zamrożone (`favoriteSalons`): trasa odpowiada 404, nie pytamy.
+    if (!session || isModuleFrozen("favoriteSalons")) return;
     try {
       const res = await fetch(
         `/api/favorites/salons/check?salonId=${salonId}`

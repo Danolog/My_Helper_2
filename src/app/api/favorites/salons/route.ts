@@ -6,8 +6,14 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { favoriteSalons, salons } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
+// Ulubione zamrożone (`favoriteSalons` w src/lib/features.ts): każdy handler
+// odpowiada 404 przed sesją i bazą. Wiersze w bazie zostają.
+
 // GET /api/favorites/salons - List favorite salons for authenticated user
 export async function GET() {
+  const frozen = frozenModuleResponse("favoriteSalons");
+  if (frozen) return frozen;
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
@@ -45,6 +51,8 @@ export async function GET() {
 
 // POST /api/favorites/salons - Add a salon to favorites
 export async function POST(request: Request) {
+  const frozen = frozenModuleResponse("favoriteSalons");
+  if (frozen) return frozen;
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
@@ -110,6 +118,8 @@ export async function POST(request: Request) {
 
 // DELETE /api/favorites/salons?salonId=<uuid> - Remove a salon from favorites
 export async function DELETE(request: Request) {
+  const frozen = frozenModuleResponse("favoriteSalons");
+  if (frozen) return frozen;
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;

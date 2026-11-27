@@ -5,7 +5,8 @@
  * z `requireDashboardAccess`) widzi wyłącznie zakładanie salonu: bez paska
  * bocznego, bez nawigacji i bez treści podstrony (`children`), niezależnie
  * od tego, czy to `/dashboard`, czy dowolna podstrona `/dashboard/*` — layout
- * jest wspólny. Do tego link „Jestem klientem” na `/salons`.
+ * jest wspólny. Do tego link „Jestem klientem” do portalu klienta
+ * (`clientHomePath()`).
  *
  * Właściciel i pracownik z aktywnym powiązaniem (`allowed: true`) widzą panel
  * jak dotychczas. Atrapy: sesja, kontekst salonu, moduły i komponenty
@@ -103,12 +104,12 @@ describe("konto bez salonu (allowed: false)", () => {
     }
   );
 
-  it("link „Jestem klientem” prowadzi na /salons", async () => {
+  it("link „Jestem klientem” prowadzi do portalu klienta (katalog zamrożony: „Moje wizyty”)", async () => {
     await renderLayout("/dashboard");
 
     expect(screen.getByRole("link", { name: /Jestem klientem/ })).toHaveAttribute(
       "href",
-      "/salons"
+      "/appointments"
     );
   });
 

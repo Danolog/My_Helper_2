@@ -24,7 +24,10 @@ const ROOT = process.cwd();
 const read = (relPath: string) => readFileSync(join(ROOT, relPath), "utf8");
 
 const SALES_DIR = "src/app/(site)/dla-salonow/_components";
+// Strona sprzedażowa jest na `/` (`(site)/page.tsx`); `/dla-salonow`
+// przekierowuje tam, a sekcje zostały w `dla-salonow/_components`.
 const SALES_FILES = [
+  "src/app/(site)/page.tsx",
   "src/app/(site)/dla-salonow/page.tsx",
   ...readdirSync(join(ROOT, SALES_DIR)).map((f) => `${SALES_DIR}/${f}`),
 ];
@@ -85,6 +88,9 @@ const FROZEN_MODULE_PROMISES: Record<string, RegExp> = {
   complexPromotions: /happy\s*hours|pakiet\w*\s+us[łl]ug|\b2\s*\+\s*1\b|pierwsz\w+ wizyt/i,
   imageGen: /baner|ilustracj|grafik\w* (AI|do post)|generowani\w* (obraz|grafik)|\bImagen\b/i,
   reviews: /opini|recenzj/i,
+  // Katalog salonów: klient nie znajdzie salonu w MyHelper, tylko z linku salonu.
+  salonCatalog: /katalog\w* salon|przegl[ąa]da\w* salon|znajd\w* salon|wyszukiw\w* salon/i,
+  favoriteSalons: /ulubion/i,
 };
 
 /**
@@ -146,6 +152,7 @@ describe("prawda w marketingu", () => {
     it("sekcja opinii jest usunięta", () => {
       expect(existsSync(join(ROOT, SALES_DIR, "DlaSalonowTestimonials.tsx"))).toBe(false);
       expectNoMatch("src/app/(site)/dla-salonow/page.tsx", /Testimonials/);
+      expectNoMatch("src/app/(site)/page.tsx", /Testimonials/);
     });
   });
 

@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { clientHomePath } from "@/lib/features"
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams()
@@ -75,12 +76,12 @@ function VerifyEmailContent() {
                 className="w-full"
                 onClick={() => {
                   // Portal klienta: konto klienta nie ma salonu, więc kierujemy
-                  // na listę salonów, nie do panelu salonu.
-                  router.replace("/salons")
+                  // do portalu (clientHomePath), nie do panelu salonu.
+                  router.replace(clientHomePath())
                   router.refresh()
                 }}
               >
-                Browse salons
+                Przejdź do portalu
               </Button>
             </>
           )}

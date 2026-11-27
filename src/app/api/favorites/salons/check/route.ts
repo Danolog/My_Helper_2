@@ -5,8 +5,12 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { favoriteSalons } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 // GET /api/favorites/salons/check?salonId=<uuid> - Check if salon is in favorites
 export async function GET(request: Request) {
+  // Ulubione zamrożone (`favoriteSalons`): 404 przed sesją i bazą.
+  const frozen = frozenModuleResponse("favoriteSalons");
+  if (frozen) return frozen;
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
