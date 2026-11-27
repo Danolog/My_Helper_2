@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -8,22 +8,21 @@ import {
   Calendar,
   CalendarPlus,
   UserRound,
-  Scissors,
-  UserCog,
+  Store,
+  TrendingUp,
   Package,
   Bell,
   Image,
   Percent,
   Bot,
-  BarChart3,
   FileText,
   CreditCard,
-  HandCoins,
   Hourglass,
   Settings,
   Star,
   Menu,
-  Wallet,
+  ChevronDown,
+  Ellipsis,
 } from "lucide-react";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { useModules } from "@/components/dashboard/modules-provider";
@@ -41,9 +40,11 @@ import {
 import { isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
+import type { ModulesState } from "@/lib/features";
+import type { SalonRole } from "@/lib/salon-context";
 import type { LucideIcon } from "lucide-react";
 
-interface NavItem {
+export interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
@@ -51,155 +52,148 @@ interface NavItem {
   isActive: (pathname: string) => boolean;
 }
 
-interface NavGroup {
-  title: string;
-  items: NavItem[];
+function startsWithAny(pathname: string, prefixes: ReadonlyArray<string>): boolean {
+  return prefixes.some((prefix) => pathname.startsWith(prefix));
 }
 
-export const NAV_GROUPS: NavGroup[] = [
+/**
+ * Pięć głównych pozycji menu (plan wejścia na rynek, 4.3). „Oferta” i „Wyniki”
+ * prowadzą na strony zbiorcze z kafelkami do istniejących podstron, więc są
+ * aktywne także na tych podstronach.
+ */
+export const PRIMARY_NAV: ReadonlyArray<NavItem> = [
   {
-    title: "Glowne",
-    items: [
-      {
-        label: "Pulpit",
-        href: "/dashboard",
-        icon: LayoutDashboard,
-        isActive: (pathname: string) => pathname === "/dashboard",
-      },
-      {
-        label: "Kalendarz",
-        href: "/dashboard/calendar",
-        icon: Calendar,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/calendar"),
-      },
-      {
-        label: "Rezerwacja",
-        href: "/dashboard/booking",
-        icon: CalendarPlus,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/booking"),
-      },
-    ],
+    label: "Dziś",
+    href: "/dashboard",
+    icon: LayoutDashboard,
+    isActive: (pathname) => pathname === "/dashboard",
   },
   {
-    title: "Zarzadzanie",
-    items: [
-      {
-        label: "Klienci",
-        href: "/dashboard/clients",
-        icon: UserRound,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/clients"),
-      },
-      {
-        label: "Uslugi",
-        href: "/dashboard/services",
-        icon: Scissors,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/services"),
-      },
-      {
-        label: "Pracownicy",
-        href: "/dashboard/employees",
-        icon: UserCog,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/employees"),
-      },
-      {
-        label: "Magazyn",
-        href: "/dashboard/products",
-        icon: Package,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/products"),
-      },
-      {
-        label: "Lista oczekujacych",
-        href: "/dashboard/waiting-list",
-        icon: Hourglass,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/waiting-list"),
-      },
-      {
-        label: "Powiadomienia",
-        href: "/dashboard/notifications",
-        icon: Bell,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/notifications"),
-      },
-    ],
+    label: "Kalendarz",
+    href: "/dashboard/calendar",
+    icon: Calendar,
+    isActive: (pathname) => pathname.startsWith("/dashboard/calendar"),
   },
   {
-    title: "Marketing",
-    items: [
-      {
-        label: "Galeria",
-        href: "/dashboard/gallery",
-        icon: Image,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/gallery"),
-      },
-      {
-        label: "Promocje",
-        href: "/dashboard/promotions",
-        icon: Percent,
-        isActive: (pathname: string) =>
-          pathname.startsWith("/dashboard/promotions") ||
-          pathname.startsWith("/dashboard/promo-codes"),
-      },
-      {
-        label: "Opinie",
-        href: "/dashboard/reviews",
-        icon: Star,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/reviews"),
-      },
-      {
-        label: "Asystent AI",
-        href: "/dashboard/ai-assistant",
-        icon: Bot,
-        badge: "PRO",
-        isActive: (pathname: string) =>
-          pathname.startsWith("/dashboard/ai-assistant") ||
-          pathname.startsWith("/dashboard/ai-recommendations") ||
-          pathname.startsWith("/dashboard/content-generator") ||
-          pathname.startsWith("/dashboard/ai-usage"),
-      },
-    ],
+    label: "Klienci",
+    href: "/dashboard/clients",
+    icon: UserRound,
+    isActive: (pathname) => pathname.startsWith("/dashboard/clients"),
   },
   {
-    title: "Finanse",
-    items: [
-      {
-        label: "Raporty",
-        href: "/dashboard/reports",
-        icon: BarChart3,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/reports"),
-      },
-      {
-        label: "Platnosci",
-        href: "/dashboard/payments",
-        icon: Wallet,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/payments"),
-      },
-      {
-        label: "Rozliczenia",
-        href: "/dashboard/finance",
-        icon: HandCoins,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/finance"),
-      },
-      {
-        label: "Faktury",
-        href: "/dashboard/invoices",
-        icon: FileText,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/invoices"),
-      },
-      {
-        label: "Subskrypcja",
-        href: "/dashboard/subscription",
-        icon: CreditCard,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/subscription"),
-      },
-    ],
+    label: "Oferta",
+    href: "/dashboard/offer",
+    icon: Store,
+    isActive: (pathname) =>
+      startsWithAny(pathname, ["/dashboard/offer", "/dashboard/services", "/dashboard/employees"]),
+  },
+  {
+    label: "Wyniki",
+    href: "/dashboard/results",
+    icon: TrendingUp,
+    isActive: (pathname) =>
+      startsWithAny(pathname, [
+        "/dashboard/results",
+        "/dashboard/reports",
+        "/dashboard/payments",
+        "/dashboard/finance",
+      ]),
   },
 ];
 
-const SETTINGS_ITEM: NavItem = {
-  label: "Ustawienia",
-  href: "/dashboard/settings",
-  icon: Settings,
-  isActive: (pathname: string) => pathname.startsWith("/dashboard/settings"),
-};
+/** Dodatki i ustawienia pod rozwijaną grupą „Więcej”. */
+export const MORE_NAV: ReadonlyArray<NavItem> = [
+  {
+    label: "Ręczna rezerwacja",
+    href: "/dashboard/booking",
+    icon: CalendarPlus,
+    isActive: (pathname) => pathname.startsWith("/dashboard/booking"),
+  },
+  {
+    label: "Magazyn",
+    href: "/dashboard/products",
+    icon: Package,
+    isActive: (pathname) => pathname.startsWith("/dashboard/products"),
+  },
+  {
+    label: "Lista oczekujących",
+    href: "/dashboard/waiting-list",
+    icon: Hourglass,
+    isActive: (pathname) => pathname.startsWith("/dashboard/waiting-list"),
+  },
+  {
+    label: "Promocje",
+    href: "/dashboard/promotions",
+    icon: Percent,
+    isActive: (pathname) =>
+      startsWithAny(pathname, ["/dashboard/promotions", "/dashboard/promo-codes"]),
+  },
+  {
+    label: "Galeria",
+    href: "/dashboard/gallery",
+    icon: Image,
+    isActive: (pathname) => pathname.startsWith("/dashboard/gallery"),
+  },
+  {
+    label: "Powiadomienia",
+    href: "/dashboard/notifications",
+    icon: Bell,
+    isActive: (pathname) => pathname.startsWith("/dashboard/notifications"),
+  },
+  {
+    label: "Asystent AI",
+    href: "/dashboard/ai-assistant",
+    icon: Bot,
+    badge: "PRO",
+    isActive: (pathname) =>
+      startsWithAny(pathname, [
+        "/dashboard/ai-assistant",
+        "/dashboard/ai-recommendations",
+        "/dashboard/content-generator",
+        "/dashboard/ai-usage",
+      ]),
+  },
+  {
+    label: "Faktury",
+    href: "/dashboard/invoices",
+    icon: FileText,
+    isActive: (pathname) => pathname.startsWith("/dashboard/invoices"),
+  },
+  {
+    label: "Opinie",
+    href: "/dashboard/reviews",
+    icon: Star,
+    isActive: (pathname) => pathname.startsWith("/dashboard/reviews"),
+  },
+  {
+    label: "Subskrypcja",
+    href: "/dashboard/subscription",
+    icon: CreditCard,
+    isActive: (pathname) => pathname.startsWith("/dashboard/subscription"),
+  },
+  {
+    label: "Ustawienia",
+    href: "/dashboard/settings",
+    icon: Settings,
+    isActive: (pathname) => pathname.startsWith("/dashboard/settings"),
+  },
+];
+
+/**
+ * Pozycje widoczne dla roli i stanu modułów salonu. Jedna ścieżka filtra dla
+ * menu bocznego i dolnego paska: rola (`isRouteAllowedForRole`, te same
+ * reguły co `RoleGate`) i moduły (`isRouteEnabledForModules`, bez pozycji
+ * modułów wyłączonych i zamrożonych).
+ */
+export function filterNavItems(
+  items: ReadonlyArray<NavItem>,
+  role: SalonRole,
+  modules: ModulesState
+): NavItem[] {
+  return items.filter(
+    (item) => isRouteAllowedForRole(item.href, role) && isRouteEnabledForModules(item.href, modules)
+  );
+}
 
 function NavLink({
   item,
@@ -239,19 +233,22 @@ function NavLink({
 export function SidebarNav({
   pathname,
   onClick,
+  moreDefaultOpen = false,
 }: {
   pathname: string;
   onClick?: () => void;
+  /** Rozwinięta grupa „Więcej” na starcie (np. po „Więcej” z dolnego paska). */
+  moreDefaultOpen?: boolean;
 }) {
   const modules = useModules();
   const role = useSalonRole();
-  const visibleGroups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) => {
-      if (!isRouteAllowedForRole(item.href, role)) return false;
-      return isRouteEnabledForModules(item.href, modules);
-    }),
-  })).filter((group) => group.items.length > 0);
+  const primaryItems = filterNavItems(PRIMARY_NAV, role, modules);
+  const moreItems = filterNavItems(MORE_NAV, role, modules);
+  // Na podstronie z „Więcej” grupa startuje rozwinięta, żeby aktywna
+  // pozycja była widoczna.
+  const moreHasActive = moreItems.some((item) => item.isActive(pathname));
+  const [moreOpen, setMoreOpen] = useState(moreDefaultOpen || moreHasActive);
+  const moreListId = useId();
 
   return (
     <nav
@@ -260,30 +257,48 @@ export function SidebarNav({
       aria-label="Panel nawigacyjny"
     >
       <div className="flex-1">
-        {visibleGroups.map((group, groupIndex) => (
-          <div key={group.title} className={cn(groupIndex > 0 && "mt-4")}>
-            <h3 className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
-              {group.title}
-            </h3>
-            <div className="flex flex-col gap-0.5">
-              {group.items.map((item) => (
-                <NavLink
-                  key={item.href}
-                  item={item}
-                  pathname={pathname}
-                  onClick={onClick}
-                />
-              ))}
-            </div>
+        <div className="flex flex-col gap-0.5">
+          {primaryItems.map((item) => (
+            <NavLink key={item.href} item={item} pathname={pathname} onClick={onClick} />
+          ))}
+        </div>
+
+        {moreItems.length > 0 && (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setMoreOpen((open) => !open)}
+              aria-expanded={moreOpen}
+              aria-controls={moreListId}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg px-3 py-3 min-h-[44px] text-sm font-medium transition-colors border-l-[3px]",
+                // Zwinięta grupa z aktywną podstroną (np. wejście z palety
+                // poleceń) jest podświetlona, żeby było widać, gdzie jesteśmy.
+                moreHasActive && !moreOpen
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground border-primary"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground border-transparent"
+              )}
+            >
+              <Ellipsis className="h-4 w-4 shrink-0" />
+              <span className="flex-1 text-left">Więcej</span>
+              <ChevronDown
+                className={cn("h-4 w-4 shrink-0 transition-transform", moreOpen && "rotate-180")}
+                aria-hidden="true"
+              />
+            </button>
+            {moreOpen && (
+              <div id={moreListId} className="mt-0.5 flex flex-col gap-0.5">
+                {moreItems.map((item) => (
+                  <NavLink key={item.href} item={item} pathname={pathname} onClick={onClick} />
+                ))}
+              </div>
+            )}
           </div>
-        ))}
+        )}
       </div>
 
-      {/* Ustawienia (tylko owner) i wylogowanie (każda rola) na dole */}
+      {/* Wylogowanie (każda rola) na dole */}
       <div className="mt-4 pt-4 border-t border-sidebar-border flex flex-col gap-0.5">
-        {isRouteAllowedForRole(SETTINGS_ITEM.href, role) && (
-          <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
-        )}
         <SignOutButton
           variant="ghost"
           className="w-full px-3 text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"

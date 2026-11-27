@@ -3,14 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Calendar,
-  UserRound,
-  Bot,
-  Menu,
-} from "lucide-react";
-import { SidebarNav } from "@/components/dashboard/dashboard-sidebar";
+import { Menu, Plus } from "lucide-react";
+import { PRIMARY_NAV, SidebarNav, type NavItem } from "@/components/dashboard/dashboard-sidebar";
 import { useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Separator } from "@/components/ui/separator";
@@ -23,58 +17,61 @@ import {
 import { isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
+import type { ModulesState } from "@/lib/features";
+import type { SalonRole } from "@/lib/salon-context";
 
-interface BottomNavItem {
-  label: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-  isActive: (pathname: string) => boolean;
+/** Pozycje paska z menu bocznego: Dziś, Kalendarz, Klienci (te same etykiety i aktywność). */
+const BOTTOM_NAV_HREFS = ["/dashboard", "/dashboard/calendar", "/dashboard/clients"];
+const BOTTOM_NAV_ITEMS: ReadonlyArray<NavItem> = PRIMARY_NAV.filter((item) =>
+  BOTTOM_NAV_HREFS.includes(item.href)
+);
+
+/**
+ * Środkowy przycisk „+ Wizyta” prowadzi do ręcznej rezerwacji, czyli
+ * dodawania wizyty przez salon. Podlega tym samym regułom ról co strona.
+ */
+const ADD_APPOINTMENT_HREF = "/dashboard/booking";
+
+function isVisible(href: string, role: SalonRole, modules: ModulesState): boolean {
+  return isRouteAllowedForRole(href, role) && isRouteEnabledForModules(href, modules);
 }
 
-const BOTTOM_NAV_ITEMS: BottomNavItem[] = [
-  {
-    label: "Pulpit",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    isActive: (pathname) => pathname === "/dashboard",
-  },
-  {
-    label: "Kalendarz",
-    href: "/dashboard/calendar",
-    icon: Calendar,
-    isActive: (pathname) => pathname.startsWith("/dashboard/calendar"),
-  },
-  {
-    label: "Klienci",
-    href: "/dashboard/clients",
-    icon: UserRound,
-    isActive: (pathname) => pathname.startsWith("/dashboard/clients"),
-  },
-  {
-    label: "AI",
-    href: "/dashboard/ai-assistant",
-    icon: Bot,
-    isActive: (pathname) =>
-      pathname.startsWith("/dashboard/ai-assistant") ||
-      pathname.startsWith("/dashboard/ai-recommendations") ||
-      pathname.startsWith("/dashboard/content-generator"),
-  },
-];
+function BottomNavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+  const active = item.isActive(pathname);
+  const Icon = item.icon;
+
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "flex flex-1 flex-col items-center justify-center gap-0.5 min-h-[56px] transition-colors",
+        active ? "text-primary" : "text-muted-foreground"
+      )}
+      aria-current={active ? "page" : undefined}
+    >
+      <Icon className="h-5 w-5" />
+      <span className="text-[10px] font-medium mt-0.5">{item.label}</span>
+    </Link>
+  );
+}
 
 /**
  * Mobile bottom navigation bar for the dashboard.
  * Fixed to the bottom of the viewport, visible only on screens < md (768px).
- * The "Wiecej" (More) button opens a Sheet drawer with the full sidebar navigation.
+ * Układ: Dziś, Kalendarz, „+ Wizyta” (środek), Klienci, Więcej. „Więcej”
+ * otwiera panel z pełnym menu i rozwiniętą grupą dodatków.
  */
 export function DashboardBottomNav() {
   const pathname = usePathname();
   const [sheetOpen, setSheetOpen] = useState(false);
   const modules = useModules();
   const role = useSalonRole();
-  const visibleItems = BOTTOM_NAV_ITEMS.filter((item) => {
-    if (!isRouteAllowedForRole(item.href, role)) return false;
-    return isRouteEnabledForModules(item.href, modules);
-  });
+  const visibleItems = BOTTOM_NAV_ITEMS.filter((item) => isVisible(item.href, role, modules));
+  // Środkowy przycisk wchodzi między drugą a trzecią pozycję (po Kalendarzu).
+  const leftItems = visibleItems.slice(0, 2);
+  const rightItems = visibleItems.slice(2);
+  const showAddAppointment = isVisible(ADD_APPOINTMENT_HREF, role, modules);
+  const addActive = pathname.startsWith(ADD_APPOINTMENT_HREF);
 
   return (
     <>
@@ -89,41 +86,47 @@ export function DashboardBottomNav() {
         role="navigation"
         aria-label="Szybka nawigacja"
       >
-        {visibleItems.map((item) => {
-          const active = item.isActive(pathname);
-          const Icon = item.icon;
+        {leftItems.map((item) => (
+          <BottomNavLink key={item.href} item={item} pathname={pathname} />
+        ))}
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
+        {showAddAppointment && (
+          <Link
+            href={ADD_APPOINTMENT_HREF}
+            className="flex flex-1 flex-col items-center justify-center min-h-[56px]"
+            aria-label="Dodaj wizytę"
+            aria-current={addActive ? "page" : undefined}
+          >
+            <span
               className={cn(
-                "flex flex-1 flex-col items-center justify-center gap-0.5 min-h-[56px] transition-colors",
-                active ? "text-primary" : "text-muted-foreground"
+                "flex h-11 w-11 items-center justify-center rounded-full shadow-md transition-colors",
+                "bg-primary text-primary-foreground",
+                addActive && "ring-2 ring-primary/40 ring-offset-2 ring-offset-sidebar"
               )}
-              aria-current={active ? "page" : undefined}
             >
-              <Icon className="h-5 w-5" />
-              <span className="text-[10px] font-medium mt-0.5">
-                {item.label}
-              </span>
-            </Link>
-          );
-        })}
+              <Plus className="h-5 w-5" />
+            </span>
+            <span className="text-[10px] font-medium mt-0.5 text-primary">Wizyta</span>
+          </Link>
+        )}
 
-        {/* "Wiecej" button - opens Sheet with full sidebar navigation */}
+        {rightItems.map((item) => (
+          <BottomNavLink key={item.href} item={item} pathname={pathname} />
+        ))}
+
+        {/* "Więcej" - opens Sheet with full sidebar navigation */}
         <button
           type="button"
           onClick={() => setSheetOpen(true)}
           className="flex flex-1 flex-col items-center justify-center gap-0.5 min-h-[56px] text-muted-foreground transition-colors"
-          aria-label="Otworz pelne menu nawigacyjne"
+          aria-label="Otwórz pełne menu nawigacyjne"
         >
           <Menu className="h-5 w-5" />
-          <span className="text-[10px] font-medium mt-0.5">Wiecej</span>
+          <span className="text-[10px] font-medium mt-0.5">Więcej</span>
         </button>
       </nav>
 
-      {/* Sheet drawer with full sidebar navigation, triggered by "Wiecej" */}
+      {/* Sheet drawer with full sidebar navigation, triggered by "Więcej" */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="left" className="w-64 bg-sidebar p-0">
           <SheetHeader className="border-b border-sidebar-border p-4">
@@ -135,6 +138,7 @@ export function DashboardBottomNav() {
           <div className="p-4 overflow-y-auto flex-1 min-h-0">
             <SidebarNav
               pathname={pathname}
+              moreDefaultOpen
               onClick={() => setSheetOpen(false)}
             />
           </div>

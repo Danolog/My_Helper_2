@@ -37,6 +37,7 @@ import {
   Lightbulb,
   Search,
   Sparkles,
+  Store,
 } from "lucide-react";
 import { useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
@@ -63,6 +64,8 @@ interface CommandPage {
 const NAV_PAGES: CommandPage[] = [
   { label: "Pulpit", href: "/dashboard", icon: LayoutDashboard },
   { label: "Kalendarz", href: "/dashboard/calendar", icon: Calendar },
+  { label: "Oferta", href: "/dashboard/offer", icon: Store, keywords: ["uslugi", "zespol"] },
+  { label: "Wyniki", href: "/dashboard/results", icon: TrendingUp, keywords: ["raporty", "platnosci", "rozliczenia"] },
   { label: "Rezerwacja", href: "/dashboard/booking", icon: CalendarPlus, keywords: ["wizyta", "termin"] },
   { label: "Klienci", href: "/dashboard/clients", icon: UserRound },
   { label: "Uslugi", href: "/dashboard/services", icon: Scissors },

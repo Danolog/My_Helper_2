@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 
 const LABELS: Record<string, string> = {
-  dashboard: "Pulpit",
+  dashboard: "Dziś",
   calendar: "Kalendarz",
   clients: "Klienci",
   services: "Uslugi",
@@ -45,6 +45,8 @@ const LABELS: Record<string, string> = {
   finance: "Prowizje",
   reviews: "Opinie",
   "waiting-list": "Lista oczekujacych",
+  offer: "Oferta",
+  results: "Wyniki",
 };
 
 function isUuid(segment: string) {
