@@ -248,7 +248,8 @@ describe("zakres salonu i blokada wiersza", () => {
 
     expect((await call(POST)).status).toBe(200);
 
-    expect(h.selectWheres).toHaveLength(1);
+    // [wizyta], [próg automatycznej blokady] — próg pusty, więc bez kart.
+    expect(h.selectWheres).toHaveLength(2);
     const apptWhere = rendered(h.selectWheres[0]);
     expect(apptWhere.sql).toBe('("appointments"."id" = $1 and "appointments"."salon_id" = $2)');
     expect(apptWhere.params).toEqual([APPT_ID, SALON_A]);

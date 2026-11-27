@@ -115,11 +115,17 @@ describe("200", () => {
     expect(clientWhere.sql).toBe('("clients"."id" = $1 and "clients"."salon_id" = $2)');
     expect(clientWhere.params).toEqual([CLIENT_ID, SALON_A]);
 
+    // Ten sam licznik co przy automatycznej blokadzie (countCardNoShows):
+    // wizyty karty plus wizyty online tego samego klienta. Pełny kształt
+    // zapytania sprawdza appointments-no-show-auto-block.test.ts.
     const countWhere = rendered(h.selectWheres[1]);
-    expect(countWhere.sql).toBe(
-      '("appointments"."salon_id" = $1 and "appointments"."client_id" = $2 and "appointments"."status" = $3)'
-    );
-    expect(countWhere.params).toEqual([SALON_A, CLIENT_ID, "no_show"]);
+    expect(countWhere.sql.startsWith(
+      '("appointments"."salon_id" = $1 and "appointments"."status" = $2 and ("appointments"."client_id" = $3 or ' +
+        '("appointments"."client_id" is null and exists (select 1 from "clients" "no_show_card" where ' +
+        '("no_show_card"."id" = $4 and "no_show_card"."salon_id" = $5 and '
+    )).toBe(true);
+    expect(countWhere.sql).toContain('"booking_account"."id" = "appointments"."booked_by_user_id"');
+    expect(countWhere.params).toEqual([SALON_A, "no_show", CLIENT_ID, CLIENT_ID, SALON_A, true]);
   });
 });
 

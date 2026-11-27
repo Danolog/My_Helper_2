@@ -5,12 +5,21 @@
  * oznacza wizytę „Nie przyszedł” — po zmianie statusu, przed commitem. Próg
  * czyta z `salons.settingsJson.noShowAutoBlockThreshold` (null = wyłączone).
  *
+ * Karty, których dotyczy nieobecność:
+ * - wizyta z kartą (`client_id`) — ta karta;
+ * - wizyta online bez karty (portal, gość) — każda karta tego salonu, która
+ *   według reguły „ten sam klient” (src/lib/online-booking-block.ts) pasuje
+ *   do telefonu wizyty albo zweryfikowanego e-maila konta rezerwującego.
+ *   Bez pasującej karty nie ma blokady. Wizyta nie dostaje `client_id`
+ *   i żadna karta nie powstaje.
+ *
  * Kolejność w transakcji:
  * 1. próg salonu (brak albo wartość spoza 1–3 → nic nie robi, bez blokady wiersza);
- * 2. wiersz klienta `FOR NO KEY UPDATE` — dwa równoległe oznaczenia wizyt
- *    tego samego klienta liczą po kolei, więc drugie widzi wizytę pierwszego
- *    i próg nie „przeskakuje” przez wyścig;
- * 3. liczba wizyt klienta ze statusem `no_show` w salonie;
+ * 2. wiersze kart `FOR NO KEY UPDATE` w kolejności `id` — dwa równoległe
+ *    oznaczenia wizyt tego samego klienta liczą po kolei, więc drugie widzi
+ *    wizytę pierwszego i próg nie „przeskakuje” przez wyścig; stała kolejność
+ *    przy kilku kartach nie daje zakleszczeń między dwoma oznaczeniami;
+ * 3. dla każdej karty licznik `countCardNoShows` (ten sam co na karcie klienta);
  * 4. UPDATE tylko karty bez blokady (`blocked_at IS NULL`): istniejąca blokada,
  *    ręczna albo automatyczna, zostaje z pierwotną datą, autorem i notatką.
  *
@@ -19,7 +28,7 @@
  * `tx` pochodzi z `forSalon(salonId).raw(...)`; każde zapytanie ma jawny
  * warunek `salon_id` (salons: `id = salonId`).
  */
-import { and, count, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, count, eq, isNull, or, sql } from "drizzle-orm";
 import {
   CLIENT_BLOCKED_BY_AUTO,
   parseNoShowAutoBlockThreshold,
@@ -27,6 +36,7 @@ import {
   type NoShowAutoBlockThreshold,
 } from "@/lib/client-block";
 import { NO_SHOW_STATUS } from "@/lib/no-show";
+import { cardOfOnlineAppointment, onlineAppointmentOfCard } from "@/lib/online-booking-block";
 import { appointments, clients, salons } from "@/lib/schema";
 import type { DbTx } from "@/lib/server/repository";
 
@@ -39,17 +49,69 @@ export function noShowAutoBlockThresholdColumn() {
   return sql<unknown>`${salons.settingsJson} -> 'noShowAutoBlockThreshold'`;
 }
 
+/**
+ * Liczba nieobecności karty `clientId` w salonie: wizyty z tą kartą plus
+ * wizyty online tego samego klienta (bez karty). Jedno źródło licznika dla
+ * blokady i dla licznika „Nie przyszedł” na karcie klienta.
+ */
+export async function countCardNoShows(tx: DbTx, salonId: string, clientId: string): Promise<number> {
+  const [row] = await tx
+    .select({ noShowCount: count() })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.salonId, salonId),
+        eq(appointments.status, NO_SHOW_STATUS),
+        or(eq(appointments.clientId, clientId), onlineAppointmentOfCard(salonId, clientId))
+      )
+    );
+  return Number(row?.noShowCount ?? 0);
+}
+
+/** Wizyta oznaczana „Nie przyszedł”: id i karta (null = wizyta online). */
+export type NoShowAppointmentRef = { id: string; clientId: string | null };
+
+export type NoShowCardOutcome = {
+  clientId: string;
+  noShowCount: number;
+  result: "below" | "already_blocked" | "blocked";
+};
+
 export type NoShowAutoBlockOutcome =
   | { kind: "off" }
-  | { kind: "client_missing"; threshold: NoShowAutoBlockThreshold }
-  | { kind: "below"; threshold: NoShowAutoBlockThreshold; noShowCount: number }
-  | { kind: "already_blocked"; threshold: NoShowAutoBlockThreshold; noShowCount: number }
-  | { kind: "blocked"; threshold: NoShowAutoBlockThreshold; noShowCount: number };
+  | { kind: "no_card"; threshold: NoShowAutoBlockThreshold }
+  | { kind: "checked"; threshold: NoShowAutoBlockThreshold; cards: NoShowCardOutcome[] };
+
+/**
+ * Karty, których dotyczy nieobecność, zablokowane `FOR NO KEY UPDATE`
+ * w kolejności `id` (Postgres blokuje wiersze po sortowaniu).
+ */
+async function lockNoShowCards(tx: DbTx, salonId: string, appointment: NoShowAppointmentRef): Promise<string[]> {
+  const target = appointment.clientId
+    ? eq(clients.id, appointment.clientId)
+    : cardOfOnlineAppointment(salonId, appointment.id);
+  const rows = await tx
+    .select({ id: clients.id })
+    .from(clients)
+    .where(and(target, eq(clients.salonId, salonId)))
+    .orderBy(asc(clients.id))
+    .for("no key update");
+  return rows.map((r) => r.id);
+}
+
+async function blockCardIfUnblocked(tx: DbTx, salonId: string, clientId: string, now: Date): Promise<boolean> {
+  const updated = await tx
+    .update(clients)
+    .set({ blockedAt: now, blockedBy: CLIENT_BLOCKED_BY_AUTO, blockNote: null, updatedAt: now })
+    .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId), isNull(clients.blockedAt)))
+    .returning({ id: clients.id });
+  return updated.length > 0;
+}
 
 export async function applyNoShowAutoBlock(
   tx: DbTx,
   salonId: string,
-  clientId: string,
+  appointment: NoShowAppointmentRef,
   now: Date = new Date()
 ): Promise<NoShowAutoBlockOutcome> {
   const [salon] = await tx
@@ -60,33 +122,19 @@ export async function applyNoShowAutoBlock(
   const threshold = parseNoShowAutoBlockThreshold(salon?.threshold);
   if (threshold === null) return { kind: "off" };
 
-  const [client] = await tx
-    .select({ id: clients.id })
-    .from(clients)
-    .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
-    .limit(1)
-    .for("no key update");
-  if (!client) return { kind: "client_missing", threshold };
+  const cardIds = await lockNoShowCards(tx, salonId, appointment);
+  if (cardIds.length === 0) return { kind: "no_card", threshold };
 
-  const [row] = await tx
-    .select({ noShowCount: count() })
-    .from(appointments)
-    .where(
-      and(
-        eq(appointments.salonId, salonId),
-        eq(appointments.clientId, clientId),
-        eq(appointments.status, NO_SHOW_STATUS)
-      )
-    );
-  const noShowCount = Number(row?.noShowCount ?? 0);
-  if (!reachesNoShowAutoBlock(noShowCount, threshold)) return { kind: "below", threshold, noShowCount };
-
-  const updated = await tx
-    .update(clients)
-    .set({ blockedAt: now, blockedBy: CLIENT_BLOCKED_BY_AUTO, blockNote: null, updatedAt: now })
-    .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId), isNull(clients.blockedAt)))
-    .returning({ id: clients.id });
-  return updated.length > 0
-    ? { kind: "blocked", threshold, noShowCount }
-    : { kind: "already_blocked", threshold, noShowCount };
+  // Po kolei, nie równolegle: jedna transakcja to jedno połączenie.
+  const cards: NoShowCardOutcome[] = [];
+  for (const clientId of cardIds) {
+    const noShowCount = await countCardNoShows(tx, salonId, clientId);
+    if (!reachesNoShowAutoBlock(noShowCount, threshold)) {
+      cards.push({ clientId, noShowCount, result: "below" });
+      continue;
+    }
+    const blocked = await blockCardIfUnblocked(tx, salonId, clientId, now);
+    cards.push({ clientId, noShowCount, result: blocked ? "blocked" : "already_blocked" });
+  }
+  return { kind: "checked", threshold, cards };
 }
