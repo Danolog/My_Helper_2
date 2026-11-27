@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   BASE_FIELDS,
   MAX_MESSAGE_LENGTH,
+  OMITTED_MESSAGE,
   OUTPUT_FIELDS,
   SKIPPED_LINE,
   formatJson,
   formatText,
   maskMessage,
+  maskText,
   processLogInput,
   sanitizePath,
   toSafeEntry,
@@ -326,6 +328,131 @@ describe('regresja: wycieki z recenzji', () => {
   });
 });
 
+describe('regresja: sekrety maskowane przed dekodowaniem %XX', () => {
+  // [nazwa, wejście, fragmenty, których nie może być na wyjściu, oczekiwane wyjście]
+  it.each([
+    [
+      'URI z %2F w haśle',
+      'postgresql://app:pa%2Fss@db.example.com/db',
+      ['app', 'pa/', 'pa%2F', 'ss@', '[email]'],
+      'postgresql://[dane]@db.example.com/db',
+    ],
+    [
+      'URI z %3F w haśle',
+      'postgresql://app:p%3Fss@db.example.com/db',
+      ['app', 'p?', 'p%3F', 'ss@', '[email]'],
+      'postgresql://[dane]@db.example.com/db',
+    ],
+    [
+      'URI z %23 w haśle',
+      'postgresql://app:p%23ss@db.example.com/db',
+      ['app', 'p#', 'p%23', 'ss@', '[email]'],
+      'postgresql://[dane]@db.example.com/db',
+    ],
+    [
+      'URI z %20 w haśle',
+      'postgresql://app:p%20ss@db.example.com/db',
+      ['app', 'p ', 'p%20', 'ss@', '[email]'],
+      'postgresql://[dane]@db.example.com/db',
+    ],
+    [
+      'URI redis z %2F i %2B w haśle',
+      'redis://default:Ab%2FCd%2BEf@cache.example.com:6379',
+      ['default', 'Ab', 'Cd', 'Ef', '[email]'],
+      'redis://[dane]@cache.example.com:6379',
+    ],
+    ['password z %20', 'password=abc%20def', ['abc', 'def', '%20'], 'password=[token]'],
+    ['password z %26', 'password=abc%26def', ['abc', 'def', '&'], 'password=[token]'],
+    ['password z %2C', 'password=abc%2Cdef', ['abc', 'def', ','], 'password=[token]'],
+    ['password z %3B', 'password=abc%3Bdef', ['abc', 'def', ';'], 'password=[token]'],
+    ['token z %22', 'token=Ab12%22Cd34', ['Ab12', 'Cd34', '"'], 'token=[token]'],
+    ['Bearer z %20', 'Bearer abc%20def123', ['abc', 'def123'], 'Bearer [token]'],
+  ])('%s', (_name, input, forbidden, expected) => {
+    const out = maskMessage(input as string);
+    for (const fragment of forbidden as string[]) expect(out).not.toContain(fragment);
+    expect(out).toBe(expected);
+  });
+});
+
+describe('regresja: odporność na złośliwe wejście', () => {
+  it.each([
+    ['a=', 'a='],
+    ['a:', 'a:'],
+  ])('ciąg „%s” powtórzony do 4000 znaków nie przepełnia stosu', (_name, unit) => {
+    const text = unit.repeat(2000);
+    expect(text.length).toBe(4000);
+    expect(() => maskMessage(text)).not.toThrow();
+    const entry = toSafeEntry({ timestamp: '2026-11-27T10:15:30Z', textPayload: text }, WITH_MESSAGE);
+    expect(entry).not.toBeNull();
+    expect(typeof entry!.message).toBe('string');
+  });
+
+  it('sekret na końcu długiego łańcucha zagnieżdżonych par jest maskowany', () => {
+    const out = maskText('a='.repeat(1900) + 'token=AbC123xyz');
+    expect(out).not.toContain('AbC123xyz');
+    expect(out.endsWith('token=[token]')).toBe(true);
+  });
+
+  it('czterokrotnie zakodowany e-mail jest dekodowany do końca', () => {
+    const out = maskMessage('login jan%2525252540example.com');
+    expect(out).toBe('login [email]');
+    expect(out).not.toContain('jan');
+  });
+
+  it('kodowanie głębsze niż limit przebiegów pomija cały komunikat', () => {
+    const out = maskMessage(`login jan%${'25'.repeat(10)}40example.com`);
+    expect(out).toBe(OMITTED_MESSAGE);
+  });
+
+  it('błędny bajt %XX, który się nie dekoduje, nie pomija komunikatu', () => {
+    const out = maskMessage('login jan%E2%40example.com');
+    expect(out).toBe('login [email]');
+  });
+});
+
+describe('regresja: drobne wycieki z recenzji', () => {
+  // [nazwa, wejście, fragmenty, których nie może być na wyjściu, oczekiwane wyjście]
+  it.each([
+    // wartości zaczynające się od [ i <, cudzysłowy
+    ['wartość w nawiasie kwadratowym', 'password=[S3cret!]', ['S3cret'], 'password=[token]'],
+    ['cudzysłów bez zamknięcia', 'password="S3cret!', ['S3cret'], 'password=[token]'],
+    ['wartość w nawiasie ostrym', 'password=<S3cret!>', ['S3cret'], 'password=[token]'],
+    ['cudzysłów ze znakiem ucieczki', '"password":"ab\\"cd"', ['ab', 'cd'], '"password":[token]'],
+    ['apostrof w środku wartości', "password=ab'cd", ['ab', 'cd'], 'password=[token]'],
+    // nazwy kluczy
+    ['klucz pass', 'pass=Kot!Ala2026', ['Kot', 'Ala2026'], 'pass=[token]'],
+    ['klucz private_key', 'private_key=Kot!Ala2026', ['Kot', 'Ala2026'], 'private_key=[token]'],
+    ['klucz otp', 'otp=482913', ['482913'], 'otp=[token]'],
+    ['klucz pin', 'pin=4821', ['4821'], 'pin=[token]'],
+    ['klucz signature', 'signature=AbCd1234Ef', ['AbCd', '1234'], 'signature=[token]'],
+    // telefony
+    ['telefon z ukośnikami', 'tel 600/700/800', ['600', '700', '800'], 'tel [telefon]'],
+    ['telefon z półpauzą', 'tel 600–700–800', ['600', '700', '800'], 'tel [telefon]'],
+    [
+      'telefon cyframi pełnej szerokości',
+      'tel ６００ ７００ ８００',
+      ['600', '６００', '８００'],
+      'tel [telefon]',
+    ],
+    // IPv6 przyklejone do litery
+    ['IPv6 po literze', 'ip2001:db8::1', ['2001', 'db8'], 'ip[ip]'],
+    ['IPv6 przed literą', 'from 2001:db8::1ms', ['2001', 'db8'], 'from [ip]ms'],
+  ])('%s', (_name, input, forbidden, expected) => {
+    const out = maskMessage(input as string);
+    for (const fragment of forbidden as string[]) expect(out).not.toContain(fragment);
+    expect(out).toBe(expected);
+  });
+
+  it.each([
+    ['host po wiodącym //', '//example.com/x', '/x'],
+    ['sam host po wiodącym //', '//example.com', '/'],
+  ])('ścieżka: %s', (_name, input, expected) => {
+    const out = sanitizePath(input);
+    expect(out).toBe(expected);
+    expect(out).not.toContain('example');
+  });
+});
+
 describe('kolejność reguł', () => {
   it('maskowanie IP nie zostawia hasła z URI', () => {
     const out = maskMessage('connect postgresql://app:S3cretPass@198.51.100.7:5432/db refused');
@@ -358,6 +485,8 @@ describe('bez fałszywych trafień', () => {
     ['licznik tokenów modelu', 'max_tokens=1000 input_tokens: 250'],
     ['zwykłe słowo Basic', 'Basic plan aktywny'],
     ['IPv6 pętli zwrotnej nie jest daną osobową', 'nasłuch na ::1'],
+    ['data z ukośnikami i godziną', 'start 2026/11/27 10:15 ok'],
+    ['klucze kończące się na pass i pin bez separatora', 'bypass=1 mapping=2 compass=3'],
   ])('%s', (_name, input) => {
     expect(maskMessage(input)).toBe(input);
   });
