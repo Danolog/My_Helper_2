@@ -146,6 +146,7 @@ vi.mock("@/lib/schema", () => {
     subscriptionPlans: table("subscriptionPlans"),
     salonSubscriptions: table("salonSubscriptions"),
     salons: table("salons"),
+    salonSlugHistory: table("salonSlugHistory"),
     user: table("user"),
     legalAcceptances: table("legalAcceptances"),
   };
@@ -181,6 +182,19 @@ vi.mock("drizzle-orm", () => ({
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
 }));
 
+// Wolny adres `/s/<slug>` wybiera wyjście systemowe (zajęte adresy należą do innych
+// salonów). Atrapa odnotowuje wywołanie w opLog i oddaje `base` albo pierwszy wolny
+// sufiks z listy `takenSlugs`.
+const slugState = vi.hoisted(() => ({ taken: [] as string[] }));
+const mockPickFreeSalonSlug = vi.fn(async (base: string) => {
+  opLog.push(`pick:slug:${base}`);
+  if (!slugState.taken.includes(base)) return base;
+  for (let n = 2; ; n++) if (!slugState.taken.includes(`${base}-${n}`)) return `${base}-${n}`;
+});
+vi.mock("@/lib/server/system", () => ({
+  pickFreeSalonSlug: (base: string) => mockPickFreeSalonSlug(base),
+}));
+
 const mockRequireAuth = vi.fn();
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
@@ -213,6 +227,7 @@ beforeEach(() => {
   opLog.length = 0;
   failInsert = null;
   lockFailure.next = null;
+  slugState.taken = [];
   legalState.published = false;
   legalState.terms = null;
   legalState.dpa = null;
@@ -480,8 +495,9 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
       1,
       expect.objectContaining({ ownerId: USER_A.id, email: USER_A.email })
     );
+    // 2. wstawienie: adres bieżący w rejestrze adresów; 3.: subskrypcja.
     expect(mockInsertValues).toHaveBeenNthCalledWith(
-      2,
+      3,
       expect.objectContaining({ salonId: SALON_A, planId: PLAN_BASIC.id, status: "trialing" })
     );
   });
@@ -529,10 +545,15 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
     expect(status).toBe(200);
     expect(opLog).toEqual([
       "select:subscriptionPlans",
+      // Wolny adres `/s/<slug>` z wyjścia systemowego PRZED otwarciem transakcji:
+      // wyjście bierze własne połączenie z puli, transakcja nie trzyma dwóch naraz.
+      "pick:slug:salon-anna",
       "tx:start",
       "lock_timeout",
       "select:salons",
       "insert:salons",
+      // Adres bieżący w rejestrze adresów (klucz główny slug), ta sama transakcja.
+      "insert:salonSlugHistory",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",
       "insert:salonSubscriptions",
@@ -604,6 +625,162 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
     const { status } = await post({ planSlug: 123 });
     expect(status).toBe(400);
     expect(opLog).toEqual([]);
+  });
+});
+
+describe("POST /api/register-subscription — krótki adres salonu /s/<slug>", () => {
+  it("nowy salon dostaje slug z nazwy (polskie znaki → ASCII); wolny adres z wyjścia systemowego", async () => {
+    mockRequireAuth.mockResolvedValue({
+      session: { user: { ...USER_A, name: "Żaneta Łęcka" } },
+      user: { ...USER_A, name: "Żaneta Łęcka" },
+    });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(1);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledWith("salon-zaneta-lecka");
+    expect(mockInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Salon Żaneta Łęcka", slug: "salon-zaneta-lecka" })
+    );
+  });
+
+  it("trasa nie czyta zajętych adresów sama: jedyny odczyt salons to salon konta", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    await post({ planSlug: "basic" });
+
+    expect(opLog.filter((op) => op === "select:salons")).toHaveLength(1);
+    expect(mockEq).not.toHaveBeenCalledWith("salons.slug", expect.anything());
+  });
+
+  it("adres zajęty → slug wybrany przez wyjście systemowe (-2 zajęte → -3)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    slugState.taken = ["salon-anna", "salon-anna-2"];
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ slug: "salon-anna-3" }));
+  });
+
+  it("istniejący salon konta: adres wybrany przed transakcją zostaje niewykorzystany, slug bez zmian", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(1);
+    expect(mockInsertValues).not.toHaveBeenCalledWith(expect.objectContaining({ slug: expect.anything() }));
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it("wybór adresu przed otwarciem transakcji (bez drugiego połączenia z puli w otwartej transakcji)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(opLog.indexOf("pick:slug:salon-anna")).toBeGreaterThanOrEqual(0);
+    expect(opLog.indexOf("pick:slug:salon-anna")).toBeLessThan(opLog.indexOf("tx:start"));
+    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(1);
+  });
+
+  it("błąd wyjścia systemowego przy wyborze adresu → 500, transakcja nieotwarta, bez zapisu salonu", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    mockPickFreeSalonSlug.mockRejectedValueOnce(new Error("db down"));
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(500);
+    expect(opLog).not.toContain("tx:start");
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("równoległa rejestracja zajęła adres (23505 na salons_slug_uq) → cała transakcja od nowa, 200", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    failInsert = {
+      table: "salons",
+      error: Object.assign(new Error("db"), { cause: { code: "23505", constraint_name: "salons_slug_uq" } }),
+    };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    // Każda próba: najpierw wybór adresu od nowa (stan zajętości po równoległym
+    // zapisie) poza transakcją, potem jedna nowa transakcja.
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(2);
+    expect(opLog.filter((op) => op === "pick:slug:salon-anna" || op === "tx:start" || op === "rollback" || op === "commit"))
+      .toEqual(["pick:slug:salon-anna", "tx:start", "rollback", "pick:slug:salon-anna", "tx:start", "commit"]);
+  });
+
+  it("nowy salon zapisuje adres bieżący w rejestrze adresów (slug, salonId, bez retiredAt)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockInsert).toHaveBeenCalledWith("salonSlugHistory");
+    expect(mockInsertValues).toHaveBeenCalledWith({ slug: "salon-anna", salonId: SALON_A });
+  });
+
+  it("istniejący salon konta: bez zapisu w rejestrze adresów", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+
+    await post({ planSlug: "basic" });
+
+    expect(mockInsert).not.toHaveBeenCalledWith("salonSlugHistory");
+  });
+
+  it("adres porzucony równolegle przez inny salon (23505 na salon_slug_history_pkey) → transakcja od nowa, 200", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    failInsert = {
+      table: "salonSlugHistory",
+      error: Object.assign(new Error("db"), { cause: { code: "23505", constraint_name: "salon_slug_history_pkey" } }),
+    };
+
+    const { status } = await post({ planSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(2);
+    expect(opLog.filter((op) => op === "pick:slug:salon-anna" || op === "tx:start" || op === "rollback" || op === "commit"))
+      .toEqual(["pick:slug:salon-anna", "tx:start", "rollback", "pick:slug:salon-anna", "tx:start", "commit"]);
+  });
+
+  it("konflikt adresu w każdej próbie → 503 LOCK_BUSY (nie 409 „salon ma subskrypcję”)", async () => {
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    const slugConflict = Object.assign(new Error("db"), { code: "23505", constraint_name: "salons_slug_uq" });
+    // failInsert działa raz — każda kolejna próba dostaje go od nowa.
+    mockInsert.mockImplementation((table: string) => {
+      if (table === "salons") failInsert = { table: "salons", error: slugConflict };
+    });
+    failInsert = { table: "salons", error: slugConflict };
+
+    let result: Awaited<ReturnType<typeof post>>;
+    try {
+      result = await post({ planSlug: "basic" });
+    } finally {
+      // clearAllMocks w beforeEach nie zdejmuje implementacji — tu zdejmujemy ją sami.
+      mockInsert.mockReset();
+      failInsert = null;
+    }
+    const { status, body } = result;
+
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expect(opLog.filter((op) => op === "tx:start")).toHaveLength(3);
+    expect(mockPickFreeSalonSlug).toHaveBeenCalledTimes(3);
+    // Limit 3 prób: każda z wyborem adresu przed własną transakcją.
+    expect(opLog.filter((op) => op.startsWith("pick:slug:") || op === "tx:start")).toEqual([
+      "pick:slug:salon-anna",
+      "tx:start",
+      "pick:slug:salon-anna",
+      "tx:start",
+      "pick:slug:salon-anna",
+      "tx:start",
+    ]);
+    expect(opLog.at(-1)).toBe("rollback");
   });
 });
 
@@ -688,10 +865,12 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
     expect(status).toBe(200);
     expect(opLog).toEqual([
       "select:subscriptionPlans",
+      "pick:slug:salon-anna",
       "tx:start",
       "lock_timeout",
       "select:salons",
       "insert:salons",
+      "insert:salonSlugHistory",
       `lock:salon:${SALON_A}`,
       "select:salonSubscriptions",
       "insert:salonSubscriptions",
@@ -714,6 +893,9 @@ describe("POST /api/register-subscription — akceptacja regulaminu i DPA", () =
     expect(status).toBe(200);
     expect(opLog).toEqual([
       "select:subscriptionPlans",
+      // Adres wybierany przed transakcją, zanim wiadomo, czy konto ma salon;
+      // dla istniejącego salonu zostaje niewykorzystany.
+      "pick:slug:salon-anna",
       "tx:start",
       "lock_timeout",
       "select:salons",

@@ -60,6 +60,8 @@ export async function seedDemoData(): Promise<SeedDemoResult> {
       email: "demo@beautystudio.pl",
       address: "ul. Przykladowa 123, Warszawa",
       industryType: "beauty_salon",
+      // Ten sam krótki adres co w scripts/seed-test.ts (ten sam salon demo).
+      slug: "beauty-studio-demo",
     })
     .onConflictDoUpdate({
       target: salons.id,

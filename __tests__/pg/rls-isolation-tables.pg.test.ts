@@ -66,10 +66,15 @@ interface Builder {
   plan(): Promise<string>;
 }
 
+/** Klucz główny tabeli: kolumna i jej typ (do rzutowania parametru w WHERE). */
+type Key = { col: string; type: string };
+
 interface Factory {
   via: Via;
   /** Minimalny poprawny wiersz salonu `salon` (NOT NULL, CHECK, FK); rodziców tworzy przez `b`. */
   row: (b: Builder, salon: string) => Promise<Row>;
+  /** Klucz główny, gdy inny niż `id uuid` (DEFAULT_KEY). */
+  key?: Key;
 }
 
 const SELF: Via = { kind: "self", col: "id" };
@@ -142,6 +147,11 @@ const FACTORIES: Record<string, Factory> = {
     version: "2026-01-01",
     source: "registration",
   })),
+  // Klucz główny to sam slug (bez kolumny id): każdy wiersz dostaje własny (format jak salons_slug_format).
+  salon_slug_history: {
+    ...direct(() => ({ slug: `it-slug-${randomUUID().slice(0, 8)}` })),
+    key: { col: "slug", type: "text" },
+  },
 
   time_blocks: child("employees", "employee_id", () => ({ start_time: START, end_time: END, block_type: "break" })),
   work_schedules: child("employees", "employee_id", () => ({ day_of_week: 1, start_time: "09:00", end_time: "17:00" })),
@@ -164,6 +174,12 @@ const TABLES: string[] = loadRlsRequirements()
 
 const q = (ident: string) => `"${ident}"`;
 
+/** Klucz główny większości tabel; tabele spoza FACTORIES (`user`, `subscription_plans`) też mają `id`. */
+const DEFAULT_KEY: Key = { col: "id", type: "uuid" };
+const keyOf = (t: string): Key => FACTORIES[t]?.key ?? DEFAULT_KEY;
+/** Warunek `klucz = $n` z rzutowaniem parametru na typ klucza tabeli `t`. */
+const keyEq = (t: string, n: number): string => `${q(keyOf(t).col)} = $${n}::${keyOf(t).type}`;
+
 /**
  * INSERT wybranych kolumn z rekordu JSON (typy kolumn z tabeli, pozostałe kolumny z wartości domyślnych).
  * Parametr to tekst JSON rzutowany `$1::text::jsonb`: przy `$1::jsonb` sterownik serializuje napis
@@ -173,7 +189,7 @@ const q = (ident: string) => `"${ident}"`;
  */
 function insertSql(t: string, row: Row, returning = true): string {
   const cols = Object.keys(row).map(q).join(", ");
-  const tail = returning ? " RETURNING id::text AS id" : "";
+  const tail = returning ? ` RETURNING ${q(keyOf(t).col)}::text AS id` : "";
   return `INSERT INTO ${q(t)} (${cols}) SELECT ${cols} FROM jsonb_populate_record(null::${q(t)}, $1::text::jsonb)${tail}`;
 }
 
@@ -347,6 +363,7 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
     if (!f) throw new Error(`${t}: brak fabryki`);
     const { b, build, ownedBy } = builder;
     const col = q(f.via.col);
+    const key = q(keyOf(t).col);
     // Start każdej tabeli: rola migracji (SET LOCAL ROLE z poprzednich kroków cofnięte przez
     // ROLLBACK TO) i bez kontekstu salonu. Inny stan = czerwony wynik tej tabeli.
     const start = await conn.unsafe(
@@ -365,10 +382,10 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
       const foreignJson = JSON.stringify(foreign);
 
       const migrationRoleValue = async (id: string): Promise<string | undefined> =>
-        ((await conn.unsafe(`SELECT ${col}::text AS v FROM ${q(t)} WHERE id = $1::uuid`, [id])) as Array<{ v: string }>)[0]?.v;
+        ((await conn.unsafe(`SELECT ${col}::text AS v FROM ${q(t)} WHERE ${keyEq(t, 1)}`, [id])) as Array<{ v: string }>)[0]?.v;
 
       const visibleA = await asApp(conn, A, async () =>
-        ((await conn.unsafe(`SELECT id::text AS id FROM ${q(t)}`)) as Array<{ id: string }>).map((r) => r.id),
+        ((await conn.unsafe(`SELECT ${key}::text AS id FROM ${q(t)}`)) as Array<{ id: string }>).map((r) => r.id),
       );
       const ownA = new Set(ownedBy(t, A));
 
@@ -376,12 +393,12 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
         aLeak: visibleA.filter((id) => !ownA.has(id)),
         aSeesOwn: visibleA.includes(rA.id),
         bSeesB: await asApp(conn, B, async () => {
-          const r = await attempt(conn, `SELECT count(*)::int AS n FROM ${q(t)} WHERE id = $1::uuid`, [rB.id]);
+          const r = await attempt(conn, `SELECT count(*)::int AS n FROM ${q(t)} WHERE ${keyEq(t, 1)}`, [rB.id]);
           return "rows" in r ? (r.rows[0] as { n: number }).n : r.code;
         }),
         cInsert: await asApp(conn, A, async () => writeOutcome(await attempt(conn, insertSql(t, foreign, false), [foreignJson]))),
         dUpdate: await asApp(conn, A, async () =>
-          writeOutcome(await attempt(conn, `UPDATE ${q(t)} SET ${col} = $1::uuid WHERE id = $2::uuid`, [rB.ref, rA.id])),
+          writeOutcome(await attempt(conn, `UPDATE ${q(t)} SET ${col} = $1::uuid WHERE ${keyEq(t, 2)}`, [rB.ref, rA.id])),
         ),
         eUpdate: 0,
         eUpdateKept: false,
@@ -396,13 +413,13 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
 
       // (e) zapis w kontekście A do wiersza B; w tym samym kroku rola migracji sprawdza wiersz B.
       [result.eUpdate, result.eUpdateKept] = await asApp(conn, A, async () => {
-        const r = await attempt(conn, `UPDATE ${q(t)} SET ${col} = $1::uuid WHERE id = $2::uuid RETURNING 1`, [rA.ref, rB.id]);
+        const r = await attempt(conn, `UPDATE ${q(t)} SET ${col} = $1::uuid WHERE ${keyEq(t, 2)} RETURNING 1`, [rA.ref, rB.id]);
         if (!("rows" in r)) return [r.code, false] as const;
         await conn.unsafe("SET LOCAL ROLE NONE");
         return [r.rows.length, (await migrationRoleValue(rB.id)) === rB.ref] as const;
       });
       [result.eDelete, result.eDeleteKept] = await asApp(conn, A, async () => {
-        const r = await attempt(conn, `DELETE FROM ${q(t)} WHERE id = $1::uuid RETURNING 1`, [rB.id]);
+        const r = await attempt(conn, `DELETE FROM ${q(t)} WHERE ${keyEq(t, 1)} RETURNING 1`, [rB.id]);
         if (!("rows" in r)) return [affected(r), false] as const;
         await conn.unsafe("SET LOCAL ROLE NONE");
         return [r.rows.length, (await migrationRoleValue(rB.id)) === rB.ref] as const;

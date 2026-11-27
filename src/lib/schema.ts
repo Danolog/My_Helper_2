@@ -121,6 +121,11 @@ export const salons = pgTable(
     industryType: text("industry_type"), // e.g., 'hair_salon', 'beauty', 'medical'
     settingsJson: jsonb("settings_json").default({}),
     ownerId: text("owner_id").references(() => user.id, { onDelete: "cascade" }),
+    // Krotki adres salonu `/s/<slug>` (src/lib/salon-slug.ts). Nullable tylko
+    // dla wierszy wstawianych poza aplikacja (testy pg, reczny SQL): kazda
+    // sciezka zakladania salonu w kodzie nadaje slug, migracja 0018 uzupelnila
+    // istniejace salony. Salon bez sluga nie ma krotkiego adresu (404).
+    slug: text("slug"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -132,6 +137,43 @@ export const salons = pgTable(
     // salonu po ownerId z limit(1). NULL-e (salony bez wlasciciela) sie nie
     // zderzaja. Zastapil nieunikalny salons_owner_id_idx.
     uniqueIndex("salons_owner_id_uq").on(table.ownerId),
+    // Adres jest unikalny; konflikt (23505 na tym indeksie) trasa zmiany adresu
+    // zamienia na 409, zakladanie salonu na kolejna probe z sufiksem.
+    uniqueIndex("salons_slug_uq").on(table.slug),
+    // Format i dlugosc jak SALON_SLUG_PATTERN i limity w src/lib/salon-slug.ts.
+    // Slow zastrzezonych baza nie zna — pilnuje ich aplikacja.
+    check(
+      "salons_slug_format",
+      sql`${table.slug} IS NULL OR (length(${table.slug}) BETWEEN 3 AND 50 AND ${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$')`
+    ),
+  ]
+);
+
+// Rejestr krotkich adresow salonu (migracja 0018): kazdy adres, ktory salon
+// kiedykolwiek mial. retiredAt null = adres biezacy, inaczej adres dawny.
+// Dawny adres zostaje przypisany do salonu: inny salon nie moze go zajac
+// (wydrukowane linki nie prowadza do cudzego salonu), a `/s/<stary>`
+// przekierowuje dalej do wlasciciela. Ochrona to klucz glowny na `slug` —
+// zajecie adresu = INSERT wiersza, wiec ten sam adres w dwoch salonach daje
+// 23505 takze przy rownoleglych transakcjach. Wlasny dawny adres salon
+// odzyskuje (usuwa swoj wiersz i wstawia go od nowa jako biezacy).
+export const salonSlugHistory = pgTable(
+  "salon_slug_history",
+  {
+    slug: text("slug").primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("salon_slug_history_salon_id_idx").on(table.salonId),
+    // Najwyzej jeden adres biezacy na salon.
+    uniqueIndex("salon_slug_history_current_uq").on(table.salonId).where(sql`${table.retiredAt} IS NULL`),
+    check(
+      "salon_slug_history_slug_format",
+      sql`length(${table.slug}) BETWEEN 3 AND 50 AND ${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`
+    ),
   ]
 );
 

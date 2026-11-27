@@ -58,9 +58,12 @@ const db = drizzle(sql);
 const OWNER_USER_ID = "test-owner-user-id-00001";
 const CLIENT_USER_ID = "test-client-user-id-00001";
 const SALON_ID = "00000000-0000-4000-8000-000000000001";
+// Krótki adres salonu testowego `/s/beauty-studio-demo` (E2E: tests/client-portal/salon-short-link.spec.ts).
+const SALON_SLUG = "beauty-studio-demo";
 // Drugi właściciel i jego salon w stanie „okres próbny zakończony” (tylko odczyt).
 const TRIAL_EXPIRED_OWNER_USER_ID = "test-owner-user-id-00002";
 const TRIAL_EXPIRED_SALON_ID = "00000000-0000-4000-8000-000000000002";
+const TRIAL_EXPIRED_SALON_SLUG = "salon-po-okresie-probnym";
 
 // Po jednym wierszu subskrypcji na salon seeda, plan Basic, bez identyfikatorów Stripe.
 // Salon testowy: active bez dat okresu (pełny dostęp niezależnie od dat). Salon po okresie
@@ -253,10 +256,11 @@ async function seed() {
       industryType: "beauty_salon",
       ownerId: OWNER_USER_ID,
       settingsJson: seedModules,
+      slug: SALON_SLUG,
     })
     .onConflictDoUpdate({
       target: salons.id,
-      set: { name: "Beauty Studio Demo", phone: "+48 000 600 704", ownerId: OWNER_USER_ID, settingsJson: seedModules },
+      set: { name: "Beauty Studio Demo", phone: "+48 000 600 704", ownerId: OWNER_USER_ID, settingsJson: seedModules, slug: SALON_SLUG },
     });
 
   console.log("[seed-test] Created salon: Beauty Studio Demo");
@@ -580,10 +584,11 @@ async function seed() {
       phone: null,
       address: null,
       ownerId: TRIAL_EXPIRED_OWNER_USER_ID,
+      slug: TRIAL_EXPIRED_SALON_SLUG,
     })
     .onConflictDoUpdate({
       target: salons.id,
-      set: { name: "Salon Po Okresie Probnym", phone: null, address: null, ownerId: TRIAL_EXPIRED_OWNER_USER_ID },
+      set: { name: "Salon Po Okresie Probnym", phone: null, address: null, ownerId: TRIAL_EXPIRED_OWNER_USER_ID, slug: TRIAL_EXPIRED_SALON_SLUG },
     });
 
   console.log("[seed-test] Created trial-expired owner + salon");

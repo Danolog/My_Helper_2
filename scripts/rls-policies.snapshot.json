@@ -348,6 +348,18 @@
     "sha256": "f94e3b2257cea82c19339767017a9d3dc87b56b0644061540d3b476ee9723fa1"
   },
   {
+    "table": "salon_slug_history",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "6f1736414946d511c7f08f0cc24b6969f593d00bd32e0bb6263bfd9fb1802b6d"
+  },
+  {
     "table": "salon_subscriptions",
     "name": "tenant_isolation",
     "cmd": "ALL",

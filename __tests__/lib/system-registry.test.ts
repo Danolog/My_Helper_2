@@ -73,8 +73,12 @@ const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
 const DEPOSITS_CLEANUP_EXPORTS = ["cleanupStaleDepositBookings"];
 /** #193 P5b: globalny cennik planów z dosiewaniem (bez danych najemcy). */
 const PLANS_EXPORTS = ["ensurePlansExist"];
-/** Publiczna lista salonów (z natury wiele salonów; jawne kolumny, bez settingsJson). */
-const CATALOG_EXPORTS = ["listPublicSalonCatalog"];
+/**
+ * Publiczna lista salonów (z natury wiele salonów; jawne kolumny, bez settingsJson)
+ * i id salonu po krótkim adresie `/s/<slug>` (przed odczytem nie ma salonu dla forSalon)
+ * oraz wolny adres dla zakładanego salonu (zajęte adresy należą do innych salonów).
+ */
+const CATALOG_EXPORTS = ["findPublicSalonIdBySlug", "listPublicSalonCatalog", "pickFreeSalonSlug"];
 /** #193 P5b: seed danych demonstracyjnych z blokadą celu (poza produkcją). */
 const SEED_EXPORTS = ["seedDemoData"];
 /** #193 (ADR-002): odczyty portalu klienta po tożsamości z sesji, bez funkcji zapisujących. */

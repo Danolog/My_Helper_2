@@ -49,11 +49,13 @@ describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)"
     expect(RLS_EXTRA_MIGRATION_FILES).toEqual([
       "drizzle/0014_deposit_status_events.sql",
       "drizzle/0015_legal_acceptances.sql",
+      "drizzle/0018_salons_slug.sql",
     ]);
     expect(loadRlsRequirements(ROOT)).toEqual([
       ...parseRlsRequirements(SQL),
       { table: "deposit_status_events", policy: "tenant_isolation" },
       { table: "legal_acceptances", policy: "tenant_isolation" },
+      { table: "salon_slug_history", policy: "tenant_isolation" },
     ]);
   });
 
@@ -63,14 +65,14 @@ describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)"
     expect(from0005.filter((r) => r.policy === "tenant_isolation")).toHaveLength(38);
   });
 
-  it("łącznie 41 tabel: 40 z tenant_isolation (z deposit_status_events i legal_acceptances), salons z tenant_self", () => {
-    expect(RLS).toHaveLength(41);
-    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(40);
+  it("łącznie 42 tabele: 41 z tenant_isolation (z deposit_status_events, legal_acceptances i salon_slug_history), salons z tenant_self", () => {
+    expect(RLS).toHaveLength(42);
+    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(41);
     expect(RLS.filter((r) => r.policy === "tenant_self")).toEqual([{ table: "salons", policy: "tenant_self" }]);
-    for (const t of ["appointments", "deposit_payments", "deposit_status_events", "legal_acceptances", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
+    for (const t of ["appointments", "deposit_payments", "deposit_status_events", "legal_acceptances", "salon_slug_history", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
       expect(RLS).toContainEqual({ table: t, policy: "tenant_isolation" });
     }
-    expect(new Set(RLS.map((r) => r.table)).size).toBe(41);
+    expect(new Set(RLS.map((r) => r.table)).size).toBe(42);
   });
 
   it("tabela dopisana do direct_tables w pliku → jest na liście (nic na sztywno)", () => {
@@ -128,6 +130,13 @@ describe("strażnik — jawne polityki z migracji po 0005", () => {
     ]);
   });
 
+  it("plik 0018 → salon_slug_history z tenant_isolation", () => {
+    const file = "drizzle/0018_salons_slug.sql";
+    expect(parseExplicitRlsRequirements(readFileSync(join(ROOT, file), "utf8"), file)).toEqual([
+      { table: "salon_slug_history", policy: "tenant_isolation" },
+    ]);
+  });
+
   it.each([
     ["zakomentowana polityka", `${enable}-- CREATE POLICY tenant_isolation ON t USING (true);\n`, /brak jawnego CREATE POLICY/],
     ["polityka bez ENABLE", "CREATE POLICY tenant_isolation ON t USING (true);\n", /CREATE POLICY na t bez ALTER TABLE t ENABLE/],
@@ -152,31 +161,31 @@ describe("strażnik — jawne polityki z migracji po 0005", () => {
 });
 
 describe("strażnik — decyzja", () => {
-  it("komplet RLS (0005 + 0014 + 0015) → ok z liczbami; tabele spoza listy bez znaczenia", () => {
-    expect(checkRls([...fullRls(), { table: "inna", rls: false, policies: [] }], RLS)).toEqual({ ok: true, checked: 41, rlsTables: 41 });
+  it("komplet RLS (0005 + 0014 + 0015 + 0018) → ok z liczbami; tabele spoza listy bez znaczenia", () => {
+    expect(checkRls([...fullRls(), { table: "inna", rls: false, policies: [] }], RLS)).toEqual({ ok: true, checked: 42, rlsTables: 42 });
   });
 
-  it("push po migracjach (RLS zdjęte na wszystkich 41) → odmowa z liczbą tabel", () => {
+  it("push po migracjach (RLS zdjęte na wszystkich 42) → odmowa z liczbą tabel", () => {
     const rows = RLS.map((r) => ({ table: r.table, rls: false, policies: [] }));
     const r = checkRls(rows, RLS);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.missing).toHaveLength(42);
-    expect(r.missing).toContain("tabel z RLS w bazie 0 < 41 z migracji");
-    expect(r.message).toMatch(/^RLS z migracji niekompletne \(42\): .* i 37 więcej — .*pnpm db:migrate\.$/);
+    expect(r.missing).toHaveLength(43);
+    expect(r.missing).toContain("tabel z RLS w bazie 0 < 42 z migracji");
+    expect(r.message).toMatch(/^RLS z migracji niekompletne \(43\): .* i 38 więcej — .*pnpm db:migrate\.$/);
   });
 
-  it.each(["deposit_status_events", "legal_acceptances"])("RLS wyłączone na %s (migracja po 0005) → odmowa wskazująca tabelę", (table) => {
+  it.each(["deposit_status_events", "legal_acceptances", "salon_slug_history"])("RLS wyłączone na %s (migracja po 0005) → odmowa wskazująca tabelę", (table) => {
     const r = checkRls(fullRls().map((x) => (x.table === table ? { ...x, rls: false } : x)), RLS);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toEqual([`${table} (RLS wyłączone)`, "tabel z RLS w bazie 40 < 41 z migracji"]);
+    if (!r.ok) expect(r.missing).toEqual([`${table} (RLS wyłączone)`, "tabel z RLS w bazie 41 < 42 z migracji"]);
   });
 
   it.each([
-    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), ["appointments (RLS wyłączone)", "tabel z RLS w bazie 40 < 41 z migracji"]],
+    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), ["appointments (RLS wyłączone)", "tabel z RLS w bazie 41 < 42 z migracji"]],
     ["brak polityki na deposit_payments", (rows: RlsRow[]) => rows.map((x) => (x.table === "deposit_payments" ? { ...x, policies: [] } : x)), ["deposit_payments (brak polityki tenant_isolation)"]],
     ["salons z tenant_isolation zamiast tenant_self", (rows: RlsRow[]) => rows.map((x) => (x.table === "salons" ? { ...x, policies: ["tenant_isolation"] } : x)), ["salons (brak polityki tenant_self)"]],
-    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), ["clients (brak tabeli)", "tabel z RLS w bazie 40 < 41 z migracji"]],
+    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), ["clients (brak tabeli)", "tabel z RLS w bazie 41 < 42 z migracji"]],
   ])("%s → odmowa wskazująca tabelę", (_n, mutate, expected) => {
     const r = checkRls(mutate(fullRls()), RLS);
     expect(r.ok).toBe(false);

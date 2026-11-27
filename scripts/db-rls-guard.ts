@@ -125,6 +125,7 @@ export function parseRlsRequirements(sql: string): RlsRequirement[] {
 export const RLS_EXTRA_MIGRATION_FILES: readonly string[] = [
   "drizzle/0014_deposit_status_events.sql",
   "drizzle/0015_legal_acceptances.sql",
+  "drizzle/0018_salons_slug.sql",
 ];
 
 const failIn = (file: string, what: string): never => {
