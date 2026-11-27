@@ -9,6 +9,11 @@ import {
   hasNoShowDayArrived,
   isNoShowMarkRole,
 } from "@/lib/no-show";
+import {
+  isRetryableWriteConflict,
+  WRITE_CONFLICT_RETRY_CODE,
+  WRITE_CONFLICT_RETRY_MESSAGE,
+} from "@/lib/pg-lock-failure";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { appointments } from "@/lib/schema";
@@ -41,7 +46,8 @@ import { isValidUuid } from "@/lib/validations";
  * (osobny log `info`). Odpowiedź trasy się nie zmienia. Kolejność blokad
  * wierszy: wizyta, potem karta klienta. Usuwanie karty bierze je odwrotnie
  * (karta, potem wizyty); zakleszczenie rozstrzyga baza (40P01) i jedna
- * z transakcji się wycofuje (tu: 500, nic nie zapisane).
+ * z transakcji się wycofuje — nic nie zapisane, trasa zwraca 409 `RETRY`
+ * (także przy konflikcie serializacji 40001), żeby panel mógł ponowić.
  */
 
 type NoShowOutcome =
@@ -182,6 +188,18 @@ async function changeNoShow(
       data: { appointmentId: id, noShow: markAsNoShow, changed: outcome.changed },
     });
   } catch (error) {
+    if (isRetryableWriteConflict(error)) {
+      // Transakcja wycofana w całości — ponowienie jest bezpieczne, to nie awaria.
+      logger.warn(`[AppointmentNoShow API] ${action.method} write conflict`, {
+        salonId,
+        appointmentId,
+        ...toErrorIdentity(error),
+      });
+      return NextResponse.json(
+        { success: false, code: WRITE_CONFLICT_RETRY_CODE, error: WRITE_CONFLICT_RETRY_MESSAGE },
+        { status: 409 }
+      );
+    }
     // Sama tożsamość błędu: treść błędu bazy może nieść parametry zapytania.
     logger.error(`[AppointmentNoShow API] ${action.method} failed`, {
       salonId,

@@ -4,6 +4,11 @@ import { clientBlockSchema, parseBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { CLIENT_BLOCKED_BY_AUTO, isClientBlockRole, type ClientBlockState } from "@/lib/client-block";
 import { logger } from "@/lib/logger";
+import {
+  isRetryableWriteConflict,
+  WRITE_CONFLICT_RETRY_CODE,
+  WRITE_CONFLICT_RETRY_MESSAGE,
+} from "@/lib/pg-lock-failure";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { clients } from "@/lib/schema";
@@ -23,6 +28,8 @@ import { isValidUuid } from "@/lib/validations";
  * Kolejność: sesja (401) → kontekst salonu (404) → rola (403: tylko
  * właściciel) → format id (400) → treść POST (400) → jedna transakcja
  * `forSalon(ctx.salonId).raw` z jawnym `eq(salonId)`: karta (404), zapis.
+ * Zakleszczenie (40P01) albo konflikt serializacji (40001), np. z oznaczeniem
+ * „Nie przyszedł” albo usuwaniem karty → 409 `RETRY`, nic nie zapisane.
  *
  * Ślad audytu: log `info` z salonId, clientId, userId i kierunkiem zmiany —
  * bez notatki i danych klienta.
@@ -139,6 +146,14 @@ async function changeBlock(method: "POST" | "DELETE", request: Request, params: 
 
     return NextResponse.json({ success: true, data: toState(id, result.row, result.changed) });
   } catch (error) {
+    if (isRetryableWriteConflict(error)) {
+      // Transakcja wycofana w całości — ponowienie jest bezpieczne, to nie awaria.
+      logger.warn(`[ClientBlock API] ${method} write conflict`, { salonId, clientId, ...toErrorIdentity(error) });
+      return NextResponse.json(
+        { success: false, code: WRITE_CONFLICT_RETRY_CODE, error: WRITE_CONFLICT_RETRY_MESSAGE },
+        { status: 409 }
+      );
+    }
     // Sama tożsamość błędu: treść błędu bazy może nieść parametry zapytania.
     logger.error(`[ClientBlock API] ${method} failed`, { salonId, clientId, ...toErrorIdentity(error) });
     return NextResponse.json({ success: false, error: SERVER_ERROR_MESSAGE[method] }, { status: 500 });

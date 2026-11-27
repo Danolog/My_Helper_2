@@ -16,7 +16,7 @@ const h = await vi.hoisted(async () => {
   const m = (await import("./salon-staff-harness")).createSalonStaffMocks();
   const setArgs: Record<string, unknown>[] = [];
   const selectWheres: unknown[] = [];
-  const state = { failDb: false, transactions: 0 };
+  const state = { failDb: false, failWith: null as unknown, transactions: 0 };
 
   type Tx = Parameters<Parameters<typeof m.db.transaction>[0]>[0];
   type Chain = Record<string, (...args: unknown[]) => unknown>;
@@ -24,6 +24,7 @@ const h = await vi.hoisted(async () => {
     transaction: (fn: (tx: Tx) => unknown) => {
       state.transactions += 1;
       if (state.failDb) return Promise.reject(new Error("connection refused params: Anna,+48500600700"));
+      if (state.failWith) return Promise.reject(state.failWith);
       return Promise.resolve(
         m.db.transaction((tx) =>
           fn({
@@ -89,6 +90,7 @@ beforeEach(() => {
   h.setArgs.length = 0;
   h.selectWheres.length = 0;
   h.state.failDb = false;
+  h.state.failWith = null;
   h.state.transactions = 0;
   vi.clearAllMocks();
   m.hasTemporaryAccess.mockResolvedValue(false);
@@ -317,6 +319,36 @@ describe("500 i logi", () => {
     const [, meta] = h.logger.error.mock.calls[0]!;
     expect(meta).toEqual({ salonId: SALON_A, clientId: CLIENT_ID, errorName: "Error" });
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("connection refused");
+  });
+
+  it.each([
+    ["POST", "40P01", POST],
+    ["POST", "40001", POST],
+    ["DELETE", "40P01", DELETE],
+    ["DELETE", "40001", DELETE],
+  ] as const)("%s: %s z bazy (opakowany jak w Drizzle) → 409 RETRY, bez logu error", async (_label, code, handler) => {
+    m.asOwnerOf(SALON_A);
+    h.state.failWith = new Error("Failed query params: Anna,+48500600700", {
+      cause: Object.assign(new Error("deadlock detected"), { code }),
+    });
+
+    const res = await call(handler);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      success: false,
+      code: "RETRY",
+      error: "Wystąpił konflikt zapisu. Spróbuj ponownie.",
+    });
+    expect(h.logger.error).not.toHaveBeenCalled();
+    expect(h.logger.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(h.logger.warn.mock.calls)).not.toContain("+48500600700");
+  });
+
+  it("inny kod bazy (23503) → nadal 500", async () => {
+    m.asOwnerOf(SALON_A);
+    h.state.failWith = Object.assign(new Error("fk"), { code: "23503" });
+    expect((await call(POST)).status).toBe(500);
   });
 
   it("log info bez notatki", async () => {
