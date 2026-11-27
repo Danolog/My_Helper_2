@@ -17,6 +17,14 @@ export const SALON_SLUG_MAX_LENGTH = 50;
 /** Małe litery i cyfry, pojedyncze myślniki wewnątrz (bez myślnika na początku i końcu). */
 export const SALON_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/**
+ * Ile razy salon może zmienić adres. Każda zmiana zostawia wycofany adres,
+ * którego nikt inny nie zajmie, więc bez limitu salon mógłby zablokować
+ * dowolnie wiele atrakcyjnych nazw. Liczą się wycofane adresy salonu;
+ * odzyskanie własnego dawnego adresu nie podlega limitowi.
+ */
+export const SALON_SLUG_MAX_CHANGES = 5;
+
 /** Adres zapasowy, gdy z nazwy nie da się złożyć poprawnego sluga. */
 export const SALON_SLUG_FALLBACK = "salon";
 

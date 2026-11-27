@@ -3,7 +3,8 @@
  *
  * Kontrakt: 401 bez sesji, 400 zły id / zły slug / zły JSON, 404 brak salonu,
  * 403 nie właściciel, 409 SLUG_TAKEN (23505 na salons_slug_uq albo na kluczu
- * głównym rejestru salon_slug_history), 500 inny błąd, 200 z zapisanym slugiem.
+ * głównym rejestru salon_slug_history), 409 SLUG_CHANGE_LIMIT (5 wycofanych
+ * adresów i nowy adres), 500 inny błąd, 200 z zapisanym slugiem.
  * Dostęp tylko przez forSalon(id z URL).
  *
  * Atrapa bazy trzyma w pamięci `salons` i rejestr adresów `salon_slug_history`
@@ -182,6 +183,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { PUT } from "@/app/api/salons/[id]/slug/route";
+import { SALON_SLUG_MAX_CHANGES } from "@/lib/salon-slug";
 
 function put(id: string, body: unknown) {
   return PUT(
@@ -337,6 +339,69 @@ describe("PUT /api/salons/[id]/slug", () => {
       { slug: "salon-a", current: true },
       { slug: "salon-ada", current: false },
     ]);
+  });
+
+  describe("limit zmian adresu", () => {
+    /** Salon A z `count` wycofanymi adresami (`dawny-1`…) obok bieżącego `salon-a`. */
+    function retireAddresses(count: number) {
+      for (let i = 1; i <= count; i++) {
+        state.history.push({ slug: `dawny-${i}`, salonId: SALON_A, retiredAt: new Date("2026-11-01") });
+      }
+    }
+
+    it("409 SLUG_CHANGE_LIMIT: 5 wycofanych adresów i nowy adres — niczego nie zapisuje", async () => {
+      retireAddresses(SALON_SLUG_MAX_CHANGES);
+      const historyBefore = JSON.stringify(state.history);
+
+      const { status, body } = await put(SALON_A, { slug: "salon-ada" });
+
+      expect(status).toBe(409);
+      expect(body.code).toBe("SLUG_CHANGE_LIMIT");
+      expect(body.error).toBe(
+        "Osiągnięto limit zmian adresu. Napisz do nas, jeśli potrzebujesz kolejnej zmiany."
+      );
+      expect(state.writes).toEqual([]);
+      expect(salonA().slug).toBe("salon-a");
+      expect(JSON.stringify(state.history)).toBe(historyBefore);
+    });
+
+    it("200: 5 wycofanych adresów i odzyskanie własnego adresu przechodzi", async () => {
+      retireAddresses(SALON_SLUG_MAX_CHANGES);
+
+      const { status, body } = await put(SALON_A, { slug: "dawny-3" });
+
+      expect(status).toBe(200);
+      expect(body).toEqual({ success: true, data: { slug: "dawny-3" } });
+      expect(salonA().slug).toBe("dawny-3");
+    });
+
+    it("200: 4 wycofane adresy i nowy adres przechodzi", async () => {
+      retireAddresses(SALON_SLUG_MAX_CHANGES - 1);
+
+      const { status, body } = await put(SALON_A, { slug: "salon-ada" });
+
+      expect(status).toBe(200);
+      expect(body).toEqual({ success: true, data: { slug: "salon-ada" } });
+      expect(salonA().slug).toBe("salon-ada");
+    });
+
+    it("200: ten sam adres co obecny nie podlega limitowi", async () => {
+      retireAddresses(SALON_SLUG_MAX_CHANGES);
+
+      const { status } = await put(SALON_A, { slug: "salon-a" });
+
+      expect(status).toBe(200);
+    });
+
+    it("limit liczy tylko własne wycofane adresy salonu", async () => {
+      for (let i = 1; i <= SALON_SLUG_MAX_CHANGES; i++) {
+        state.history.push({ slug: `cudzy-${i}`, salonId: SALON_B, retiredAt: new Date("2026-11-01") });
+      }
+
+      const { status } = await put(SALON_A, { slug: "salon-ada" });
+
+      expect(status).toBe(200);
+    });
   });
 
   it("401: bez sesji — bez zapytań", async () => {

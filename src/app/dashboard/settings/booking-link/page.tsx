@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import {
+  SALON_SLUG_MAX_CHANGES,
   SALON_SLUG_MAX_LENGTH,
   salonShortUrl,
   salonSlugProblem,
@@ -146,7 +147,7 @@ function BookingLinkSettingsInner() {
         toast.success("Adres zapisany");
         return;
       }
-      // 409 (adres zajęty) i 400 (walidacja) pokazujemy przy polu, resztę jako toast.
+      // 409 (adres zajęty albo limit zmian) i 400 (walidacja) pokazujemy przy polu, resztę jako toast.
       const fieldMessage = data.details?.slug ?? (res.status === 409 ? data.error : null);
       if (fieldMessage) {
         setSlugError(fieldMessage);
@@ -263,6 +264,7 @@ function BookingLinkSettingsInner() {
             <p id="salon-slug-help" className="text-sm text-muted-foreground">
               Małe litery bez polskich znaków, cyfry i myślniki, od 3 do 50 znaków.
               Po zmianie stary link będzie dalej prowadzić do Twojego salonu.
+              Adres możesz zmienić najwyżej {SALON_SLUG_MAX_CHANGES} razy.
             </p>
           </div>
 

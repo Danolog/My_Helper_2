@@ -3,7 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { isValidUuid, parseBody, updateSalonSlugSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
-import { isSalonSlugConflict } from "@/lib/salon-slug";
+import { isSalonSlugConflict, SALON_SLUG_MAX_CHANGES } from "@/lib/salon-slug";
 import { salonSlugHistory, salons } from "@/lib/schema";
 // Odczyt własności i zapis przez forSalon(id z URL), jak PUT /api/salons/[id]:
 // polityka RLS `salons` przepuszcza wiersz o id = kontekst, więc brak wiersza
@@ -14,6 +14,14 @@ import { salonSlugHistory, salons } from "@/lib/schema";
 import { forSalon, type DbTx } from "@/lib/server/repository";
 
 const SLUG_TAKEN_CODE = "SLUG_TAKEN";
+const SLUG_CHANGE_LIMIT_CODE = "SLUG_CHANGE_LIMIT";
+
+/** Salon wykorzystał limit zmian adresu — transakcja jest cofana, nic się nie zapisuje. */
+class SlugChangeLimitError extends Error {
+  constructor() {
+    super(SLUG_CHANGE_LIMIT_CODE);
+  }
+}
 
 /**
  * Zmiana adresu w jednej transakcji salonu (kontekst RLS = `salonId`).
@@ -47,6 +55,20 @@ async function changeSalonSlug(tx: DbTx, salonId: string, slug: string): Promise
   const previousSlug = current?.slug ?? null;
 
   if (previousSlug !== slug) {
+    // Limit liczymy w tej samej transakcji, przed jakimkolwiek zapisem, i po
+    // blokadzie wiersza salonu — równoległe zmiany nie obejdą limitu. Własne
+    // wiersze rejestru (RLS) dzielimy w pamięci: odzyskanie własnego dawnego
+    // adresu nie zajmuje nowego miejsca, więc limitu nie dotyczy.
+    const ownEntries = await tx
+      .select({ slug: salonSlugHistory.slug, retiredAt: salonSlugHistory.retiredAt })
+      .from(salonSlugHistory)
+      .where(eq(salonSlugHistory.salonId, salonId));
+    const retired = ownEntries.filter((entry) => entry.retiredAt !== null);
+    const isRecovery = retired.some((entry) => entry.slug === slug);
+    if (retired.length >= SALON_SLUG_MAX_CHANGES && !isRecovery) {
+      throw new SlugChangeLimitError();
+    }
+
     const retiredAt = new Date();
     await tx
       .update(salonSlugHistory)
@@ -73,7 +95,9 @@ async function changeSalonSlug(tx: DbTx, salonId: string, slug: string): Promise
  * Body: `{ slug: string }` (updateSalonSlugSchema). Tylko właściciel salonu.
  * Odpowiedzi: 200 `{ success, data: { slug } }`, 400 (zły id albo slug),
  * 401 (bez sesji), 403 (nie właściciel), 404 (brak salonu),
- * 409 `SLUG_TAKEN` (adres bieżący albo dawny innego salonu), 500.
+ * 409 `SLUG_TAKEN` (adres bieżący albo dawny innego salonu), 409
+ * `SLUG_CHANGE_LIMIT` (salon ma już `SALON_SLUG_MAX_CHANGES` wycofanych
+ * adresów, a nowy nie jest odzyskaniem własnego), 500.
  * Stary adres zostaje w rejestrze jako dawny: `/s/<stary>` dalej prowadzi do
  * tego salonu, a inny salon nie może go zająć. Własny dawny adres wolno
  * odzyskać.
@@ -121,6 +145,16 @@ export async function PUT(
     try {
       await forSalon(id).raw((tx) => changeSalonSlug(tx, id, slug));
     } catch (error) {
+      if (error instanceof SlugChangeLimitError) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: SLUG_CHANGE_LIMIT_CODE,
+            error: "Osiągnięto limit zmian adresu. Napisz do nas, jeśli potrzebujesz kolejnej zmiany.",
+          },
+          { status: 409 }
+        );
+      }
       if (isSalonSlugConflict(error)) {
         return NextResponse.json(
           { success: false, code: SLUG_TAKEN_CODE, error: "Ten adres jest już zajęty. Wybierz inny." },
