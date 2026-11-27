@@ -79,6 +79,8 @@ const h = vi.hoisted(() => ({
   calc: vi.fn(),
   rate: vi.fn(),
   sms: vi.fn(),
+  /** Sprawdzenie blokady rezerwacji online: undefined/null = brak blokady. */
+  block: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -124,6 +126,11 @@ function insertChain() {
   return c;
 }
 
+// Dopasowanie karty z blokadą sprawdza online-booking-block.test.ts; tu tylko
+// miejsce wywołania w trasie (domyślnie: brak blokady).
+vi.mock("@/lib/online-booking-block", () => ({
+  onlineBookingBlockResponse: (...a: unknown[]) => h.block(...a),
+}));
 vi.mock("@/lib/server/repository", () => {
   const tx = {
     select: (cols?: unknown) => {
@@ -1525,5 +1532,67 @@ describe("bookedByUserId wizyty BLIK (#193)", () => {
     expect((await post()).status).toBe(201);
     expect(inserted()).toMatchObject({ bookedByUserId: null });
     expect(h.salonCtx).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Blokada rezerwacji online ──────────────────────────────────────────────
+
+describe("blokada rezerwacji online", () => {
+  const blocked = () =>
+    new Response(
+      JSON.stringify({
+        success: false,
+        code: "ONLINE_BOOKING_UNAVAILABLE",
+        error: "Rezerwacja online jest niedostępna. Skontaktuj się z salonem.",
+      }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+
+  it("gość z numerem z zablokowanej karty → 403 przed kwotą, ustawieniami salonu i zapisem", async () => {
+    h.block.mockResolvedValueOnce(blocked());
+
+    const res = await post();
+    const { status, body } = await parseResponse<Err>(res);
+
+    expect(status).toBe(403);
+    expect(body.code).toBe("ONLINE_BOOKING_UNAVAILABLE");
+    expect(h.block).toHaveBeenCalledWith({ salonId: SALON, sessionUser: null, phone: GUEST_PHONE_E164 });
+    expect(h.calc).not.toHaveBeenCalled();
+    expect(h.raw).not.toHaveBeenCalled();
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+
+  it("zalogowany klient → sprawdzenie z użytkownikiem sesji", async () => {
+    const user = { id: "portal-1", email: "klient@example.invalid", emailVerified: true };
+    h.session.mockResolvedValue({ user });
+    h.block.mockResolvedValueOnce(blocked());
+
+    const res = await post({ ...validBody, guestName: undefined, guestPhone: undefined });
+
+    expect(res.status).toBe(403);
+    expect(h.block).toHaveBeenCalledWith({ salonId: SALON, sessionUser: user, phone: null });
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+
+  it("personel tego salonu → bez sprawdzenia blokady", async () => {
+    h.session.mockResolvedValue({ user: { id: "staff-1", email: "staff@example.invalid" } });
+    h.salonCtx.mockResolvedValue({ salonId: SALON });
+    // Dalsza ścieżka nieistotna: wystarczy, że trasa minęła miejsce sprawdzenia.
+    h.calc.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "Strzyzenie" });
+
+    await post({ ...validBody, clientId: CLIENT });
+
+    expect(h.block).not.toHaveBeenCalled();
+    expect(h.calc).toHaveBeenCalled();
+  });
+
+  it("błąd sprawdzenia → 500, bez zapisu", async () => {
+    h.block.mockRejectedValueOnce(new Error("db down"));
+
+    const res = await post();
+
+    expect(res.status).toBe(500);
+    expect(h.insert).not.toHaveBeenCalled();
   });
 });

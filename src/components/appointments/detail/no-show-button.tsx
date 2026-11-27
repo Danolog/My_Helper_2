@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Button } from "@/components/ui/button";
 import { mutationFetch } from "@/lib/api-client";
+import { CLIENT_AUTO_BLOCKED_TOAST, isNoShowClientAutoBlocked } from "@/lib/client-block";
 import { NO_SHOW_LABEL, canMarkNoShow, canUndoNoShow, noShowErrorToastMessage } from "@/lib/no-show";
 
 const NO_SHOW_GENERIC_ERROR = "Nie udało się zmienić oznaczenia wizyty";
@@ -21,6 +22,7 @@ interface NoShowButtonProps {
 interface NoShowResponse {
   success?: boolean;
   error?: unknown;
+  data?: unknown;
 }
 
 /**
@@ -50,6 +52,7 @@ export function NoShowButton({ appointment, onChanged, notifyChange }: NoShowBut
 
       if (res.ok && data?.success === true) {
         toast.success(canUndo ? "Cofnięto oznaczenie „Nie przyszedł”" : "Wizyta oznaczona: „Nie przyszedł”");
+        if (!canUndo && isNoShowClientAutoBlocked(data.data)) toast.info(CLIENT_AUTO_BLOCKED_TOAST);
         notifyChange();
         // Przycisk zostaje wyłączony do końca odświeżenia, żeby drugie
         // kliknięcie nie poszło ze starym statusem wizyty.

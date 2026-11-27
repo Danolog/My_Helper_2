@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Save, RefreshCw, Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { NoShowAutoBlockCard } from "@/components/settings/no-show-auto-block-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -240,6 +241,11 @@ export default function SalonSettingsPage() {
             </>
           )}
         </Button>
+      </div>
+
+      {/* Osobny zapis (od razu po wyborze), tylko dla właściciela. */}
+      <div className="mt-8">
+        <NoShowAutoBlockCard salonId={salon.id} />
       </div>
     </div>
   );

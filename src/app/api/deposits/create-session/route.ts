@@ -19,6 +19,7 @@ import {
 import { DEPOSITS_DISABLED_CODE, isDepositEnabled } from "@/lib/features";
 import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
+import { onlineBookingBlockResponse } from "@/lib/online-booking-block";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
@@ -239,6 +240,17 @@ export async function POST(request: Request) {
     // zycia sesji Checkout. Jeden, niezdradzajacy komunikat 400.
     const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId });
     if (refsError) return refsError;
+
+    // Blokada rezerwacji online — przed wyliczeniem kwoty, sesją Checkout
+    // i zapisem wizyty. Personel z panelu dodaje wizytę mimo blokady.
+    if (!isSalonStaff) {
+      const blocked = await onlineBookingBlockResponse({
+        salonId,
+        sessionUser: session?.user ?? null,
+        phone: guestPhone ?? null,
+      });
+      if (blocked) return blocked;
+    }
 
     // SECURITY: recompute the deposit amount on the server from salon/service
     // /client settings + promotions. The body amount is only compared to

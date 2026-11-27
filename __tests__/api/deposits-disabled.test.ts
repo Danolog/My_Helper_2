@@ -35,6 +35,8 @@ const h = vi.hoisted(() => ({
   rateLimitCheck: vi.fn(),
 }));
 
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/db", () => {
   const touch = (name: string) => (...a: unknown[]) => {
     h.dbCall(name, ...a);

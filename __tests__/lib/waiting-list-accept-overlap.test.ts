@@ -101,6 +101,9 @@ beforeEach(() => {
   h.select.mockReset();
   h.insert.mockReset();
   h.update.mockReset();
+  // Odczyt po kolejce testu: sprawdzenie blokady rezerwacji online przed nową
+  // wizytą — brak zablokowanej karty tego klienta (puste trafienie).
+  h.select.mockReturnValue(createChainMock([]));
   h.insert.mockReturnValue(createChainMock([{ id: "apt-new" }]));
   h.update.mockReturnValue(createChainMock([]));
   h.calc.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "X" });

@@ -6,6 +6,7 @@ import { verifiedClientMatchEmail } from "@/lib/client-match";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { onlineBookingBlockResponse } from "@/lib/online-booking-block";
 import {
   waitingList,
   clients,
@@ -155,6 +156,13 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+
+    // Zablokowany klient nie dołącza do listy: oferta z listy tworzy nową
+    // wizytę, czyli rezerwację online. To samo sprawdzenie, ten sam 403 i
+    // komunikat co przy rezerwacji w portalu — dopasowanie po zweryfikowanym
+    // e-mailu konta do kart tego salonu. Przed podpięciem i utworzeniem karty.
+    const blockedResponse = await onlineBookingBlockResponse({ salonId, sessionUser: authResult.user });
+    if (blockedResponse) return blockedResponse;
 
     let [clientRecord] = await db
       .select()

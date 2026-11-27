@@ -43,6 +43,12 @@ const mockTx = {
   execute: vi.fn().mockResolvedValue(undefined),
 };
 
+// Dopasowanie karty z blokadą sprawdza online-booking-block.test.ts; tu tylko
+// miejsce wywołania w trasie (domyślnie: brak blokady).
+const mockBlockResponse = vi.fn(async (..._args: unknown[]): Promise<Response | null> => null);
+vi.mock("@/lib/online-booking-block", () => ({
+  onlineBookingBlockResponse: (...args: unknown[]) => mockBlockResponse(...args),
+}));
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
@@ -3449,5 +3455,91 @@ describe("POST /api/appointments — forSalon i jawne listy kolumn (#193)", () =
     };
     expect(matchesPredicate(where, { ...row, salonId: TEST_IDS.SALON_UUID })).toBe(true);
     expect(matchesPredicate(where, { ...row, salonId: "99999999-9999-4999-8999-999999999999" })).toBe(false);
+  });
+});
+
+describe("POST /api/appointments — blokada rezerwacji online", () => {
+  const blocked = () =>
+    new Response(
+      JSON.stringify({
+        success: false,
+        code: "ONLINE_BOOKING_UNAVAILABLE",
+        error: "Rezerwacja online jest niedostępna. Skontaktuj się z salonem.",
+      }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+
+  const body = (extra: Record<string, unknown> = {}) => ({
+    salonId: TEST_IDS.SALON_UUID,
+    employeeId: TEST_IDS.EMPLOYEE_UUID,
+    serviceId: TEST_IDS.SERVICE_UUID,
+    startTime: "2026-04-01T10:00:00Z",
+    endTime: "2026-04-01T11:00:00Z",
+    ...extra,
+  });
+  const post = (extra?: Record<string, unknown>) =>
+    createAppointment(
+      createMockRequest("http://localhost:3000/api/appointments", { method: "POST", body: body(extra) })
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+  });
+
+  it("gość z numerem z zablokowanej karty (inny zapis numeru) → 403, przed zadatkiem i zapisem", async () => {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+    mockBlockResponse.mockResolvedValueOnce(blocked());
+
+    const res = await post({ guestName: "Jan Kowalski", guestPhone: "000 600 700" });
+    const { status, body: json } = await parseResponse<{ code: string }>(res);
+
+    expect(status).toBe(403);
+    expect(json.code).toBe("ONLINE_BOOKING_UNAVAILABLE");
+    expect(mockBlockResponse).toHaveBeenCalledWith({
+      salonId: TEST_IDS.SALON_UUID,
+      sessionUser: null,
+      phone: "+48000600700",
+    });
+    expect(mockDepositGuard).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockSendBookingSms).not.toHaveBeenCalled();
+  });
+
+  it("zalogowany klient portalu → sprawdzenie z użytkownikiem sesji; 403 bez zapisu", async () => {
+    mockGetSalonContext.mockResolvedValueOnce(null);
+    mockBlockResponse.mockResolvedValueOnce(blocked());
+
+    const res = await post();
+
+    expect(res.status).toBe(403);
+    expect(mockBlockResponse).toHaveBeenCalledWith({
+      salonId: TEST_IDS.SALON_UUID,
+      sessionUser: expect.objectContaining({ id: "test-user-id", email: "test@test.com" }),
+      phone: null,
+    });
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("personel tego salonu → bez sprawdzenia blokady, wizyta zapisana", async () => {
+    mockDbSelect.mockReturnValueOnce(chainMock([])).mockReturnValueOnce(chainMock([]));
+    mockDbInsert.mockReturnValue(chainMock([makeAppointment()]));
+
+    const res = await post({ clientId: TEST_IDS.CLIENT_UUID });
+
+    expect(res.status).toBe(201);
+    expect(mockBlockResponse).not.toHaveBeenCalled();
+  });
+
+  it("błąd sprawdzenia → 500, bez zapisu", async () => {
+    mockGetSalonContext.mockResolvedValueOnce(null);
+    mockBlockResponse.mockRejectedValueOnce(new Error("connection refused"));
+
+    const res = await post();
+
+    expect(res.status).toBe(500);
+    expect(mockDbInsert).not.toHaveBeenCalled();
   });
 });

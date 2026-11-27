@@ -52,6 +52,8 @@ function nextSelect() {
   return filteringChain(h.queue.shift() ?? []);
 }
 
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/db", () => {
   const select = () => nextSelect();
   return {

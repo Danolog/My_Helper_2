@@ -40,6 +40,8 @@ const h = vi.hoisted(() => ({
 
 // Atrapa bazy: select().from(tabela) zwraca wiersze przypisane do tabeli.
 // Zarówno trasa, jak i wyliczenie zadatku czytają przez forSalon(salonId).raw.
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/server/repository", () => {
   const select = () => {
     let table: unknown;

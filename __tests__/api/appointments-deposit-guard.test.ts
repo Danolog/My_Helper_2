@@ -29,6 +29,8 @@ const h = vi.hoisted(() => ({
 }));
 
 // #193: POST czyta i zapisuje przez forSalon(salonId).raw(tx => …).
+// Blokadę rezerwacji online sprawdzają osobne testy (online-booking-block*).
+vi.mock("@/lib/online-booking-block", () => ({ onlineBookingBlockResponse: async () => null }));
 vi.mock("@/lib/server/repository", () => {
   const tx = {
     select: (...a: unknown[]) => h.select(...a),
