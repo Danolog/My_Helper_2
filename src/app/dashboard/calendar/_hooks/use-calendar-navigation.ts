@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, type RefObject } from "react";
 import { toast } from "sonner";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import { mutationFetch } from "@/lib/api-client";
+import { CLIENT_AUTO_BLOCKED_TOAST, isNoShowClientAutoBlocked } from "@/lib/client-block";
 import { getStartOfWeek, getEndOfWeek } from "@/lib/date-utils";
 import { NO_SHOW_LABEL, canMarkNoShow, noShowErrorToastMessage } from "@/lib/no-show";
 import type { CalendarEvent, CalendarView, Employee, TimeBlock } from "@/types/calendar";
@@ -36,9 +37,12 @@ async function markNoShowFromCalendar(
   inFlight.add(appointmentId);
   try {
     const res = await mutationFetch(`/api/appointments/${appointmentId}/no-show`, { method: "POST" });
-    const data = (await res.json().catch(() => null)) as { success?: boolean; error?: unknown } | null;
+    const data = (await res.json().catch(() => null)) as
+      | { success?: boolean; error?: unknown; data?: unknown }
+      | null;
     if (res.ok && data?.success === true) {
       toast.success(`Wizyta oznaczona: „${NO_SHOW_LABEL}”`);
+      if (isNoShowClientAutoBlocked(data.data)) toast.info(CLIENT_AUTO_BLOCKED_TOAST);
       onChanged();
       return;
     }

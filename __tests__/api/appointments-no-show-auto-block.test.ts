@@ -141,8 +141,13 @@ describe("próg osiągnięty → blokada 'auto' w tej samej transakcji", () => {
     const res = await call(POST);
 
     expect(res.status).toBe(200);
-    // Odpowiedź trasy bez zmian.
-    expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, noShow: true, changed: true });
+    // Panel dowiaduje się o założonej blokadzie z odpowiedzi.
+    expect((await res.json()).data).toEqual({
+      appointmentId: APPT_ID,
+      noShow: true,
+      changed: true,
+      clientAutoBlocked: true,
+    });
     expect(h.state.transactions).toBe(1);
     const [block] = clientUpdates();
     expect(block).toMatchObject({ blockedBy: "auto", blockNote: null });
@@ -192,7 +197,10 @@ describe("próg osiągnięty → blokada 'auto' w tej samej transakcji", () => {
     m.asOwnerOf(SALON_A);
     givenMarkable({ threshold: 1, noShowCount: 3, blockedNow: false });
 
-    expect((await call(POST)).status).toBe(200);
+    const res = await call(POST);
+    expect(res.status).toBe(200);
+    // Blokada już była — to oznaczenie jej nie założyło.
+    expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, noShow: true, changed: true });
     expect(clientUpdates()).toHaveLength(1);
     expect(h.logger.info).toHaveBeenCalledTimes(1);
   });
@@ -206,7 +214,9 @@ describe("bez blokady", () => {
     m.asOwnerOf(SALON_A);
     givenMarkable({ threshold, noShowCount });
 
-    expect((await call(POST)).status).toBe(200);
+    const res = await call(POST);
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).not.toHaveProperty("clientAutoBlocked");
     expect(clientUpdates()).toEqual([]);
     expect(h.logger.info).toHaveBeenCalledTimes(1);
   });

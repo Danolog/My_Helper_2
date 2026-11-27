@@ -43,7 +43,7 @@ import { isValidUuid } from "@/lib/validations";
  * Automatyczna blokada rezerwacji online: po nowym oznaczeniu (POST z zapisem)
  * w tej samej transakcji `applyNoShowAutoBlock` — gdy licznik karty klienta
  * dojdzie do progu salonu, karta dostaje blokadę `blocked_by = 'auto'`
- * (osobny log `info`). Odpowiedź trasy się nie zmienia. Kolejność blokad
+ * (osobny log `info`), a odpowiedź ma `data.clientAutoBlocked: true`. Kolejność blokad
  * wierszy: wizyta, potem karta klienta. Usuwanie karty bierze je odwrotnie
  * (karta, potem wizyty); zakleszczenie rozstrzyga baza (40P01) i jedna
  * z transakcji się wycofuje — nic nie zapisane, trasa zwraca 409 `RETRY`
@@ -183,9 +183,17 @@ async function changeNoShow(
       });
     }
 
+    // `clientAutoBlocked: true` tylko wtedy, gdy to oznaczenie założyło
+    // blokadę — panel pokazuje wtedy osobny komunikat. Inne odpowiedzi bez zmian.
+    const clientAutoBlocked = outcome.autoBlock?.result.kind === "blocked";
     return NextResponse.json({
       success: true,
-      data: { appointmentId: id, noShow: markAsNoShow, changed: outcome.changed },
+      data: {
+        appointmentId: id,
+        noShow: markAsNoShow,
+        changed: outcome.changed,
+        ...(clientAutoBlocked ? { clientAutoBlocked: true } : {}),
+      },
     });
   } catch (error) {
     if (isRetryableWriteConflict(error)) {

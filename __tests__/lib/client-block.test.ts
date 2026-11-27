@@ -5,8 +5,10 @@
 import { describe, it, expect } from "vitest";
 import { clientBlockSchema, noShowSettingsSchema } from "@/lib/api-validation";
 import {
+  CLIENT_AUTO_BLOCKED_TOAST,
   CLIENT_BLOCK_NOTE_MAX_LENGTH,
   isClientBlockRole,
+  isNoShowClientAutoBlocked,
   NO_SHOW_AUTO_BLOCK_THRESHOLDS,
   onlineBookingUnavailableMessage,
   parseNoShowAutoBlockThreshold,
@@ -82,5 +84,28 @@ describe("zgodność ze schematami", () => {
     expect(clientBlockSchema.safeParse({ note: "a".repeat(CLIENT_BLOCK_NOTE_MAX_LENGTH) }).success).toBe(true);
     expect(clientBlockSchema.safeParse({ note: "a".repeat(CLIENT_BLOCK_NOTE_MAX_LENGTH + 1) }).success).toBe(false);
     expect(clientBlockSchema.safeParse({}).success).toBe(true);
+  });
+});
+
+describe("isNoShowClientAutoBlocked (toast po oznaczeniu „Nie przyszedł”)", () => {
+  it("clientAutoBlocked: true → toast", () => {
+    expect(isNoShowClientAutoBlocked({ appointmentId: "a", noShow: true, changed: true, clientAutoBlocked: true })).toBe(
+      true
+    );
+  });
+
+  it.each([
+    ["brak pola", { appointmentId: "a", noShow: true, changed: true }],
+    ["false", { clientAutoBlocked: false }],
+    ["napis", { clientAutoBlocked: "true" }],
+    ["null", null],
+    ["brak data", undefined],
+    ["tablica", [true]],
+  ])("%s → bez toastu", (_label, data) => {
+    expect(isNoShowClientAutoBlocked(data)).toBe(false);
+  });
+
+  it("treść toastu", () => {
+    expect(CLIENT_AUTO_BLOCKED_TOAST).toBe("Klient ma teraz zablokowaną rezerwację online.");
   });
 });

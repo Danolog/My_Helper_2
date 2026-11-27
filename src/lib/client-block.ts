@@ -72,3 +72,15 @@ export function onlineBookingUnavailableMessage(salonPhone: string | null | unde
     ? `Rezerwacja online jest niedostępna. Zadzwoń do salonu: ${phone}`
     : "Rezerwacja online jest niedostępna. Skontaktuj się z salonem.";
 }
+
+/** Toast w panelu po oznaczeniu „Nie przyszedł”, które założyło blokadę z progu. */
+export const CLIENT_AUTO_BLOCKED_TOAST = "Klient ma teraz zablokowaną rezerwację online.";
+
+/** Czy `data` odpowiedzi POST `/api/appointments/[id]/no-show` mówi, że oznaczenie założyło blokadę. */
+export function isNoShowClientAutoBlocked(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as { clientAutoBlocked?: unknown }).clientAutoBlocked === true
+  );
+}
