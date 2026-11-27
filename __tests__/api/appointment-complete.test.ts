@@ -1463,4 +1463,238 @@ describe("POST /api/appointments/[id]/complete", () => {
     // lowStockAlert should be null since minQuantity is null
     expect(data.stockDeductions[0].lowStockAlert).toBeNull();
   });
+
+  describe("płatność przy zakończeniu (kwota i metoda)", () => {
+    function completeWith(body: Record<string, unknown>) {
+      return completeAppointment(
+        createMockRequest(
+          `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+          { method: "POST", body }
+        ),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    /**
+     * Zakończenie bez pracownika (bez prowizji): odczyt wizyty, odczyt zabiegu,
+     * insert zabiegu, UPDATE statusu (zwraca `updatedRow`), produkty, salon.
+     * Zwraca łańcuch UPDATE wizyty, żeby sprawdzić argument `set`.
+     */
+    function givenCompletableAppointment(updatedRow: Record<string, unknown>) {
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      const updateChain = chainMock([{ ...appointment, status: "completed", ...updatedRow }]);
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      mockDbUpdate.mockReturnValueOnce(updateChain);
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+      return updateChain;
+    }
+
+    it("200: kwota i metoda w tym samym SET co status, odpowiedź z wartościami zapisanymi", async () => {
+      const updateChain = givenCompletableAppointment({ paidAmount: "123.45", paymentMethod: "card" });
+
+      const { status, body } = await parseResponse(
+        await completeWith({ paidAmount: "123.45", paymentMethod: "card" })
+      );
+
+      expect(status).toBe(200);
+      // Jedno wywołanie UPDATE wizyty i jedno `set` z trzema polami naraz.
+      expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+      expect((mockDbUpdate.mock.calls[0]?.[0] as { _table?: string })?._table).toBe("appointments");
+      expect(updateChain.set).toHaveBeenCalledTimes(1);
+      expect(updateChain.set).toHaveBeenCalledWith({
+        status: "completed",
+        paidAmount: "123.45",
+        paymentMethod: "card",
+      });
+      expect((body as any).data.payment).toEqual({ paidAmount: "123.45", paymentMethod: "card" });
+      expect((body as any).data.appointment.paidAmount).toBe("123.45");
+      expect((body as any).data.appointment.paymentMethod).toBe("card");
+    });
+
+    it("200: kwota liczbą trafia do bazy jako tekst", async () => {
+      const updateChain = givenCompletableAppointment({ paidAmount: "80.50", paymentMethod: "blik" });
+
+      const { status } = await parseResponse(await completeWith({ paidAmount: 80.5, paymentMethod: "blik" }));
+
+      expect(status).toBe(200);
+      expect(updateChain.set).toHaveBeenCalledWith({
+        status: "completed",
+        paidAmount: "80.5",
+        paymentMethod: "blik",
+      });
+    });
+
+    it("200: bez obu pól — SET tylko statusu, płatność w odpowiedzi pusta", async () => {
+      const updateChain = givenCompletableAppointment({ paidAmount: null, paymentMethod: null });
+
+      const { status, body } = await parseResponse(await completeWith({ notes: "ok" }));
+
+      expect(status).toBe(200);
+      expect(updateChain.set).toHaveBeenCalledWith({ status: "completed" });
+      expect((body as any).data.payment).toEqual({ paidAmount: null, paymentMethod: null });
+    });
+
+    it("200: oba pola null traktowane jak brak", async () => {
+      const updateChain = givenCompletableAppointment({ paidAmount: null, paymentMethod: null });
+
+      const { status } = await parseResponse(await completeWith({ paidAmount: null, paymentMethod: null }));
+
+      expect(status).toBe(200);
+      expect(updateChain.set).toHaveBeenCalledWith({ status: "completed" });
+    });
+
+    it("200: kwota 0 (wizyta gratis)", async () => {
+      const updateChain = givenCompletableAppointment({ paidAmount: "0.00", paymentMethod: "cash" });
+
+      const { status, body } = await parseResponse(await completeWith({ paidAmount: "0", paymentMethod: "cash" }));
+
+      expect(status).toBe(200);
+      expect(updateChain.set).toHaveBeenCalledWith({
+        status: "completed",
+        paidAmount: "0",
+        paymentMethod: "cash",
+      });
+      expect((body as any).data.payment).toEqual({ paidAmount: "0.00", paymentMethod: "cash" });
+    });
+
+    it("200: górna granica 99999999.99", async () => {
+      const updateChain = givenCompletableAppointment({ paidAmount: "99999999.99", paymentMethod: "cash" });
+
+      const { status } = await parseResponse(
+        await completeWith({ paidAmount: "99999999.99", paymentMethod: "cash" })
+      );
+
+      expect(status).toBe(200);
+      expect(updateChain.set).toHaveBeenCalledWith(
+        expect.objectContaining({ paidAmount: "99999999.99" })
+      );
+    });
+
+    it("kwota i metoda nie trafiają do logów", async () => {
+      const { logger } = await import("@/lib/logger");
+      const infoSpy = vi.spyOn(logger, "info");
+      givenCompletableAppointment({ paidAmount: "4321.09", paymentMethod: "blik" });
+
+      const { status } = await parseResponse(
+        await completeWith({ paidAmount: "4321.09", paymentMethod: "blik" })
+      );
+
+      expect(status).toBe(200);
+      const logged = JSON.stringify(infoSpy.mock.calls);
+      expect(logged).not.toContain("4321.09");
+      expect(logged).not.toContain("blik");
+      expect(logged).not.toContain("paidAmount");
+      expect(logged).not.toContain("paymentMethod");
+      infoSpy.mockRestore();
+    });
+
+    it.each([
+      ["metoda spoza listy: transfer", { paidAmount: "50", paymentMethod: "transfer" }, "paymentMethod"],
+      ["metoda wielkimi literami: BLIK", { paidAmount: "50", paymentMethod: "BLIK" }, "paymentMethod"],
+      ["kwota ujemna (tekst)", { paidAmount: "-1", paymentMethod: "cash" }, "paidAmount"],
+      ["kwota ujemna (liczba)", { paidAmount: -0.01, paymentMethod: "cash" }, "paidAmount"],
+      ["trzy miejsca po przecinku", { paidAmount: "10.005", paymentMethod: "cash" }, "paidAmount"],
+      ["trzy miejsca po przecinku (liczba)", { paidAmount: 10.005, paymentMethod: "cash" }, "paidAmount"],
+      ["powyżej zakresu numeric(10,2)", { paidAmount: "100000000", paymentMethod: "cash" }, "paidAmount"],
+      ["kwota nie jest liczbą", { paidAmount: "abc", paymentMethod: "cash" }, "paidAmount"],
+      ["kwota pusta", { paidAmount: "", paymentMethod: "cash" }, "paidAmount"],
+      ["zapis wykładniczy", { paidAmount: 1e21, paymentMethod: "cash" }, "paidAmount"],
+      ["tylko kwota", { paidAmount: "50" }, "paymentMethod"],
+      ["tylko metoda", { paymentMethod: "card" }, "paidAmount"],
+      ["kwota z metodą null", { paidAmount: "50", paymentMethod: null }, "paymentMethod"],
+    ])("400: %s — bez żadnego zapytania do bazy", async (_name, body, field) => {
+      const { status, body: res } = await parseResponse(await completeWith(body));
+
+      expect(status).toBe(400);
+      expect(res.success).toBe(false);
+      expect((res as any).details[field]).toEqual(expect.any(String));
+      expect(mockDbSelect).not.toHaveBeenCalled();
+      expect(mockDbInsert).not.toHaveBeenCalled();
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    });
+
+    it("400: komunikaty po polsku", async () => {
+      const negative = await parseResponse(await completeWith({ paidAmount: "-5", paymentMethod: "cash" }));
+      expect((negative.body as any).details.paidAmount).toBe("Kwota nie moze byc ujemna");
+
+      const decimals = await parseResponse(await completeWith({ paidAmount: "1.234", paymentMethod: "cash" }));
+      expect((decimals.body as any).details.paidAmount).toBe("Kwota moze miec najwyzej 2 miejsca po przecinku");
+
+      const pair = await parseResponse(await completeWith({ paidAmount: "5" }));
+      expect((pair.body as any).details.paymentMethod).toBe("Podaj metode platnosci razem z kwota");
+    });
+
+    it("401: brak sesji — bez zapisu", async () => {
+      const { NextResponse } = await import("next/server");
+      const { requireAuth, isAuthError } = await import("@/lib/auth-middleware");
+      vi.mocked(requireAuth).mockResolvedValueOnce(
+        NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 }) as never
+      );
+      vi.mocked(isAuthError).mockReturnValueOnce(true);
+
+      const { status } = await parseResponse(await completeWith({ paidAmount: "50", paymentMethod: "cash" }));
+
+      expect(status).toBe(401);
+      expect(mockDbSelect).not.toHaveBeenCalled();
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    });
+
+    it("404: pracownik kończy cudzą wizytę — płatność niezapisana", async () => {
+      const { getSalonContext } = await import("@/lib/salon-context");
+      vi.mocked(getSalonContext).mockResolvedValueOnce({
+        salonId: TEST_IDS.SALON_UUID,
+        role: "employee",
+        employeeId: "other-employee-id",
+        userId: "user-2",
+      } as never);
+      const appointment = makeAppointment({ status: "scheduled" });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+
+      const { status, body } = await parseResponse(
+        await completeWith({ paidAmount: "50", paymentMethod: "cash" })
+      );
+
+      expect(status).toBe(404);
+      expect(body.success).toBe(false);
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+      expect(mockDbInsert).not.toHaveBeenCalled();
+    });
+
+    it("409: wizyta „Nie przyszedł” — płatność niezapisana", async () => {
+      const appointment = makeAppointment({ status: NO_SHOW_STATUS });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+
+      const { status, body } = await parseResponse(
+        await completeWith({ paidAmount: "50", paymentMethod: "cash" })
+      );
+
+      expect(status).toBe(409);
+      expect((body as any).code).toBe(NO_SHOW_COMPLETE_BLOCKED_CODE);
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    });
+
+    it("500: błąd bazy przy UPDATE — odpowiedź bez kwoty, metody i szczegółów błędu", async () => {
+      const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService() }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+      const failingUpdate: Record<string, unknown> = {};
+      for (const m of ["set", "where", "returning"]) {
+        failingUpdate[m] = vi.fn().mockReturnValue(failingUpdate);
+      }
+      failingUpdate.then = (_: unknown, reject: (err: Error) => void) =>
+        reject(Object.assign(new Error("new row violates check constraint"), { code: "23514" }));
+      mockDbUpdate.mockReturnValueOnce(failingUpdate);
+
+      const { status, body } = await parseResponse(
+        await completeWith({ paidAmount: "77.70", paymentMethod: "card" })
+      );
+
+      expect(status).toBe(500);
+      expect(body).toEqual({ success: false, error: "Failed to complete appointment" });
+    });
+  });
 });
