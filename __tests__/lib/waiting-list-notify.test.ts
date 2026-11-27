@@ -31,7 +31,16 @@ vi.mock("drizzle-orm", () => ({
   not: (): Cond => ({ kind: "other" }),
   isNull: (col: string): Cond => ({ kind: "isNull", col }),
   isNotNull: (col: string): Cond => ({ kind: "isNotNull", col }),
+  gt: (): Cond => ({ kind: "other" }),
+  sql: (): Cond => ({ kind: "other" }),
   asc: (col: string): Order => ({ kind: "asc", col }),
+}));
+
+// Kolumna „ten sam klient ma blokadę” to SQL na prawdziwej bazie
+// (__tests__/pg/online-booking-block.pg.test.ts, waiting-list-linked-appointment);
+// tu jej wynik ustawia fikstura wpisu (`blockedEntryIds`).
+vi.mock("@/lib/online-booking-block", () => ({
+  sameCustomerOnlineBookingBlocked: () => ({ kind: "other" }),
 }));
 
 vi.mock("@/lib/schema", () => {
@@ -69,6 +78,10 @@ let users: Array<Record<string, unknown>> = [];
 // Kontakt klienta wpisu (ustawiany per test)
 let clientPhone: string | null = null;
 let clientEmail: string | null = CLIENT_EMAIL;
+// Wpisy, których klient ma blokadę rezerwacji online (kolumna z zapytania o wpisy)
+let blockedEntryIds = new Set<string>();
+// Wizyty klienta, które oferta może przenieść (wynik zapytania o wizyty)
+let movableAppointments: Array<{ id: string }> = [];
 
 // Wartości przekazane do db.update(...).set(...) i warunki tych zapisów
 const updates: Array<Record<string, unknown>> = [];
@@ -150,6 +163,7 @@ function entryRow(e: EntryFixture) {
       phone: clientPhone,
       email: clientEmail,
     },
+    onlineBookingBlocked: blockedEntryIds.has(e.id),
   };
 }
 
@@ -227,6 +241,7 @@ function selectChain() {
       const rows = salonRows.filter((s) => matches(s, where, "salons")).map((s) => ({ phone: s.phone }));
       return resolve(limit !== undefined ? rows.slice(0, limit) : rows);
     }
+    if (tableName === "appointments") return resolve(movableAppointments);
     return resolve([]);
   };
   return c;
@@ -357,6 +372,8 @@ function resetAll() {
   waitingListModuleOn = true;
   clientPhone = null;
   clientEmail = CLIENT_EMAIL;
+  blockedEntryIds = new Set();
+  movableAppointments = [];
   mockSendPush.mockResolvedValue({ success: true });
   mockSendSms.mockResolvedValue({ success: true, notificationId: "n-1" });
 }
@@ -1150,5 +1167,72 @@ describe("notifyWaitingList — zajęcie wpisu przed wysyłką i warunkowe zwoln
     expectNoOffer(entryState("wl-1", "salon-2"));
     expect(entryState("wl-1", "salon-1").notifiedAt).toBeInstanceOf(Date);
     expect(result).toEqual({ notified: 1, smsCount: 1, pushCount: 0, errors: 0 });
+  });
+});
+
+describe("notifyWaitingList — klient z blokadą rezerwacji online", () => {
+  const withService = { ...params, serviceId: "svc-1" };
+
+  it("oferta nowej wizyty: wpis pominięty bez zajęcia i wysyłki, wpis nietknięty", async () => {
+    users = VERIFIED;
+    clientPhone = CLIENT_PHONE;
+    blockedEntryIds = new Set(["wl-1"]);
+
+    const result = await notifyWaitingList(withService);
+
+    expect(mockClaim).not.toHaveBeenCalled();
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(mockSendPush).not.toHaveBeenCalled();
+    expectNoOffer(entryState("wl-1"));
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+    expectOutcome("wl-1", "online_booking_blocked");
+  });
+
+  it("oferta nowej wizyty bez usługi: też pominięta", async () => {
+    users = VERIFIED;
+    blockedEntryIds = new Set(["wl-1"]);
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockClaim).not.toHaveBeenCalled();
+    expect(result.notified).toBe(0);
+    expectOutcome("wl-1", "online_booking_blocked");
+  });
+
+  it("oferta przeniesienia istniejącej wizyty: wychodzi mimo blokady, z powiązaną wizytą", async () => {
+    users = VERIFIED;
+    blockedEntryIds = new Set(["wl-1"]);
+    movableAppointments = [{ id: "appt-later" }];
+
+    const result = await notifyWaitingList(withService);
+
+    expect(mockClaim).toHaveBeenCalledTimes(1);
+    expect(updates[0]).toHaveProperty("existingAppointmentId", "appt-later");
+    expect(result).toEqual({ notified: 1, smsCount: 0, pushCount: 1, errors: 0 });
+    expectOutcome("wl-1", "delivered");
+  });
+
+  it("pominięty wpis klienta z blokadą nie zatrzymuje kolejnych wpisów", async () => {
+    users = VERIFIED;
+    entries = [entryFixture("wl-1"), entryFixture("wl-2")];
+    blockedEntryIds = new Set(["wl-1"]);
+
+    const result = await notifyWaitingList(withService);
+
+    expect(markedEntryIds()).toEqual(["wl-2"]);
+    expectNoOffer(entryState("wl-1"));
+    expect(result.notified).toBe(1);
+    expectOutcome("wl-1", "online_booking_blocked");
+    expectOutcome("wl-2", "delivered");
+  });
+
+  it("bez blokady: oferta nowej wizyty wychodzi jak dotąd", async () => {
+    users = VERIFIED;
+
+    const result = await notifyWaitingList(withService);
+
+    expect(mockClaim).toHaveBeenCalledTimes(1);
+    expect(updates[0]).toHaveProperty("existingAppointmentId", null);
+    expect(result.notified).toBe(1);
   });
 });

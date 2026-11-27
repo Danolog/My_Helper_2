@@ -8,7 +8,10 @@
  * - przyszła wizyta późniejsza niż oferta → przyjęcie ją przenosi: stary
  *   termin wolny, klient ma jedną wizytę tej usługi;
  * - przyszła późniejsza wizyta zakończona przez salon po ofercie → odmowa,
- *   wizyta nietknięta, bez drugiej wizyty, wpis nierozstrzygnięty.
+ *   wizyta nietknięta, bez drugiej wizyty, wpis nierozstrzygnięty;
+ * - klient z blokadą rezerwacji online (jego karta albo inna karta salonu
+ *   z tym samym e-mailem) nie dostaje oferty nowej wizyty, a oferta
+ *   przeniesienia istniejącej wizyty wychodzi.
  *
  * Niezależność od pory dnia (godziny ciszy SMS 21:00–8:00): klient ma numer
  * spoza listy numerów testowych ORAZ zweryfikowane konto, a oba kanały to
@@ -68,14 +71,17 @@ function nextOffer() {
   return { start, end: new Date(start.getTime() + HOUR) };
 }
 
-async function clientWithAccount(tag: string): Promise<string> {
+async function clientWithAccount(
+  tag: string,
+  card: Partial<typeof clients.$inferInsert> = {}
+): Promise<string> {
   const userId = `${PREFIX}-${tag}`;
   const email = `${userId}@example.invalid`;
   await h!.db.insert(user).values({ id: userId, name: `IT linked ${tag}`, email, emailVerified: true });
   createdUsers.push(userId);
   const [c] = await h!.db
     .insert(clients)
-    .values({ salonId: ids.salon, firstName: "IT", lastName: tag, email, phone: PHONE })
+    .values({ salonId: ids.salon, firstName: "IT", lastName: tag, email, phone: PHONE, ...card })
     .returning({ id: clients.id });
   return c!.id;
 }
@@ -248,5 +254,71 @@ suite("lista oczekujących: powiązana wizyta przy ofercie i przyjęciu — praw
       .where(and(eq(appointments.salonId, ids.salon), eq(appointments.startTime, offer.start)));
     expect(atOffer).toEqual([]);
     expect((await entryRow(entry.id)).accepted).toBeNull();
+  });
+
+  describe("klient z blokadą rezerwacji online", () => {
+    /**
+     * Własny numer każdego klienta tej grupy: zablokowana karta z numerem
+     * PHONE dopasowałaby wpisy pozostałych przypadków (ten sam klient po numerze).
+     */
+    const blockedCard = () => ({ blockedAt: new Date(), blockedBy: OWNER });
+
+    async function notifyRaw(serviceId: string, s: { start: Date; end: Date }) {
+      return notifyWaitingList({
+        salonId: ids.salon,
+        serviceId,
+        employeeId: ids.empOffer,
+        startTime: s.start,
+        endTime: s.end,
+        serviceName: "IT linked",
+        employeeName: "IT oferta",
+        salonName: "IT linked",
+      });
+    }
+
+    it("karta wpisu zablokowana, brak wizyty do przeniesienia → bez oferty, wpis nietknięty", async () => {
+      const svc = await serviceOf("blocked-new");
+      const clientId = await clientWithAccount("blocked-new", { phone: "+48000600796", ...blockedCard() });
+      const entry = await waitingEntry(clientId, svc);
+
+      const res = await notifyRaw(svc, nextOffer());
+
+      expect(res).toMatchObject({ notified: 0, errors: 0 });
+      const row = await entryRow(entry.id);
+      expect(row.notifiedAt).toBeNull();
+      expect(row.acceptToken).toBeNull();
+    });
+
+    it("inna zablokowana karta z tym samym e-mailem (wielkie litery) → bez oferty nowej wizyty", async () => {
+      const svc = await serviceOf("blocked-twin");
+      const clientId = await clientWithAccount("blocked-twin", { phone: "+48000600795" });
+      await h!.db.insert(clients).values({
+        salonId: ids.salon,
+        firstName: "IT",
+        lastName: "blocked-twin-2",
+        email: `${PREFIX}-blocked-twin@example.invalid`.toUpperCase(),
+        ...blockedCard(),
+      });
+      const entry = await waitingEntry(clientId, svc);
+
+      const res = await notifyRaw(svc, nextOffer());
+
+      expect(res).toMatchObject({ notified: 0, errors: 0 });
+      expect((await entryRow(entry.id)).notifiedAt).toBeNull();
+    });
+
+    it("karta wpisu zablokowana, późniejsza wizyta do przeniesienia → oferta przeniesienia wychodzi", async () => {
+      const svc = await serviceOf("blocked-move");
+      const clientId = await clientWithAccount("blocked-move", { phone: "+48000600794", ...blockedCard() });
+      const offer = nextOffer();
+      const apptId = await visit(clientId, svc, new Date(offer.start.getTime() + 2 * DAY), "scheduled");
+      const entry = await waitingEntry(clientId, svc);
+
+      await notify(svc, offer);
+
+      const row = await entryRow(entry.id);
+      expect(row.notifiedAt).not.toBeNull();
+      expect(row.existingAppointmentId).toBe(apptId);
+    });
   });
 });

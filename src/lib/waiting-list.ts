@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { eq, and, asc, gt, isNull, isNotNull, or } from "drizzle-orm";
+import { eq, and, asc, gt, isNull, isNotNull, not, or, sql } from "drizzle-orm";
 import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import { onlineBookingUnavailableMessage, ONLINE_BOOKING_UNAVAILABLE_CODE } from "@/lib/client-block";
 import {
@@ -8,6 +8,7 @@ import {
   DEPOSIT_REQUIRED_MESSAGE,
 } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
+import { sameCustomerOnlineBookingBlocked } from "@/lib/online-booking-block";
 import { sendPushNotification } from "@/lib/push";
 import {
   waitingList,
@@ -127,6 +128,11 @@ async function readSalonPhone(gate: SalonGate, salonId: string): Promise<string 
 interface EntryRow {
   entry: typeof waitingList.$inferSelect;
   client: typeof clients.$inferSelect;
+  /**
+   * Karta wpisu albo inna karta salonu z tym samym e-mailem lub numerem ma
+   * blokadę rezerwacji online (`sameCustomerOnlineBookingBlocked`).
+   */
+  onlineBookingBlocked?: boolean | null;
 }
 
 /** Wspólne dane jednego przebiegu: zwolniony termin, gotowe treści, wynik. */
@@ -270,8 +276,28 @@ function movableAppointmentWhere(offeredStart: Date, now: Date) {
 }
 
 /**
+ * Warunek wizyty klienta (id karty albo kolumna karty w zapytaniu o wpisy),
+ * którą oferta zwolnionego terminu może przenieść: ten salon, ta sama usługa
+ * i `movableAppointmentWhere`.
+ */
+function linkedAppointmentWhere(
+  clientId: string | typeof clients.id,
+  salonId: string,
+  serviceId: string,
+  offeredStart: Date,
+  now: Date
+) {
+  return and(
+    eq(appointments.clientId, clientId),
+    eq(appointments.salonId, salonId),
+    eq(appointments.serviceId, serviceId),
+    movableAppointmentWhere(offeredStart, now)
+  );
+}
+
+/**
  * Wizyta klienta na tę samą usługę w tym salonie, którą oferta może przenieść
- * (`movableAppointmentWhere`); przy kilku — najwcześniejsza.
+ * (`linkedAppointmentWhere`); przy kilku — najwcześniejsza.
  */
 async function findExistingAppointmentId(row: EntryRow, offer: SlotOffer): Promise<string | null> {
   const { gate, salonId, params } = offer;
@@ -282,14 +308,7 @@ async function findExistingAppointmentId(row: EntryRow, offer: SlotOffer): Promi
     tx
       .select({ id: appointments.id })
       .from(appointments)
-      .where(
-        and(
-          eq(appointments.clientId, clientId),
-          eq(appointments.salonId, salonId),
-          eq(appointments.serviceId, serviceId),
-          movableAppointmentWhere(params.startTime, offer.now)
-        )
-      )
+      .where(linkedAppointmentWhere(clientId, salonId, serviceId, params.startTime, offer.now))
       .orderBy(asc(appointments.startTime))
       .limit(1)
   );
@@ -370,6 +389,7 @@ async function releaseEntry(row: EntryRow, offer: SlotOffer, acceptToken: string
 /** Wynik obsługi jednego wpisu (log `{ entryId, outcome }`). */
 type EntryOutcome =
   | "no_channel"
+  | "online_booking_blocked"
   | "claim_failed"
   | "claimed_elsewhere"
   | "delivered"
@@ -393,6 +413,12 @@ async function offerSlotToEntry(row: EntryRow, offer: SlotOffer): Promise<EntryO
   let claimed: boolean;
   try {
     const existingApptId = await findExistingAppointmentId(row, offer);
+    // Oferta NOWEJ wizyty dla klienta z blokadą rezerwacji online: wpis
+    // pominięty bez zapisu (przy przyjęciu i tak dostałby odmowę). Oferta
+    // przeniesienia istniejącej wizyty wychodzi — nie tworzy rezerwacji.
+    // Zapytanie o wpisy odsiewa takie wpisy wcześniej; ten warunek łapie
+    // wizytę, która zniknęła między odczytem wpisów a tym miejscem.
+    if (!existingApptId && row.onlineBookingBlocked) return "online_booking_blocked";
     claimed = await claimEntry(row, offer, existingApptId, acceptToken);
   } catch (err) {
     // Błąd bazy przed wysyłką: wiadomość nie wychodzi, wpis zostaje oczekujący.
@@ -437,7 +463,9 @@ async function offerSlotToEntry(row: EntryRow, offer: SlotOffer): Promise<EntryO
  *
  * Wpisy: ten salon, potwierdzona prośba klienta, jeszcze nie powiadomione
  * i nierozstrzygnięte, ta sama usługa/pracownik albo bez preferencji;
- * najwyżej WAITING_LIST_NOTIFY_LIMIT najstarszych.
+ * najwyżej WAITING_LIST_NOTIFY_LIMIT najstarszych. Pominięte są wpisy klienta
+ * z blokadą rezerwacji online (karta wpisu albo inna karta salonu z tym samym
+ * e-mailem lub numerem), chyba że oferta przenosi jego istniejącą wizytę.
  *
  * Kanały: SMS na numer klienta wpisu (treść z `buildWaitingListSms`, telefon
  * salonu z bazy), poza godzinami ciszy 21:00–8:00 czasu SMS_TIME_ZONE i nie
@@ -513,11 +541,29 @@ export async function notifyWaitingList(
         )
       : isNull(waitingList.preferredEmployeeId);
 
+    // Klient z blokadą rezerwacji online (jego karta albo inna karta salonu
+    // z tym samym e-mailem lub numerem) nie dostaje oferty NOWEJ wizyty.
+    // Wpis zostaje w bazie, ale nie zajmuje miejsca w limicie przebiegu.
+    // Oferta przeniesienia istniejącej wizyty na tę usługę wychodzi.
+    const onlineBookingBlocked = sameCustomerOnlineBookingBlocked(salonId);
+    const serviceId = params.serviceId;
+    const offerAllowedForBlocked = serviceId
+      ? sql`exists (select 1 from ${appointments} where ${linkedAppointmentWhere(
+          clients.id,
+          salonId,
+          serviceId,
+          params.startTime,
+          now
+        )})`
+      : undefined;
+    const onlineBookingCondition = or(not(onlineBookingBlocked), offerAllowedForBlocked);
+
     const entries = await gate.raw((tx) =>
       tx
         .select({
           entry: waitingList,
           client: clients,
+          onlineBookingBlocked,
         })
         .from(waitingList)
         .innerJoin(
@@ -531,7 +577,8 @@ export async function notifyWaitingList(
             isNull(waitingList.notifiedAt),
             isNull(waitingList.accepted),
             serviceCondition,
-            employeeCondition
+            employeeCondition,
+            onlineBookingCondition
           )
         )
         .orderBy(asc(waitingList.createdAt))
@@ -632,6 +679,11 @@ interface AcceptResult {
  * odmowa NOWEJ wizyty z kodem ONLINE_BOOKING_UNAVAILABLE (trasa: 403, ten sam
  * komunikat co przy rezerwacji online), bez zapisu, wpis nierozstrzygnięty.
  * Przeniesienie istniejącej wizyty zostaje dozwolone — nie tworzy rezerwacji.
+ * Ta sama reguła obowiązuje w trasie portalu `POST /api/client/waiting-list/[id]`:
+ * sprawdza blokadę (szerzej: także inne karty z tym samym e-mailem lub numerem)
+ * tylko dla wpisu bez powiązanej wizyty. Sprawdzenie tutaj obejmuje wpis,
+ * którego powiązana wizyta zniknęła albo została odwołana (wtedy powstaje nowa
+ * wizyta), oraz wołających bez sprawdzenia w trasie.
  */
 export async function acceptEarlierSlot(
   waitingListId: string,
