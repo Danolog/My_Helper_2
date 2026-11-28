@@ -36,7 +36,8 @@ const SESSION_EXPORTS = [
   "revokeSalonGrantsForUser",
 ];
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
-const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
+/** Strażnik schematu (`checkSchemaMigrations`): liczba migracji w bazie względem dziennika obrazu. */
+const HEALTH_EXPORTS = ["checkDatabase", "checkSchemaMigrations", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
 /** Retencja tabel auth: wygasłe sesje i rekordy weryfikacji (cron, wszystkie konta). */
 const AUTH_RETENTION_EXPORTS = ["cleanupExpiredAuthRecords"];

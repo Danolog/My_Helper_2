@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 // ADR-001 sekcja 4: healthcheck systemowy (ping bazy, bez danych najemcy) — wyjście systemowe #193
-import { pingDatabase } from '@/lib/server/system';
+import { checkSchemaMigrations, pingDatabase } from '@/lib/server/system';
 import { logger } from "@/lib/logger";
 // Health checks must always reflect real-time system state — never cache
 export const dynamic = 'force-dynamic';
 
 // Fixed public text for a failed database check; error details go to the server log only
 const DATABASE_UNAVAILABLE_MESSAGE = 'Database unavailable';
+// Fixed public text for the schema guard; counts and reason go to the server log only
+const SERVICE_NOT_READY_MESSAGE = 'Service not ready';
 
 // Helper function to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -24,6 +26,27 @@ export async function GET() {
   try {
     // Test database connection with 5 second timeout
     await withTimeout(pingDatabase(), 5000);
+
+    // Schema guard: the Cloud Run startup probe and the deploy smoke step both
+    // call this route, so a revision whose image has more migrations than the
+    // database never becomes ready and is never promoted.
+    const schema = await withTimeout(checkSchemaMigrations(), 5000);
+    if (!schema.ready) {
+      logger.error('Health check: schema not ready', {
+        reason: schema.reason,
+        applied: schema.applied,
+        expected: schema.expected,
+        sqlstate: schema.sqlstate,
+      });
+      const notReady = NextResponse.json({
+        status: 'unhealthy',
+        timestamp: new Date().toISOString(),
+        responseTimeMs: Date.now() - startTime,
+        error: SERVICE_NOT_READY_MESSAGE,
+      }, { status: 503 });
+      notReady.headers.set("Cache-Control", "no-store");
+      return notReady;
+    }
 
     const responseTime = Date.now() - startTime;
 
