@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
-import { validateBody, employeePriceSchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { parseBody, employeePriceSchema } from "@/lib/api-validation";
 import { getSalonContext } from "@/lib/salon-context";
 import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 
 /** Verify the service belongs to the caller's salon. */
 async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
@@ -15,17 +15,29 @@ async function serviceBelongsToSalon(serviceId: string, salonId: string): Promis
 
 const OWNER_ONLY_CODE = "EMPLOYEE_PRICE_OWNER_ONLY";
 const OWNER_ONLY_MESSAGE = "Ceny indywidualne pracowników może zmieniać tylko właściciel salonu.";
+const OWNER_ONLY_READ_MESSAGE =
+  "Ceny indywidualne pracowników może przeglądać tylko właściciel salonu.";
 
 const INVALID_JSON_CODE = "INVALID_JSON";
 const INVALID_JSON_MESSAGE =
   "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.";
 
+const INVALID_VARIANT_ID_CODE = "INVALID_VARIANT_ID";
+const INVALID_VARIANT_ID_MESSAGE = "Nieprawidłowy identyfikator wariantu usługi.";
+const VARIANT_NOT_FOUND_CODE = "SERVICE_VARIANT_NOT_FOUND";
+const VARIANT_NOT_FOUND_MESSAGE = "Nie znaleziono wariantu tej usługi.";
+const INVALID_PRICE_ID_CODE = "INVALID_PRICE_ID";
+const INVALID_PRICE_ID_MESSAGE = "Nieprawidłowy identyfikator ceny.";
+
 /**
- * Salon z sesji dla zapisu i usunięcia ceny indywidualnej. Cena pracownika
- * zmienia jego prowizję, a wynagrodzenie ustala właściciel, więc pracownik
- * i recepcja dostają 403 z kodem — przed walidacją body i odczytem bazy.
+ * Salon z sesji dla odczytu, zapisu i usunięcia ceny indywidualnej. Cena
+ * pracownika zmienia jego prowizję, a wynagrodzenie ustala właściciel, więc
+ * pracownik i recepcja dostają 403 z kodem — przed walidacją body i przed
+ * odczytem danych usługi, pracownika i ceny. Grant czasowy nie otwiera dostępu.
  */
-async function requireOwnerSalonId(): Promise<
+async function requireOwnerSalonId(
+  message: string
+): Promise<
   { salonId: string; response?: undefined } | { salonId?: undefined; response: NextResponse }
 > {
   const ctx = await getSalonContext();
@@ -37,7 +49,7 @@ async function requireOwnerSalonId(): Promise<
   if (ctx.role !== "owner") {
     return {
       response: NextResponse.json(
-        { success: false, code: OWNER_ONLY_CODE, error: OWNER_ONLY_MESSAGE },
+        { success: false, code: OWNER_ONLY_CODE, error: message },
         { status: 403 }
       ),
     };
@@ -53,13 +65,9 @@ export const GET = withApiHandler(
     errorMessage: "Failed to fetch employee prices",
   },
   async ({ params }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
+    const owner = await requireOwnerSalonId(OWNER_ONLY_READ_MESSAGE);
+    if (owner.response) return owner.response;
+    const salonId = owner.salonId;
 
     const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
@@ -71,11 +79,18 @@ export const GET = withApiHandler(
     }
 
     // employeeServicePrices nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    // Pracownik tylko z polami karty cen (bez telefonu, e-maila, konta i prowizji).
     const prices = await forSalon(salonId).raw((tx) =>
       tx
         .select({
           price: employeeServicePrices,
-          employee: employees,
+          employee: {
+            id: employees.id,
+            firstName: employees.firstName,
+            lastName: employees.lastName,
+            color: employees.color,
+            role: employees.role,
+          },
           variant: serviceVariants,
         })
         .from(employeeServicePrices)
@@ -106,7 +121,7 @@ export const POST = withApiHandler(
     errorMessage: "Failed to save employee price",
   },
   async ({ request, params }) => {
-    const owner = await requireOwnerSalonId();
+    const owner = await requireOwnerSalonId(OWNER_ONLY_MESSAGE);
     if (owner.response) return owner.response;
     const salonId = owner.salonId;
 
@@ -121,12 +136,19 @@ export const POST = withApiHandler(
         { status: 400 }
       );
     }
-    const validationError = validateBody(employeePriceSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    const parsed = parseBody(employeePriceSchema, body);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.error, { status: 400 });
     }
     // Sparsowane dane, nie surowe body: cena zapisuje się jako liczba ze schematu.
-    const { employeeId, variantId, customPrice } = employeePriceSchema.parse(body);
+    const { employeeId, variantId, customPrice } = parsed.data;
+
+    if (variantId && !isValidUuid(variantId)) {
+      return NextResponse.json(
+        { success: false, code: INVALID_VARIANT_ID_CODE, error: INVALID_VARIANT_ID_MESSAGE },
+        { status: 400 }
+      );
+    }
 
     if (!(await serviceBelongsToSalon(serviceId, salonId))) {
       return NextResponse.json(
@@ -142,6 +164,25 @@ export const POST = withApiHandler(
         { success: false, error: "Employee not found" },
         { status: 404 }
       );
+    }
+
+    // Wariant musi należeć do tej usługi (zweryfikowanej wyżej w salonie z sesji).
+    // serviceVariants nie ma salonId — scope przez serviceId. Wariant innej usługi
+    // albo innego salonu daje tę samą odpowiedź co wariant nieistniejący.
+    if (variantId) {
+      const [variant] = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ id: serviceVariants.id })
+          .from(serviceVariants)
+          .where(and(eq(serviceVariants.id, variantId), eq(serviceVariants.serviceId, serviceId)))
+          .limit(1)
+      );
+      if (!variant) {
+        return NextResponse.json(
+          { success: false, code: VARIANT_NOT_FOUND_CODE, error: VARIANT_NOT_FOUND_MESSAGE },
+          { status: 404 }
+        );
+      }
     }
 
     // Check if an employee price already exists for this employee + service + variant combo
@@ -218,7 +259,7 @@ export const DELETE = withApiHandler(
     errorMessage: "Failed to delete employee price",
   },
   async ({ request, params }) => {
-    const owner = await requireOwnerSalonId();
+    const owner = await requireOwnerSalonId(OWNER_ONLY_MESSAGE);
     if (owner.response) return owner.response;
     const salonId = owner.salonId;
 
@@ -229,6 +270,13 @@ export const DELETE = withApiHandler(
     if (!priceId) {
       return NextResponse.json(
         { success: false, error: "priceId is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidUuid(priceId)) {
+      return NextResponse.json(
+        { success: false, code: INVALID_PRICE_ID_CODE, error: INVALID_PRICE_ID_MESSAGE },
         { status: 400 }
       );
     }
