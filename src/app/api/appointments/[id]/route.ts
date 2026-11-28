@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and, ne } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
+import {
+  AppointmentGoneError,
+  callerAppointmentWhere,
+  isForeignAppointment,
+} from "@/lib/appointment-access";
 import { appointmentError, type AppointmentErrorKey } from "@/lib/appointment-codes";
 import {
   APPOINTMENT_COMPLETED_CODE,
@@ -39,16 +44,9 @@ import { isValidUuid } from "@/lib/validations";
 import { notifyWaitingList } from "@/lib/waiting-list";
 
 // Faza 3 (role): employee widzi/modyfikuje wyłącznie WŁASNE wizyty.
-// Cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia zasobu).
-function isForeignForEmployee(
-  ctx: SalonContext,
-  appointmentEmployeeId: string | null
-): boolean {
-  return (
-    ctx.role === "employee" &&
-    (!ctx.employeeId || appointmentEmployeeId !== ctx.employeeId)
-  );
-}
+// Cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia zasobu). Warunek
+// wspólny dla GET, PUT i DELETE (`@/lib/appointment-access`), przy błędzie
+// zamyka dostęp.
 
 /**
  * Czy kwota zadatku z body może być dodatnia. Brak pola i null — nie.
@@ -107,25 +105,9 @@ function appointmentErrorResponse(key: AppointmentErrorKey) {
   return NextResponse.json(body, { status });
 }
 
-/**
- * Zapis nie trafił w wiersz, a ponowny odczyt w tej samej transakcji nie
- * znalazł wizyty dla wołającego (usunięta albo przepisana na innego
- * pracownika). Rzucany w transakcji, żeby wycofać wszystkie jej zapisy;
- * trasa mapuje go na 404 `APPOINTMENT_NOT_FOUND`.
- */
-class AppointmentGoneError extends Error {
-  constructor() {
-    super("Appointment not found at write");
-    this.name = "AppointmentGoneError";
-  }
-}
-
 /** Warunek „wiersz wołającego”: pracownik zapisuje tylko własną wizytę. */
 function callerRowWhere(ctx: SalonContext, id: string) {
-  const base = and(eq(appointments.id, id), eq(appointments.salonId, ctx.salonId));
-  return ctx.role === "employee" && ctx.employeeId
-    ? and(base, eq(appointments.employeeId, ctx.employeeId))
-    : base;
+  return callerAppointmentWhere(ctx, ctx.salonId, id);
 }
 
 /**
@@ -189,7 +171,7 @@ export async function GET(
     );
 
     const row = result[0];
-    if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
+    if (!row || isForeignAppointment(ctx, row.appointment.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -269,7 +251,7 @@ export async function PUT(
 
     // Brak wizyty i cudza wizyta pracownika przed sprawdzeniem statusu:
     // 404, nie 409 — odpowiedź nie zdradza, że wizyta istnieje ani że jest zakończona.
-    if (!existing || isForeignForEmployee(ctx, existing.employeeId)) {
+    if (!existing || isForeignAppointment(ctx, existing.employeeId)) {
       return appointmentErrorResponse("appointmentNotFound");
     }
 
@@ -485,7 +467,7 @@ export async function PUT(
           .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
           .limit(1);
         // Brak wizyty i cudza wizyta pracownika przed statusem: 404, nie 409.
-        if (!current || isForeignForEmployee(ctx, current.employeeId)) throw new AppointmentGoneError();
+        if (!current || isForeignAppointment(ctx, current.employeeId)) throw new AppointmentGoneError();
         if (current.status !== COMPLETED_STATUS) {
           // Wiersz jest, nie jest zakończony, a warunek UPDATE go nie objął —
           // stan, którego trasa nie przewiduje. Wycofanie i 500 z logiem.
@@ -577,6 +559,63 @@ export async function PUT(
   }
 }
 
+/** Odczyt DELETE sprzed transakcji: wizyta z klientem, pracownikiem i usługą. */
+type CancelReadRow = {
+  appointment: typeof appointments.$inferSelect;
+  client: typeof clients.$inferSelect | null;
+  employee: typeof employees.$inferSelect | null;
+  service: typeof services.$inferSelect | null;
+};
+
+/**
+ * Klient, nazwa usługi i pracownik wizyty odwołanej — dla identyfikatorów
+ * z wiersza spod blokady (`cancelled`). Gdy identyfikator jest taki jak
+ * w odczycie sprzed transakcji, dane z tego odczytu; gdy się zmienił
+ * (wizyta przepisana przed blokadą), ponowny odczyt w salonie z sesji.
+ */
+async function cancelledLabels(
+  salonId: string,
+  before: CancelReadRow,
+  cancelled: typeof appointments.$inferSelect
+) {
+  const clientId =
+    cancelled.clientId === before.appointment.clientId ? (before.client?.id ?? null) : cancelled.clientId;
+  let serviceName = before.service?.name ?? null;
+  let employee = before.employee
+    ? { firstName: before.employee.firstName, lastName: before.employee.lastName }
+    : null;
+
+  const serviceId = cancelled.serviceId;
+  const employeeId = cancelled.employeeId;
+  const serviceChanged = serviceId !== before.appointment.serviceId;
+  const employeeChanged = employeeId !== before.appointment.employeeId;
+  if (serviceChanged || employeeChanged) {
+    await forSalon(salonId).raw(async (tx) => {
+      if (serviceChanged) {
+        const [service] = serviceId
+          ? await tx
+              .select({ name: services.name })
+              .from(services)
+              .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+              .limit(1)
+          : [];
+        serviceName = service?.name ?? null;
+      }
+      if (employeeChanged) {
+        const [current] = employeeId
+          ? await tx
+              .select({ firstName: employees.firstName, lastName: employees.lastName })
+              .from(employees)
+              .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
+              .limit(1)
+          : [];
+        employee = current ?? null;
+      }
+    });
+  }
+  return { clientId, serviceName, employee };
+}
+
 // DELETE /api/appointments/[id] - Cancel an appointment with deposit rules
 export async function DELETE(
   request: Request,
@@ -617,7 +656,7 @@ export async function DELETE(
     // Brak wizyty i cudza wizyta pracownika przed sprawdzeniem statusu:
     // 404, nie 409 — odpowiedź nie zdradza, że wizyta istnieje ani że jest zakończona.
     const row = result[0];
-    if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
+    if (!row || isForeignAppointment(ctx, row.appointment.employeeId)) {
       return appointmentErrorResponse("appointmentNotFound");
     }
 
@@ -638,21 +677,25 @@ export async function DELETE(
       return completedFinalResponse();
     }
 
-    // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
-    const now = new Date();
-    const startTime = new Date(appointment.startTime);
-    const hoursUntilAppointment = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-    const isMoreThan24h = hoursUntilAppointment > 24;
-
     // refund-fix RF1 + #70 pkt 1: płatność pending → failed i wizyta →
     // cancelled w JEDNEJ transakcji (kontekst RLS salonu); decyzja o zwrocie
-    // na stanie wizyty po blokadzie (`src/lib/salon-cancellation.ts`).
-    const txResult = await forSalon(salonId).raw((tx) => cancelAppointmentInTx(tx, salonId, id));
-    if ("notFound" in txResult) return appointmentErrorResponse("appointmentNotFound");
+    // i o tym, czy wizyta jest wołającego, na stanie wizyty po blokadzie
+    // (`src/lib/salon-cancellation.ts`). Wizyta cudza po blokadzie rzuca
+    // `AppointmentGoneError` (404 w `catch`), a transakcja się wycofuje.
+    const txResult = await forSalon(salonId).raw((tx) => cancelAppointmentInTx(tx, salonId, id, ctx));
     if ("alreadyCancelled" in txResult) return appointmentErrorResponse("appointmentCancelled");
     const { cancelled: cancelledAppointment, depositPaid, variant, failedPayments } = txResult;
-    const depositAmount = appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0;
+    // Od tego miejsca kwota, termin, pracownik, usługa i klient ze stanu spod
+    // blokady (wiersz z UPDATE), nie z odczytu sprzed transakcji.
+    const depositAmount = txResult.depositAmount ? parseFloat(txResult.depositAmount) : 0;
     const hasDeposit = depositAmount > 0;
+    const labels = await cancelledLabels(salonId, row, cancelledAppointment);
+
+    // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
+    const now = new Date();
+    const startTime = new Date(cancelledAppointment.startTime);
+    const hoursUntilAppointment = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const isMoreThan24h = hoursUntilAppointment > 24;
 
     // #70 pkt 1: otwarta sesja Checkout nie przyjmie już wpłaty (błąd = warn).
     await expireCheckoutSessions(id, failedPayments);
@@ -694,12 +737,13 @@ export async function DELETE(
         .limit(1)
     );
     const salonName = salon?.name || "Salon";
-    const serviceName = row.service?.name || "Wizyta";
+    const serviceName = labels.serviceName || "Wizyta";
 
     // RF2: JEDEN SMS (odwołanie + ewentualny zwrot), bez linku do rezerwacji.
-    const shouldNotify = !!row.client && (notifyClient || refundResult?.refunded === true);
+    const notifiedClientId = labels.clientId;
+    const shouldNotify = !!notifiedClientId && (notifyClient || refundResult?.refunded === true);
     let clientNotified = false;
-    if (shouldNotify && row.client) {
+    if (shouldNotify && notifiedClientId) {
       try {
         const message = buildSalonCancellationSms({
           salonName,
@@ -709,7 +753,7 @@ export async function DELETE(
           variant,
           depositAmount,
         });
-        const clientId = row.client.id;
+        const clientId = notifiedClientId;
         await forSalon(salonId).raw((tx) =>
           tx.insert(notifications).values({
             salonId,
@@ -731,16 +775,16 @@ export async function DELETE(
 
     // Notify waiting list entries about the freed slot
     try {
-      const employeeName = row.employee
-        ? `${row.employee.firstName} ${row.employee.lastName}`
+      const employeeName = labels.employee
+        ? `${labels.employee.firstName} ${labels.employee.lastName}`
         : "Pracownik";
 
       const waitingListResult = await notifyWaitingList({
-        salonId: appointment.salonId,
-        serviceId: appointment.serviceId,
-        employeeId: appointment.employeeId,
+        salonId: cancelledAppointment.salonId,
+        serviceId: cancelledAppointment.serviceId,
+        employeeId: cancelledAppointment.employeeId,
         startTime,
-        endTime: new Date(appointment.endTime),
+        endTime: new Date(cancelledAppointment.endTime),
         serviceName,
         employeeName,
         salonName,
@@ -789,6 +833,12 @@ export async function DELETE(
     // Zakończenie weszło po wczesnym sprawdzeniu — anulowanie wycofane w całości.
     if (error instanceof AppointmentCompletedError) {
       return completedFinalResponse();
+    }
+    // Wizyta zniknęła albo po blokadzie jest cudza (przepisana na innego
+    // pracownika): anulowanie wycofane w całości, ta sama odpowiedź co dla
+    // wizyty nieistniejącej, bez logu.
+    if (error instanceof AppointmentGoneError) {
+      return appointmentErrorResponse("appointmentNotFound");
     }
     // Tylko nazwa i kod błędu: treść błędu zapytania niesie parametry.
     logger.error("[Appointments API] Database error", { ...toErrorIdentity(error) });

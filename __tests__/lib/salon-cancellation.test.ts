@@ -19,6 +19,9 @@ vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
+import { AppointmentGoneError, type AppointmentCaller } from "@/lib/appointment-access";
 import { AppointmentCompletedError } from "@/lib/appointment-completion";
 import { logger } from "@/lib/logger";
 import {
@@ -26,36 +29,52 @@ import {
   cancelAppointmentInTx,
   expireCheckoutSessions,
 } from "@/lib/salon-cancellation";
+import { appointments } from "@/lib/schema";
 import type { DbTx } from "@/lib/server/repository";
+
+const OWNER: AppointmentCaller = { role: "owner", employeeId: null };
+const RECEPTION: AppointmentCaller = { role: "receptionist", employeeId: null };
+const EMPLOYEE: AppointmentCaller = { role: "employee", employeeId: "emp-own" };
+const EMPLOYEE_WITHOUT_ID: AppointmentCaller = { role: "employee", employeeId: null };
 
 /**
  * Atrapa transakcji: pierwszy UPDATE (płatności `pending → failed`) zwraca
- * `failedRows`, odczyt `for update` zwraca `lockedRow`. Zapisuje, które
- * zapisy wykonano, żeby sprawdzić, że po `no_show` nie ma UPDATE wizyty.
+ * pustą listę, odczyt `for update` zwraca `lockedRow`, UPDATE wizyty zwraca
+ * `cancelledRows`. Zapisuje tabele UPDATE-ów i ich warunki, żeby sprawdzić,
+ * że po odmowie nie ma UPDATE wizyty.
  */
-function fakeTx(lockedRow: Record<string, unknown> | null) {
+function fakeTx(lockedRow: Record<string, unknown> | null, cancelledRows?: unknown[]) {
   const updates: unknown[] = [];
-  const chain = (result: unknown[]) => {
+  const updateWheres: SQL[] = [];
+  const chain = (result: unknown[], onWhere?: (w: SQL) => void) => {
     const c: Record<string, unknown> = {};
-    for (const m of ["set", "where", "returning", "from", "for", "limit"]) c[m] = () => c;
+    for (const m of ["set", "returning", "from", "for", "limit"]) c[m] = () => c;
+    c.where = (w: SQL) => {
+      onWhere?.(w);
+      return c;
+    };
     c.then = (resolve: (v: unknown) => unknown) => resolve(result);
     return c;
   };
   const tx = {
     update: (table: unknown) => {
       updates.push(table);
-      return chain([]);
+      const isAppointment = table === appointments;
+      const result = isAppointment ? (cancelledRows ?? (lockedRow ? [{ ...lockedRow, status: "cancelled" }] : [])) : [];
+      return chain(result, isAppointment ? (w) => updateWheres.push(w) : undefined);
     },
     select: () => chain(lockedRow ? [lockedRow] : []),
   };
-  return { tx: tx as unknown as DbTx, updates };
+  return { tx: tx as unknown as DbTx, updates, updateWheres };
 }
+
+const dialect = new PgDialect();
 
 describe("cancelAppointmentInTx — stan po blokadzie wiersza", () => {
   it("wizyta no_show (oznaczenie weszło po odczycie w trasie) → błąd wycofujący transakcję, bez anulowania", async () => {
     const { tx, updates } = fakeTx({ id: "appt-1", salonId: "salon-a", status: "no_show" });
 
-    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1")).rejects.toBeInstanceOf(
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", OWNER)).rejects.toBeInstanceOf(
       AppointmentMarkedNoShowError
     );
     // Tylko krok 1 (płatności) przed blokadą; UPDATE wizyty nie zapadł.
@@ -65,7 +84,7 @@ describe("cancelAppointmentInTx — stan po blokadzie wiersza", () => {
   it("wizyta completed (zakończenie weszło po odczycie w trasie) → błąd wycofujący transakcję, bez anulowania", async () => {
     const { tx, updates } = fakeTx({ id: "appt-1", salonId: "salon-a", status: "completed" });
 
-    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1")).rejects.toBeInstanceOf(
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", OWNER)).rejects.toBeInstanceOf(
       AppointmentCompletedError
     );
     // Tylko krok 1 (płatności, wycofany razem z transakcją); UPDATE wizyty nie zapadł.
@@ -75,8 +94,98 @@ describe("cancelAppointmentInTx — stan po blokadzie wiersza", () => {
   it("kontrola: wizyta cancelled → alreadyCancelled, bez błędu", async () => {
     const { tx, updates } = fakeTx({ id: "appt-1", salonId: "salon-a", status: "cancelled" });
 
-    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1")).resolves.toEqual({ alreadyCancelled: true });
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", OWNER)).resolves.toEqual({ alreadyCancelled: true });
     expect(updates).toHaveLength(1);
+  });
+});
+
+describe("cancelAppointmentInTx — wizyta wołającego pod blokadą", () => {
+  const locked = (overrides: Record<string, unknown> = {}) => ({
+    id: "appt-1",
+    salonId: "salon-a",
+    employeeId: "emp-own",
+    status: "scheduled",
+    depositAmount: "40.00",
+    depositPaid: false,
+    ...overrides,
+  });
+
+  it("brak wiersza pod blokadą → AppointmentGoneError (wycofanie kroku płatności), bez UPDATE wizyty", async () => {
+    const { tx, updates } = fakeTx(null);
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", OWNER)).rejects.toBeInstanceOf(AppointmentGoneError);
+    expect(updates).toHaveLength(1);
+  });
+
+  it("pracownik: wizyta przepisana na innego pod blokadą → AppointmentGoneError, bez UPDATE wizyty", async () => {
+    const { tx, updates } = fakeTx(locked({ employeeId: "emp-other" }));
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", EMPLOYEE)).rejects.toBeInstanceOf(
+      AppointmentGoneError
+    );
+    expect(updates).toHaveLength(1);
+  });
+
+  it.each([
+    ["anulowana", "cancelled"],
+    ["Nie przyszedł", "no_show"],
+    ["zakończona", "completed"],
+  ])("pracownik: wizyta przepisana i %s → AppointmentGoneError przed statusem", async (_n, status) => {
+    const { tx, updates } = fakeTx(locked({ employeeId: "emp-other", status }));
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", EMPLOYEE)).rejects.toBeInstanceOf(
+      AppointmentGoneError
+    );
+    expect(updates).toHaveLength(1);
+  });
+
+  it("pracownik: wizyta bez pracownika pod blokadą → AppointmentGoneError", async () => {
+    const { tx } = fakeTx(locked({ employeeId: null }));
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", EMPLOYEE)).rejects.toBeInstanceOf(
+      AppointmentGoneError
+    );
+  });
+
+  it("pracownik bez identyfikatora pracownika → AppointmentGoneError (przy błędzie zamyka)", async () => {
+    const { tx, updates } = fakeTx(locked({ employeeId: null }));
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", EMPLOYEE_WITHOUT_ID)).rejects.toBeInstanceOf(
+      AppointmentGoneError
+    );
+    expect(updates).toHaveLength(1);
+  });
+
+  it("pracownik: własna wizyta → anulowana, kwota i zadatek spod blokady, UPDATE z warunkiem pracownika", async () => {
+    const { tx, updates, updateWheres } = fakeTx(locked({ depositAmount: "40.00", depositPaid: true }));
+
+    const result = await cancelAppointmentInTx(tx, "salon-a", "appt-1", EMPLOYEE);
+
+    expect(result).toMatchObject({
+      cancelled: { id: "appt-1", status: "cancelled" },
+      depositPaid: true,
+      depositAmount: "40.00",
+    });
+    expect(updates).toHaveLength(2);
+    expect(dialect.sqlToQuery(updateWheres[0]!).params).toEqual(["appt-1", "salon-a", "emp-own"]);
+  });
+
+  it.each([
+    ["właściciel", OWNER],
+    ["recepcja", RECEPTION],
+  ])("%s: wizyta innego pracownika → anulowana, UPDATE bez warunku pracownika", async (_n, caller) => {
+    const { tx, updateWheres } = fakeTx(locked({ employeeId: "emp-other" }));
+
+    const result = await cancelAppointmentInTx(tx, "salon-a", "appt-1", caller);
+
+    expect(result).toMatchObject({ cancelled: { status: "cancelled" }, depositAmount: "40.00", depositPaid: false });
+    expect(dialect.sqlToQuery(updateWheres[0]!).params).toEqual(["appt-1", "salon-a"]);
+  });
+
+  it("UPDATE wizyty bez trafienia → AppointmentGoneError (nie wynik, który zatwierdza krok płatności)", async () => {
+    const { tx } = fakeTx(locked(), []);
+
+    await expect(cancelAppointmentInTx(tx, "salon-a", "appt-1", OWNER)).rejects.toBeInstanceOf(AppointmentGoneError);
   });
 });
 

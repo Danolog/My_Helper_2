@@ -16,8 +16,15 @@
  * `expired`: najpierw płatność (UPDATE), potem wizyta (`FOR UPDATE`).
  * Decyzja o zwrocie zapada na stanie wizyty PO blokadzie — jeśli webhook
  * zdążył potwierdzić wpłatę, widzimy `depositPaid = true` i zwracamy.
+ * Pod blokadą zapada też decyzja, czy wizyta należy do wołającego.
  */
 import { and, eq } from "drizzle-orm";
+import {
+  AppointmentGoneError,
+  callerAppointmentWhere,
+  isForeignAppointment,
+  type AppointmentCaller,
+} from "@/lib/appointment-access";
 import { AppointmentCompletedError, COMPLETED_STATUS } from "@/lib/appointment-completion";
 import { logger } from "@/lib/logger";
 import { NO_SHOW_STATUS } from "@/lib/no-show";
@@ -36,11 +43,13 @@ type Tx = DbTx;
 
 export type SalonCancelTxResult =
   | { alreadyCancelled: true }
-  | { notFound: true }
   | {
+      /** Wiersz zwrócony przez UPDATE: termin, pracownik, usługa i klient spod blokady. */
       cancelled: AppointmentRow;
       /** depositPaid ze stanu po blokadzie (przed anulowaniem). */
       depositPaid: boolean;
+      /** Kwota zadatku ze stanu po blokadzie (przed anulowaniem). */
+      depositAmount: string | null;
       variant: CancellationDepositVariant;
       /** Płatności, które przeszły z `pending` w `failed` (do wygaszenia sesji). */
       failedPayments: Array<{ id: string; stripePaymentIntentId: string | null }>;
@@ -61,18 +70,25 @@ export class AppointmentMarkedNoShowError extends Error {
  * Transakcja anulowania. `tx` to klient z kontekstem RLS salonu
  * (`forSalon(salonId).raw`), stąd jawne `eq(salonId)` w każdym warunku.
  *
- * Wynik `alreadyCancelled` / `notFound` NIE wycofuje transakcji: krok 1
+ * Wynik `alreadyCancelled` NIE wycofuje transakcji: krok 1
  * (`pending → failed`) zostaje zatwierdzony. Świadomie — anulowana wizyta
  * nie powinna mieć płatności `pending`; jeśli klient mimo to zapłaci,
- * webhook zapisze wpłatę i ją zwróci (#70). Dla obcej wizyty krok 1 nic
- * nie zmienia (warunek `salonId`). Wizyta `no_show` po blokadzie rzuca
+ * webhook zapisze wpłatę i ją zwróci (#70).
+ *
+ * Kolejność po blokadzie: najpierw brak wiersza i wizyta cudza dla
+ * wołającego (`AppointmentGoneError`, 404), dopiero potem `cancelled`,
+ * `no_show` i `completed` — odpowiedź nie zdradza statusu cudzej wizyty.
+ * Wizyta przepisana na innego pracownika w trakcie czekania na blokadę jest
+ * cudza. Brak wiersza i wizyta cudza rzucają, a nie zwracają wyniku, bo
+ * wizyta zostaje i krok 1 też musi zostać wycofany. Wizyta `no_show` rzuca
  * `AppointmentMarkedNoShowError`, a `completed` — `AppointmentCompletedError`;
- * oba wycofują całą transakcję.
+ * wszystkie trzy wycofują całą transakcję.
  */
 export async function cancelAppointmentInTx(
   tx: Tx,
   salonId: string,
-  appointmentId: string
+  appointmentId: string,
+  caller: AppointmentCaller
 ): Promise<SalonCancelTxResult> {
   const failedPayments = await tx
     .update(depositPayments)
@@ -91,7 +107,7 @@ export async function cancelAppointmentInTx(
     .from(appointments)
     .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
     .for("update");
-  if (!current) return { notFound: true };
+  if (!current || isForeignAppointment(caller, current.employeeId)) throw new AppointmentGoneError();
   if (current.status === "cancelled") return { alreadyCancelled: true };
   // Trasa DELETE sprawdza `no_show` już na odczycie przed transakcją, ale
   // oznaczenie mogło wejść między tym odczytem a blokadą. Anulowanie
@@ -114,16 +130,24 @@ export async function cancelAppointmentInTx(
       )
     );
 
+  // Ten sam warunek wołającego co decyzja wyżej. Wiersz jest zablokowany, więc
+  // trafienie jest pewne; brak trafienia wycofuje transakcję jak wizyta cudza.
   const [cancelled] = await tx
     .update(appointments)
     .set({ status: "cancelled", updatedAt: new Date() })
-    .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
+    .where(callerAppointmentWhere(caller, salonId, appointmentId))
     .returning();
-  if (!cancelled) return { notFound: true };
+  if (!cancelled) throw new AppointmentGoneError();
 
   const variant = depositVariantFor(current.depositAmount, current.depositPaid, paidMethods);
 
-  return { cancelled, depositPaid: current.depositPaid === true, variant, failedPayments };
+  return {
+    cancelled,
+    depositPaid: current.depositPaid === true,
+    depositAmount: current.depositAmount,
+    variant,
+    failedPayments,
+  };
 }
 
 /**

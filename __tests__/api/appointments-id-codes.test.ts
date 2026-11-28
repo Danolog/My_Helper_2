@@ -6,11 +6,17 @@
  *   i status z mapy `APPOINTMENT_ERROR_STATUS`.
  * - Dla każdego wspólnego kodu (i dla `APPOINTMENT_COMPLETED`) status w trasie
  *   zakończenia jest taki sam jak w PUT/DELETE.
- * - DELETE ze złym identyfikatorem → 400 `INVALID_APPOINTMENT_ID` bez bazy.
+ * - DELETE ze złym identyfikatorem → 400 `INVALID_APPOINTMENT_ID` bez odczytu wizyty.
  * - Kolejność: wizyta zakończona innego salonu albo innego pracownika → 404,
  *   nie 409 (odpowiedź nie zdradza, że wizyta istnieje ani jaki ma status).
  * - PUT, którego zapis nie trafił w wiersz, nie odpowiada 200 z `data: null`
- *   (wizyta zniknęła albo przepisana na innego pracownika → 404).
+ *   (wizyta zniknęła albo, przy zapisie pracownika, przepisana na innego
+ *   pracownika → 404).
+ * - DELETE: wizyta zniknęła albo, przy odwołaniu przez pracownika, przepisana
+ *   na innego pracownika pod blokadą → 404, to samo body co wizyta
+ *   nieistniejąca, bez zwrotu, SMS-a, listy oczekujących i bez logu.
+ * - DELETE po transakcji bierze kwotę, termin, pracownika, usługę i klienta
+ *   ze stanu spod blokady.
  * - Dialog edycji wysyła termin, pracownika, klienta i usługę także przy samej
  *   zmianie notatki: zakończenie wizyty między odczytem a zapisem nie blokuje
  *   samej notatki, jeśli te pola są takie jak w zakończonej wizycie.
@@ -40,6 +46,10 @@ const h = vi.hoisted(() => ({
   set: vi.fn(),
   updated: [] as Record<string, unknown>[],
   transactions: 0,
+  /** Wartości przekazane do tx.insert(...).values(...). */
+  insertValues: vi.fn(),
+  /** Błąd zwracany przez tx.insert (null = zapis bez błędu). */
+  insertError: null as Error | null,
   cancelInTx: vi.fn(),
   buildSms: vi.fn(),
   expireSessions: vi.fn(),
@@ -84,9 +94,13 @@ vi.mock("@/lib/server/repository", () => {
   };
   const insert = () => {
     const chain: Record<string, unknown> = {};
-    chain.values = () => chain;
+    chain.values = (values: unknown) => {
+      h.insertValues(values);
+      return chain;
+    };
     chain.returning = () => chain;
-    chain.then = (resolve: (v: unknown) => unknown) => resolve([]);
+    chain.then = (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+      h.insertError ? reject(h.insertError) : resolve([]);
     return chain;
   };
   const tx = { select, update, insert };
@@ -121,6 +135,7 @@ import {
   appointmentError,
   type AppointmentErrorKey,
 } from "@/lib/appointment-codes";
+import { AppointmentGoneError } from "@/lib/appointment-access";
 import { APPOINTMENT_COMPLETED_CODE, AppointmentCompletedError } from "@/lib/appointment-completion";
 import { appointments } from "@/lib/schema";
 
@@ -189,6 +204,7 @@ beforeEach(() => {
   h.selectResults = [];
   h.updateResults = [];
   h.transactions = 0;
+  h.insertError = null;
   h.auth.mockResolvedValue(AUTH);
   h.salonCtx.mockResolvedValue(OWNER_CTX);
   h.refs.mockResolvedValue(null);
@@ -287,7 +303,7 @@ describe("ten sam kod → ten sam status w complete i w PUT/DELETE", () => {
 });
 
 describe("PUT /api/appointments/[id] — kody 4xx", () => {
-  it("zły identyfikator → 400 INVALID_APPOINTMENT_ID, bez bazy", async () => {
+  it("zły identyfikator → 400 INVALID_APPOINTMENT_ID, bez odczytu wizyty", async () => {
     const { status, body } = await parseResponse<Err>(await put({ notes: "x" }, BAD_ID));
 
     expect(status).toBe(400);
@@ -583,7 +599,7 @@ describe("PUT — 500 i log", () => {
 });
 
 describe("DELETE /api/appointments/[id] — kody 4xx", () => {
-  it("zły identyfikator → 400 INVALID_APPOINTMENT_ID, bez bazy (wcześniej 500 z błędu bazy)", async () => {
+  it("zły identyfikator → 400 INVALID_APPOINTMENT_ID, bez odczytu wizyty (wcześniej 500 z błędu bazy)", async () => {
     const { status, body } = await parseResponse<Err>(await del(BAD_ID));
 
     expect(status).toBe(400);
@@ -612,14 +628,15 @@ describe("DELETE /api/appointments/[id] — kody 4xx", () => {
     expect(h.cancelInTx).not.toHaveBeenCalled();
   });
 
-  it("wizyta zniknęła przed blokadą → 404 APPOINTMENT_NOT_FOUND", async () => {
+  it("wizyta zniknęła przed blokadą → 404 APPOINTMENT_NOT_FOUND, bez logu", async () => {
     h.selectResults = [deleteRow()];
-    h.cancelInTx.mockResolvedValue({ notFound: true });
+    h.cancelInTx.mockRejectedValue(new AppointmentGoneError());
 
     const { status, body } = await parseResponse<Err>(await del());
 
     expect(status).toBe(404);
     expect(body.code).toBe("APPOINTMENT_NOT_FOUND");
+    expect(h.logger.error).not.toHaveBeenCalled();
   });
 
   it("wizyta już anulowana przy odczycie → 400 APPOINTMENT_CANCELLED", async () => {
@@ -735,5 +752,241 @@ describe("DELETE — role, 200 i 500", () => {
     expect(status).toBe(200);
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error" });
+  });
+
+  it("błąd zapisu powiadomienia (notifyClient) → 200, jeden log z nazwą błędu i id wizyty, bez parametrów", async () => {
+    h.selectResults = [
+      [{ appointment: appt(), client: { id: TEST_IDS.CLIENT_UUID }, employee: null, service: null }],
+      [{ name: "Salon", phone: null }],
+    ];
+    h.buildSms.mockReturnValue("tekst");
+    h.insertError = new Error("Failed query: insert into notifications ...\nparams: Anna,tekst");
+
+    const res = await DELETE(
+      new Request(`http://localhost:3000/api/appointments/${APPOINTMENT}?notifyClient=true`, { method: "DELETE" }),
+      createRouteParams(APPOINTMENT)
+    );
+    const { status, body } = await parseResponse<Ok & { cancellationDetails: { clientNotified: boolean } }>(res);
+
+    expect(status).toBe(200);
+    expect(body.cancellationDetails.clientNotified).toBe(false);
+    expect(h.insertValues).toHaveBeenCalledTimes(1);
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+    expect(h.logger.error.mock.calls[0]![0]).toBe("[Appointments API] Failed to create notification");
+    expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error", appointmentId: APPOINTMENT });
+    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
+  });
+});
+
+describe("404 wizyty cudzej = 404 wizyty nieistniejącej (całe body)", () => {
+  it("PUT: wizyta innego pracownika, wizyta nieistniejąca i wizyta przepisana przy zapisie → to samo body", async () => {
+    h.findOne.mockResolvedValue(null);
+    const missing = await parseResponse<Err>(await put({ notes: "x" }));
+
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    givenExisting({ employeeId: OTHER_EMPLOYEE });
+    const foreign = await parseResponse<Err>(await put({ notes: "x" }));
+
+    givenExisting();
+    // 1) kolizje, 2) ponowny odczyt po UPDATE bez wiersza: wizyta innego pracownika.
+    h.selectResults = [[], [appt({ employeeId: OTHER_EMPLOYEE })]];
+    h.updateResults = [[]];
+    const reassigned = await parseResponse<Err>(await put({ notes: "x" }));
+
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: missing.body.error });
+    expect(foreign).toEqual(missing);
+    expect(reassigned).toEqual(missing);
+  });
+
+  it("DELETE: wizyta innego pracownika, wizyta nieistniejąca i wizyta przepisana pod blokadą → to samo body", async () => {
+    h.selectResults = [[]];
+    const missing = await parseResponse<Err>(await del());
+
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    h.selectResults = [deleteRow({ employeeId: OTHER_EMPLOYEE })];
+    const foreign = await parseResponse<Err>(await del());
+
+    h.selectResults = [deleteRow()];
+    h.cancelInTx.mockRejectedValue(new AppointmentGoneError());
+    const reassigned = await parseResponse<Err>(await del());
+
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: missing.body.error });
+    expect(foreign).toEqual(missing);
+    expect(reassigned).toEqual(missing);
+  });
+});
+
+describe("DELETE — pracownik i wizyta przepisana pod blokadą", () => {
+  it("pracownik: transakcja dostaje kontekst wołającego (warunek pracownika pod blokadą)", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    h.selectResults = [deleteRow(), [{ name: "Salon", phone: null }]];
+
+    await del();
+
+    expect(h.cancelInTx).toHaveBeenCalledTimes(1);
+    const [, salonId, id, caller] = h.cancelInTx.mock.calls[0]!;
+    expect([salonId, id]).toEqual([SALON, APPOINTMENT]);
+    expect(caller).toMatchObject({ role: "employee", employeeId: EMPLOYEE });
+  });
+
+  it("pracownik: wizyta przepisana pod blokadą → 404, bez zwrotu, SMS-a, listy oczekujących i bez logu z pracownikiem", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    h.selectResults = [
+      [{ appointment: appt({ depositAmount: "40.00", depositPaid: true }), client: { id: TEST_IDS.CLIENT_UUID }, employee: null, service: null }],
+    ];
+    h.cancelInTx.mockRejectedValue(new AppointmentGoneError());
+
+    const res = await DELETE(
+      new Request(`http://localhost:3000/api/appointments/${APPOINTMENT}?notifyClient=true`, { method: "DELETE" }),
+      createRouteParams(APPOINTMENT)
+    );
+    const { status, body } = await parseResponse<Err>(res);
+
+    expect(status).toBe(404);
+    expect(body.code).toBe("APPOINTMENT_NOT_FOUND");
+    expect(h.expireSessions).not.toHaveBeenCalled();
+    expect(h.refund).not.toHaveBeenCalled();
+    expect(h.buildSms).not.toHaveBeenCalled();
+    expect(h.insertValues).not.toHaveBeenCalled();
+    expect(h.notifyWaitingList).not.toHaveBeenCalled();
+    expect(h.logger.error).not.toHaveBeenCalled();
+    expect(h.logger.warn).not.toHaveBeenCalled();
+    const logged = JSON.stringify([h.logger.info.mock.calls, h.logger.debug.mock.calls]);
+    expect(logged).not.toContain(EMPLOYEE);
+    expect(logged).not.toContain(OTHER_EMPLOYEE);
+  });
+
+  it("PUT: pracownik bez identyfikatora pracownika → 404, bez zapisu", async () => {
+    h.salonCtx.mockResolvedValue({ ...EMPLOYEE_CTX, employeeId: null });
+
+    const { status, body } = await parseResponse<Err>(await put({ notes: "x" }));
+
+    expect(status).toBe(404);
+    expect(body.code).toBe("APPOINTMENT_NOT_FOUND");
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("pracownik bez identyfikatora pracownika → 404 przed transakcją", async () => {
+    h.salonCtx.mockResolvedValue({ ...EMPLOYEE_CTX, employeeId: null });
+    h.selectResults = [deleteRow()];
+
+    const { status, body } = await parseResponse<Err>(await del());
+
+    expect(status).toBe(404);
+    expect(body.code).toBe("APPOINTMENT_NOT_FOUND");
+    expect(h.cancelInTx).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE — po transakcji dane spod blokady", () => {
+  const LOCKED_START = new Date("2097-05-04T09:00:00.000Z");
+  const LOCKED_END = new Date("2097-05-04T10:30:00.000Z");
+  const LOCKED_SERVICE = "88888888-8888-4888-8888-888888888888";
+  const LOCKED_CLIENT = "99999999-9999-4999-8999-999999999999";
+
+  function lockedCancel(overrides: Record<string, unknown> = {}) {
+    return {
+      cancelled: appt({
+        status: "cancelled",
+        startTime: LOCKED_START,
+        endTime: LOCKED_END,
+        employeeId: OTHER_EMPLOYEE,
+        serviceId: LOCKED_SERVICE,
+        clientId: LOCKED_CLIENT,
+        depositAmount: "40.00",
+        depositPaid: true,
+      }),
+      depositPaid: true,
+      depositAmount: "40.00",
+      variant: "manual",
+      failedPayments: [],
+      ...overrides,
+    };
+  }
+
+  it("kwota, termin, pracownik, usługa i klient z wiersza spod blokady, nie z odczytu sprzed transakcji", async () => {
+    // Odczyt sprzed transakcji: bez zadatku, inny termin, pracownik, usługa i klient.
+    h.selectResults = [
+      [
+        {
+          appointment: appt({ depositAmount: null, depositPaid: false }),
+          client: { id: TEST_IDS.CLIENT_UUID },
+          employee: { firstName: "Stara", lastName: "Osoba" },
+          service: { name: "Stara usługa" },
+        },
+      ],
+      // Ponowny odczyt nazw dla identyfikatorów spod blokady: usługa, pracownik.
+      [{ name: "Usługa spod blokady" }],
+      [{ firstName: "Nowa", lastName: "Osoba" }],
+      [{ name: "Salon", phone: null }],
+    ];
+    h.cancelInTx.mockResolvedValue(lockedCancel());
+    h.refund.mockResolvedValue({ success: true, refunded: true, refundId: null, amount: 40, message: "ok" });
+    h.buildSms.mockReturnValue("tekst");
+
+    const { status, body } = await parseResponse<
+      Ok & { cancellationDetails: { depositAmount: number; hasDeposit: boolean; clientNotified: boolean } }
+    >(await del());
+
+    expect(status).toBe(200);
+    // Decyzja o zwrocie na kwocie spod blokady (odczyt sprzed transakcji: brak zadatku).
+    expect(h.refund).toHaveBeenCalledTimes(1);
+    expect(body.cancellationDetails).toMatchObject({ depositAmount: 40, hasDeposit: true, clientNotified: true });
+    expect(h.buildSms).toHaveBeenCalledWith(
+      expect.objectContaining({ startTime: LOCKED_START, serviceName: "Usługa spod blokady", depositAmount: 40 })
+    );
+    expect(h.insertValues).toHaveBeenCalledWith(expect.objectContaining({ clientId: LOCKED_CLIENT, salonId: SALON }));
+    expect(h.notifyWaitingList).toHaveBeenCalledWith({
+      salonId: SALON,
+      serviceId: LOCKED_SERVICE,
+      employeeId: OTHER_EMPLOYEE,
+      startTime: LOCKED_START,
+      endTime: LOCKED_END,
+      serviceName: "Usługa spod blokady",
+      employeeName: "Nowa Osoba",
+      salonName: "Salon",
+    });
+  });
+
+  it("kontrola: identyfikatory bez zmian → nazwy z odczytu sprzed transakcji, bez ponownego odczytu", async () => {
+    h.selectResults = [
+      [
+        {
+          appointment: appt(),
+          client: null,
+          employee: { firstName: "Ta", lastName: "Sama" },
+          service: { name: "Ta sama usługa" },
+        },
+      ],
+      [{ name: "Salon", phone: null }],
+    ];
+
+    const { status } = await parseResponse<Ok>(await del());
+
+    expect(status).toBe(200);
+    // Odczyt sprzed transakcji, transakcja anulowania, nazwa salonu — bez czwartego.
+    expect(h.transactions).toBe(3);
+    expect(h.notifyWaitingList).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceName: "Ta sama usługa", employeeName: "Ta Sama", employeeId: EMPLOYEE })
+    );
+  });
+
+  it("wizyta bez zadatku pod blokadą → bez zwrotu, choć odczyt sprzed transakcji miał zadatek", async () => {
+    h.selectResults = [deleteRow({ depositAmount: "40.00", depositPaid: true }), [{ name: "Salon", phone: null }]];
+    h.cancelInTx.mockResolvedValue({
+      cancelled: appt({ status: "cancelled" }),
+      depositPaid: true,
+      depositAmount: null,
+      variant: "none",
+      failedPayments: [],
+    });
+
+    const { status, body } = await parseResponse<Ok & { cancellationDetails: { hasDeposit: boolean } }>(await del());
+
+    expect(status).toBe(200);
+    expect(h.refund).not.toHaveBeenCalled();
+    expect(body.cancellationDetails.hasDeposit).toBe(false);
   });
 });

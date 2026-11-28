@@ -467,7 +467,12 @@ describe("DELETE /api/appointments/[id] — anulowanie wizyty zakończonej", () 
 
     expect(status).toBe(409);
     expect(body.code).toBe(APPOINTMENT_COMPLETED_CODE);
-    expect(h.cancelInTx).toHaveBeenCalledWith(expect.anything(), SALON, APPOINTMENT);
+    expect(h.cancelInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      SALON,
+      APPOINTMENT,
+      expect.objectContaining({ role: "owner" })
+    );
     expect(h.expireSessions).not.toHaveBeenCalled();
     expect(h.refund).not.toHaveBeenCalled();
     expect(h.buildSms).not.toHaveBeenCalled();
