@@ -83,7 +83,6 @@ function withSalonContext<T>(salonId: string, fn: (tx: Tx) => Promise<T>): Promi
     // 1. Przełącz transakcję na rolę app BEZ BYPASSRLS (naprawa W1). Nazwa roli
     //    jest zwalidowanym identyfikatorem (APP_DB_ROLE) — `SET ROLE` nie przyjmuje
     //    parametru bindowanego, dlatego literał + walidacja, nie interpolacja wejścia.
-    await tx.execute(sql.raw(`set local role ${APP_DB_ROLE}`));
     // 2. Ustaw kontekst salonu — RLS porówna salon_id z tą wartością.
     await tx.execute(sql`select set_config('app.current_salon_id', ${salonId}, true)`);
     return fn(tx);

@@ -73,6 +73,7 @@ export async function getSalonContext(salonId: string): Promise<SalonContext> {
       tx
         .select({ name: salons.name, industryType: salons.industryType })
         .from(salons)
+        .where(eq(salons.id, salonId))
         .then((r) => r[0]),
     );
 
@@ -180,7 +181,7 @@ export async function trackAIUsage(
   // `forSalon` w `try`: pusty salonId rzuca synchronicznie, a ta funkcja nigdy
   // nie rzuca (wołający używają `void trackAIUsage(...)`).
   try {
-    await forSalon(String(metadata?.salonId ?? salonId)).raw((tx) =>
+    await forSalon(salonId).raw((tx) =>
       tx.insert(aiGeneratedMedia).values({
         salonId,
         type: type as TrackedAIUsageType,
