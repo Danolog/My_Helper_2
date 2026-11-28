@@ -179,6 +179,37 @@ describe("POST /api/services/[id]/employee-prices", () => {
     }
   );
 
+  function postBrokenJson() {
+    const request = new Request(URL_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{nie json",
+    });
+    return POST(request, createRouteParams(TEST_IDS.SERVICE_UUID));
+  }
+
+  it("właściciel, niepoprawny JSON → 400 z kodem INVALID_JSON, bez odczytu bazy", async () => {
+    const { status, body } = await parseResponse(await postBrokenJson());
+    expect(status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      code: "INVALID_JSON",
+      error: "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.",
+    });
+    expect(repo.findOne).not.toHaveBeenCalled();
+    expect(repo.raw).not.toHaveBeenCalled();
+  });
+
+  it.each(["employee", "receptionist"] as const)(
+    "niepoprawny JSON od roli %s → nadal 403 (rola przed parsowaniem body)",
+    async (role) => {
+      salonCtx.role = role;
+      const { status, body } = await parseResponse(await postBrokenJson());
+      expect(status).toBe(403);
+      expect(body).toEqual(OWNER_ONLY);
+    }
+  );
+
   it.each([["Infinity"], ["NaN"], ["-1"], [-0.01], ["abc"], [""], [null]])(
     "właściciel, customPrice %j → 400 bez zapisu",
     async (customPrice) => {

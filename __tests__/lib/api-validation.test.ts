@@ -1191,6 +1191,7 @@ describe("completeAppointmentSchema — polskie komunikaty płatności", () => {
     [{ paidAmount: true, paymentMethod: "cash" }, "paidAmount", "Kwota musi być liczbą."],
     [{ paidAmount: "-5", paymentMethod: "cash" }, "paidAmount", "Kwota nie może być ujemna."],
     [{ paidAmount: "1.234", paymentMethod: "cash" }, "paidAmount", "Kwota może mieć najwyżej 2 miejsca po przecinku."],
+    [{ paidAmount: "abc", paymentMethod: "cash" }, "paidAmount", "Kwota musi być liczbą od 0 do 99 999 999,99."],
     [{ commissionPercentage: 101 }, "commissionPercentage", "Prowizja musi być liczbą od 0 do 100."],
   ])("%j → %s: %s", (body, field, message) => {
     expect(details(body)[field]).toBe(message);

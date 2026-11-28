@@ -451,7 +451,7 @@ const paidAmountField = z
     if (!PAID_AMOUNT_PATTERN.test(val)) {
       ctx.addIssue({
         code: "custom",
-        message: "Kwota musi byc liczba od 0 do 99 999 999,99",
+        message: "Kwota musi być liczbą od 0 do 99 999 999,99.",
       });
     }
   });

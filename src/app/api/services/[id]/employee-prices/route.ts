@@ -16,6 +16,10 @@ async function serviceBelongsToSalon(serviceId: string, salonId: string): Promis
 const OWNER_ONLY_CODE = "EMPLOYEE_PRICE_OWNER_ONLY";
 const OWNER_ONLY_MESSAGE = "Ceny indywidualne pracowników może zmieniać tylko właściciel salonu.";
 
+const INVALID_JSON_CODE = "INVALID_JSON";
+const INVALID_JSON_MESSAGE =
+  "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.";
+
 /**
  * Salon z sesji dla zapisu i usunięcia ceny indywidualnej. Cena pracownika
  * zmienia jego prowizję, a wynagrodzenie ustala właściciel, więc pracownik
@@ -108,7 +112,15 @@ export const POST = withApiHandler(
 
     const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     // Walidacja celowo w handlerze (po sprawdzeniu salonu i roli) — jak dotąd.
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, code: INVALID_JSON_CODE, error: INVALID_JSON_MESSAGE },
+        { status: 400 }
+      );
+    }
     const validationError = validateBody(employeePriceSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
