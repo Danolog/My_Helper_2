@@ -1,6 +1,6 @@
 # MyHelper — stan aplikacji i plan wejścia na rynek
 
-**Data:** 2026-11-14 · **Wersja planu:** 1.4 (aplikacja 1.1.2) · **Badane:** kod (`main` @ 1320e69), produkcja `my-helper-2.vercel.app`, dokumenty z lipca 2026
+**Data:** 2026-11-14 · **Wersja planu:** 1.5 (aplikacja 1.1.2) · **Badane:** kod (`main` @ 1320e69), produkcja `my-helper-2.vercel.app`, dokumenty z lipca 2026
 
 Ten dokument uzupełnia `RAPORT_I_PLAN_NAPRAWY_2026-07.md`. Tamten raport zamknął jakość kodu.
 Ten dotyczy tego, czego kod nie pokazuje: działania na produkcji, pieniędzy, prawa i wyglądu.
@@ -12,7 +12,7 @@ Ten dotyczy tego, czego kod nie pokazuje: działania na produkcji, pieniędzy, p
 
 > **Zmiana 1.3 (2026-11-14, decyzje Darka z godz. 14:46–14:52).** Cztery rzeczy:
 > 1. **Asystent AI przechodzi z OpenRouter na Claude Sonnet 5.5 (`claude-sonnet-5-5`) przez Google Vertex AI** —
->    w ramach zadania 2.5. Szczegóły w 4.2.
+>    w ramach zadania 2.5. Szczegóły w 4.2. *(Nieaktualne od 1.5 — patrz niżej.)*
 > 2. **Pomocniki AI:** zostają `appointments/auto-summary` i `search`; `categorize` i `clients/insights`
 >    wchodzą do asystenta. Reszta endpointów AI (głos, wideo, obrazy, newsletter, powiadomienia) znika albo
 >    zostaje zamrożona zgodnie z D4 i zadaniami 2.3–2.4.
@@ -33,6 +33,17 @@ Ten dotyczy tego, czego kod nie pokazuje: działania na produkcji, pieniędzy, p
 >
 > Zmienione: zadania 0.5, 0.10, 0.11, 0.12, wiersz B12, pytanie 6; przy okazji pytanie 7 i akapit pod tabelą 7.1
 > (projekt GCP rozstrzygnięty przez Darka 2026-11-19). Reszta planu bez zmian.
+
+> **Zmiana 1.5 (2026-11-28, decyzja właściciela: model; decyzje w delegacji: zakres i kolejność).** Dwie rzeczy:
+> 1. **Asystent AI działa na Gemini 3.8 Flash (`gemini-3.8-flash`) przez Google Vertex AI**, lokalizacja `eu`,
+>    zamiast Claude Sonnet 5.5. Logowanie kontem usługi Cloud Run, bez klucza. Szczegóły w 4.2.
+> 2. **Pomocniki `categorize` i `clients/insights` są usunięte bez zastępstwa** — nie wchodzą do asystenta.
+>
+> Otwarcie AI w planie w sprzedaży: dopiero po zmianie polityki prywatności i umowy powierzenia oraz po ocenie
+> zgodności. Ta zmiana nie udostępnia AI salonom.
+>
+> Zmienione: akapit „Model i dostawca” i tabela pomocników w 4.2, wiersz AI w tabeli 4.4, zadanie 2.5, dopisek przy
+> punkcie 1 zmiany 1.3. Reszta planu bez zmian.
 
 ---
 
@@ -189,26 +200,24 @@ Docelowo dwie rzeczy:
 Rekomendacje dzienne i tygodniowe są liczone regułami bez modelu, ale przy każdym wejściu na pulpit
 (4–5,5 s na produkcji). Wystarczy liczyć je raz dziennie i zapisywać wynik.
 
-**Model i dostawca (od 1.3).** Asystent działa na Claude Sonnet 5.5 (`claude-sonnet-5-5`) przez Google Vertex AI,
-czyli w tej samej chmurze co aplikacja i baza. Dziś kod woła OpenRouter z modelem `claude-sonnet-4(-5)`,
-który według ustaleń z 14.11 jest wycofywany 30.11.2026.
+**Model i dostawca (od 1.5).** Asystent działa na Gemini 3.8 Flash (`gemini-3.8-flash`) przez Google Vertex AI,
+czyli w tej samej chmurze co aplikacja i baza. Dziś kod czatu woła jeszcze OpenRouter; przejście robi zadanie 2.5.
 
-- Jedna funkcja `getChatModel()` — jedyne miejsce w kodzie, które wie, jaki to model i dostawca.
-- Dostawca Vertex-Anthropic w Vercel AI SDK. Logowanie przez konto serwisowe aplikacji (bez klucza w zmiennych).
-- Region Vertex: `eu`. Jeśli Sonnet 5.5 nie jest dostępny w regionie UE, **zadanie staje i wraca do Darka**
-  — dane klientów salonu nie mogą wyjść poza UE bez świadomej decyzji (RODO).
-- Sonnet 5.5 odrzuca błędem 400 parametry `temperature` i `top_p`, wymuszony wybór narzędzia (`toolChoice`)
-  oraz `thinking: disabled`. Kod ich dziś nie używa; test ma pilnować, żeby nie wróciły.
-  *(Ustalenie z 14.11, do potwierdzenia w dokumentacji przy wykonaniu 2.5.)*
+- Jedna funkcja `getChatModel()` (`src/lib/ai/model.ts`) — jedyne miejsce w kodzie, które wie, jaki to model i dostawca.
+- Dostawca Google Vertex w Vercel AI SDK. Logowanie kontem usługi Cloud Run (domyślne poświadczenia aplikacji),
+  bez klucza w zmiennych. Ustawiony klucz w pliku (`GOOGLE_APPLICATION_CREDENTIALS`) wyłącza AI.
+- Lokalizacja Vertex: `eu` (wiele regionów UE), na stałe w kodzie, nie w zmiennej — dane klientów salonu
+  nie mogą wyjść poza UE bez świadomej decyzji (RODO). Projekt GCP ze zmiennej `GOOGLE_VERTEX_PROJECT`.
+- Poziom myślenia `thinkingLevel` LOW. MINIMAL ten model odrzuca błędem walidacji.
 
-**Pomocniki AI poza asystentem (od 1.3).**
+**Pomocniki AI poza asystentem (od 1.3, zmienione w 1.5).**
 
 | Pomocnik | Decyzja |
 |---|---|
 | `appointments/auto-summary` (podsumowanie wizyty) | zostaje |
 | `search` (wyszukiwanie w panelu) | zostaje |
-| `categorize` (kategoryzacja) | wchodzi do asystenta, osobny endpoint znika |
-| `clients/insights` (wnioski o kliencie) | wchodzi do asystenta, osobny endpoint znika |
+| `categorize` (kategoryzacja) | usunięty bez zastępstwa (od 1.5) |
+| `clients/insights` (wnioski o kliencie) | usunięty bez zastępstwa (od 1.5) |
 | głos, wideo, publikacja postów | usunięte z `main` (D4, zadanie 2.3) |
 | obrazy, newsletter, powiadomienia pisane przez AI | zamrożone (`hardOff`, zadanie 2.4) |
 
@@ -230,7 +239,7 @@ plus „Więcej" na dodatki i ustawienia. Na telefonie cztery ikony i środkowy 
 | `subscriptions/current` pobierane raz i współdzielone | Dziś 2–3 wywołania na stronę po 1,7 s każde |
 | Dane pulpitu i list ładowane po stronie serwera | Znika kaskada `salons/mine` → dane i ekrany ze spinnerami |
 | Usunięcie `twilio`, `elevenlabs` (D4) | Mniej zależności i podatności |
-| AI przez Vertex AI zamiast OpenRouter (od 1.3) | Jeden dostawca chmury, brak osobnego klucza AI, model, który nie znika 30.11.2026 |
+| AI przez Vertex AI zamiast OpenRouter (od 1.3; Gemini 3.8 Flash w `eu` od 1.5) | Jeden dostawca chmury, brak osobnego klucza AI, dane w UE |
 | Baner „Zainstaluj aplikację" dopiero po zalogowaniu | Dziś wyskakuje anonimowemu gościowi przy pierwszej wizycie |
 
 ---
@@ -359,7 +368,7 @@ Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To sz
 | 2.2 | Schowanie katalogu salonów; `/` staje się stroną sprzedażową | S |
 | 2.3 | Tag `v1.1.2-full`, usunięcie voice, wideo, fiskalizacji, social i ich zależności `twilio` / `elevenlabs` (D4) | M |
 | 2.4 | Zamrożenie lojalności, newsletterów, faktur, promocji złożonych i generowania obrazów (`hardOff`); usunięcie z `src/lib/plan-features.ts` obietnic lojalności i newsletterów | S |
-| 2.5 | Jeden asystent AI zamiast sześciu wejść, na Sonnet 5.5 przez Vertex AI (4.2); `categorize` i `clients/insights` wchodzą do asystenta; rekomendacje liczone raz dziennie | M |
+| 2.5 | Jeden asystent AI zamiast sześciu wejść, na Gemini 3.8 Flash przez Vertex AI w `eu` (4.2); `categorize` i `clients/insights` usunięte bez zastępstwa; rekomendacje liczone raz dziennie | M |
 | 2.6 | Nawigacja: 5 pozycji + „Więcej" | M |
 
 ### Etap 3 — Wygląd

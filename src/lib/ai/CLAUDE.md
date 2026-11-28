@@ -3,6 +3,7 @@
 All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` server-side and `ProPlanGate` component client-side.
 
 ### Shared Utilities (`src/lib/ai/`)
+- `model.ts` — getChatModel() (jedyne miejsce wyboru modelu: Gemini 3.8 Flash na Vertex AI, lokalizacja `eu` na stałe, konto usługi przez ADC), chatCallOptions() (thinkingLevel `low`), aiErrorResponse() (błędy dostawcy → polski tekst, kod `AI_*`), assertUsableFinish(). Na razie nic poza testami go nie woła.
 - `openrouter.ts` — createAIClient(), getAIModel(), requireProAI(), isProAIError(), getSalonContext(), gatherSalonData(), trackAIUsage()
 - `elevenlabs.ts` — createElevenLabsClient(), DEFAULT_VOICE_ID, DEFAULT_TTS_MODEL
 - `google-imagen.ts` — createGoogleAIClient(), generateImage(), IMAGE_STYLE_PRESETS, IMAGE_SIZES
@@ -49,8 +50,10 @@ All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` serve
 ## Environment Variables (AI)
 
 ```
+GOOGLE_VERTEX_PROJECT                 # projekt GCP dla Vertex AI (na Cloud Run z vars.GCP_PROJECT_ID); brak = AI_UNAVAILABLE
+GOOGLE_APPLICATION_CREDENTIALS        # NIE ustawiac — obecnosc wylacza AI (getChatModel() odmawia)
 OPENROUTER_API_KEY                    # wycofywane razem z dostawca — nie rozwijac, nie naprawiac
-OPENROUTER_MODEL                      # wycofywane; docelowy model: claude-sonnet-5-5 przez Google Vertex AI (plan, pkt 4.2)
+OPENROUTER_MODEL                      # wycofywane; tylko Vercel, nie trafia na Cloud Run
 ELEVENLABS_API_KEY                    # ElevenLabs voice AI (TTS, STT)
 GOOGLE_AI_API_KEY                     # Google Imagen + Veo (images, video)
 TWILIO_ACCOUNT_SID                    # Twilio telephony (optional)
