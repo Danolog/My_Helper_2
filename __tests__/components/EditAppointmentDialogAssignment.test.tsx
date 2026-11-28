@@ -152,11 +152,14 @@ const ASSIGNMENT_FIELDS = [
   "edit-employee-select",
 ];
 
+const READONLY_FIELDS = ["edit-client-readonly", "edit-service-readonly", "edit-employee-readonly"];
+
 describe("EditAppointmentDialog — pola przypisania według roli", () => {
-  it("pracownik: pracownik, klient i usługa tylko do odczytu; termin i notatka edytowalne", async () => {
+  it("pracownik: pracownik, klient i usługa jako tekst; termin i notatka edytowalne", async () => {
     renderDialog("employee");
     await screen.findByTestId("edit-appointment-time-input");
-    for (const id of ASSIGNMENT_FIELDS) expect(screen.getByTestId(id)).toBeDisabled();
+    for (const id of ASSIGNMENT_FIELDS) expect(screen.queryByTestId(id)).toBeNull();
+    for (const id of READONLY_FIELDS) expect(screen.getByTestId(id)).toBeInTheDocument();
     expect(screen.getByTestId("edit-appointment-date-input")).not.toBeDisabled();
     expect(screen.getByTestId("edit-appointment-time-input")).not.toBeDisabled();
     expect(screen.getByTestId("edit-appointment-notes-input")).not.toBeDisabled();
@@ -166,12 +169,14 @@ describe("EditAppointmentDialog — pola przypisania według roli", () => {
     renderDialog(role);
     await screen.findByTestId("edit-appointment-time-input");
     for (const id of ASSIGNMENT_FIELDS) expect(screen.getByTestId(id)).not.toBeDisabled();
+    for (const id of READONLY_FIELDS) expect(screen.queryByTestId(id)).toBeNull();
   });
 
   it("bez dostawcy roli (domyślnie właściciel): pola przypisania edytowalne", async () => {
     renderDialog(null);
     await screen.findByTestId("edit-appointment-time-input");
     for (const id of ASSIGNMENT_FIELDS) expect(screen.getByTestId(id)).not.toBeDisabled();
+    for (const id of READONLY_FIELDS) expect(screen.queryByTestId(id)).toBeNull();
   });
 
   it("pracownik: zapis terminu wysyła zapisanego pracownika, klienta i usługę", async () => {
@@ -208,7 +213,8 @@ describe("EditAppointmentDialog — 403 przypisania w oknie pracownika", () => {
     expect(screen.getByTestId("edit-appointment-time-input")).toHaveValue("12:15");
     expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Nowa notatka");
     // Dane klienta z nowego odczytu.
-    expect(screen.getByTestId("notify-client-section")).toHaveTextContent("Jan Wiśniewski");
+    expect(screen.getByTestId("edit-client-readonly")).toHaveTextContent("Jan Wiśniewski");
+    expect(screen.getByTestId("edit-service-readonly")).toHaveTextContent("Koloryzacja");
 
     // Ponowny zapis: przypisanie z nowego odczytu, termin i notatka z okna.
     await waitFor(() => expect(screen.getByTestId("save-edit-btn")).not.toBeDisabled());
@@ -381,8 +387,10 @@ describe("EditAppointmentDialog — koniec wizyty", () => {
     await saveNotesOnly(
       appointment({ status: "completed", startTime: start.toISOString(), endTime: end.toISOString() })
     );
-    // Lista usług z czasem 90 min jest wczytana.
-    await screen.findByText("1h 30 min");
+    // Lista usług z czasem 90 min jest wczytana (wybór w liście ma 90 min),
+    // a podsumowanie pokazuje zapisane 60 min.
+    await screen.findByText(/Strzyżenie - 100.00 PLN \(90 min\)/);
+    expect(screen.queryByText("1h 30 min")).toBeNull();
     fireEvent.click(screen.getByTestId("save-edit-btn"));
     await waitFor(() => expect(mutationFetch).toHaveBeenCalledTimes(1));
     const body = bodyOf(0);
@@ -402,16 +410,18 @@ describe("EditAppointmentDialog — koniec wizyty", () => {
     expect(bodyOf(0).endTime).toBe(end.toISOString());
   });
 
-  it("niezakończona: koniec z bieżącego czasu trwania usługi", async () => {
+  it("niezakończona, usługa bez zmian: koniec z zapisanego czasu trwania, nie z usługi", async () => {
     salon.id = "salon-a";
     servicesList = [SERVICE_90];
     await saveNotesOnly(appointment());
-    await screen.findByText("1h 30 min");
+    // Podsumowanie pokazuje zapisane 60 min, nie 90 min usługi.
+    await waitFor(() => expect(screen.getByTestId("edit-price-duration-summary")).toHaveTextContent("1h"));
+    expect(screen.queryByText("1h 30 min")).toBeNull();
     fireEvent.click(screen.getByTestId("save-edit-btn"));
     await waitFor(() => expect(mutationFetch).toHaveBeenCalledTimes(1));
     const body = bodyOf(0);
     expect(body.startTime).toBe(future.toISOString());
-    expect(body.endTime).toBe(new Date(future.getTime() + 90 * 60 * 1000).toISOString());
+    expect(body.endTime).toBe(new Date(future.getTime() + 60 * 60 * 1000).toISOString());
   });
 });
 
