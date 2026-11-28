@@ -50,6 +50,21 @@ export function refundFailedToastDescription(amount: number): string {
   return `Zadatek ${formatAmount(amount)} PLN nie wrócił do klienta automatycznie. Napisz do nas: ${SUPPORT_CONTACT}, a zwrócimy go ręcznie. Nie oddawaj zadatku z kasy salonu, bo te pieniądze są na naszym koncie.`;
 }
 
+/** 5: odmowa serwera — tytuł toasta błędu odwołania. */
+export const CANCEL_FAILED_TOAST_TITLE = "Nie udało się odwołać wizyty";
+/** 5a: 500 — opis bez powtórzenia tytułu; okno zostaje otwarte. */
+export const CANCEL_FAILED_SERVER_DESCRIPTION = "Spróbuj ponownie za chwilę.";
+
+/** 6: wizyty nie ma już w kalendarzu (404 `APPOINTMENT_NOT_FOUND`) — okno się zamyka. */
+export const APPOINTMENT_GONE_TOAST_TITLE = "Tej wizyty nie ma już w kalendarzu";
+export const APPOINTMENT_GONE_TOAST_DESCRIPTION =
+  "Ktoś ją zmienił albo usunął w międzyczasie. Odświeżyliśmy kalendarz.";
+
+/** 7: wizyta już odwołana (`APPOINTMENT_CANCELLED`) — informacja, nie błąd; okno się zamyka. */
+export const ALREADY_CANCELLED_TOAST_TITLE = "Ta wizyta jest już odwołana";
+export const ALREADY_CANCELLED_TOAST_DESCRIPTION =
+  "Ktoś zrobił to wcześniej, nic więcej nie trzeba robić. Odświeżyliśmy kalendarz.";
+
 export interface SalonCancellationDetails {
   depositAmount: number;
   depositRefunded?: boolean;

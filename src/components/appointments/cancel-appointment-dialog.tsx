@@ -22,8 +22,15 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { mutationFetch } from "@/lib/api-client";
+import { APPOINTMENT_ERROR_CODES } from "@/lib/appointment-codes";
 import type { CancellationDepositVariant } from "@/lib/salon-cancellation";
 import {
+  ALREADY_CANCELLED_TOAST_DESCRIPTION,
+  ALREADY_CANCELLED_TOAST_TITLE,
+  APPOINTMENT_GONE_TOAST_DESCRIPTION,
+  APPOINTMENT_GONE_TOAST_TITLE,
+  CANCEL_FAILED_SERVER_DESCRIPTION,
+  CANCEL_FAILED_TOAST_TITLE,
   CANCEL_DIALOG_BACK,
   CANCEL_DIALOG_CONFIRM,
   CANCEL_DIALOG_TITLE,
@@ -138,9 +145,20 @@ export function CancelAppointmentDialog({
         }
         onOpenChange(false);
         onAppointmentCancelled();
+      } else if (data.code === APPOINTMENT_ERROR_CODES.appointmentNotFound) {
+        // Wizyty nie ma w salonie (albo pracownik już jej nie prowadzi): zamknięcie
+        // i odświeżenie jak po sukcesie, własny tekst zamiast `data.error`.
+        toast.info(APPOINTMENT_GONE_TOAST_TITLE, { description: APPOINTMENT_GONE_TOAST_DESCRIPTION });
+        onOpenChange(false);
+        onAppointmentCancelled();
+      } else if (data.code === APPOINTMENT_ERROR_CODES.appointmentCancelled) {
+        // Wizyta już odwołana: informacja, nie błąd ani sukces; zamknięcie i odświeżenie.
+        toast.info(ALREADY_CANCELLED_TOAST_TITLE, { description: ALREADY_CANCELLED_TOAST_DESCRIPTION });
+        onOpenChange(false);
+        onAppointmentCancelled();
       } else {
-        toast.error("Nie udało się odwołać wizyty", {
-          description: data.error,
+        toast.error(CANCEL_FAILED_TOAST_TITLE, {
+          description: res.status === 500 ? CANCEL_FAILED_SERVER_DESCRIPTION : data.error,
         });
       }
     } catch {
