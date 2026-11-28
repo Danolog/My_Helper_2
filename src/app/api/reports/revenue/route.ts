@@ -7,6 +7,7 @@ import { requireReportSalon } from "@/lib/reports/require-report-salon";
 import {
   REVENUE_METHOD_LABELS,
   REVENUE_METHOD_ORDER,
+  REVENUE_NO_RECORD_NOTE,
   REVENUE_SOURCE_NOTE,
   appointmentRevenueCents,
   centsToAmount,
@@ -236,8 +237,10 @@ export async function GET(request: Request) {
     const avgRevenuePerAppointment = centsToAmount(
       avgCents(totalRevenueCents, totalAppointments)
     );
-    // Share of the RAZEM row in the payment method section
+    // Share of every RAZEM row with a share column: "100.0", or "0.0" for a period without revenue
     const totalShare = revenueShare(totalRevenueCents, totalRevenueCents);
+    // The source note says amounts were entered; the "none" group was computed, so explain it when present
+    const hasNoRecordGroup = methodBreakdown.none.count > 0;
 
     // CSV export
     if (format === "csv") {
@@ -256,6 +259,9 @@ export async function GET(request: Request) {
       );
       csvRows.push(`Łączna kwota zniżek,${totalDiscount} PLN`);
       csvRows.push(`Źródło kwot,"${REVENUE_SOURCE_NOTE}"`);
+      if (hasNoRecordGroup) {
+        csvRows.push(`${REVENUE_METHOD_LABELS.none},"${REVENUE_NO_RECORD_NOTE}"`);
+      }
       csvRows.push("");
 
       // Service breakdown
@@ -314,6 +320,7 @@ export async function GET(request: Request) {
             ["Średni przychód na wizytę (PLN)", avgRevenuePerAppointment],
             ["Łączna kwota zniżek (PLN)", totalDiscount],
             ["Źródło kwot", REVENUE_SOURCE_NOTE],
+            ...(hasNoRecordGroup ? [[REVENUE_METHOD_LABELS.none, REVENUE_NO_RECORD_NOTE]] : []),
           ] as (string | number)[][],
         },
         {
@@ -327,7 +334,7 @@ export async function GET(request: Request) {
               svc.avgPrice,
               svc.share,
             ]),
-            ["RAZEM", totalAppointments, totalRevenue, avgRevenuePerAppointment, "100.0"],
+            ["RAZEM", totalAppointments, totalRevenue, avgRevenuePerAppointment, totalShare],
           ] as (string | number)[][],
         },
         {
@@ -341,7 +348,7 @@ export async function GET(request: Request) {
               emp.avgPrice,
               emp.share,
             ]),
-            ["RAZEM", totalAppointments, totalRevenue, avgRevenuePerAppointment, "100.0"],
+            ["RAZEM", totalAppointments, totalRevenue, avgRevenuePerAppointment, totalShare],
           ] as (string | number)[][],
         },
         {

@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/reports/revenue/route";
-import { REVENUE_SOURCE_NOTE } from "@/lib/reports/revenue-amount";
+import { REVENUE_NO_RECORD_NOTE, REVENUE_SOURCE_NOTE } from "@/lib/reports/revenue-amount";
 import { SALON_A } from "./salon-staff-harness";
 
 const m = await vi.hoisted(async () =>
@@ -360,6 +360,115 @@ describe("GET /api/reports/revenue — kwota zapisana i metody płatności", () 
       ["Bez zapisu płatności", 0, "0.00", "0.0"],
       ["RAZEM", 0, "0.00", "0.0"],
     ]);
+  });
+
+  describe("RAZEM w arkuszach usług i pracowników — jedna reguła udziału", () => {
+    async function sheetsFor(rows: unknown[]) {
+      m.asOwnerOf(SALON_A);
+      m.txRows.push(rows);
+      const res = await call("xlsx");
+      expect(res.status).toBe(200);
+      return excel.createExcelWorkbook.mock.calls[0]![0] as { name: string; rows: (string | number)[][] }[];
+    }
+    const razem = (sheets: { name: string; rows: (string | number)[][] }[], name: string) =>
+      sheets.find((s) => s.name === name)?.rows.find((r) => r[0] === "RAZEM");
+
+    it("suma > 0: udział RAZEM 100.0", async () => {
+      const sheets = await sheetsFor([
+        appt({ paidAmount: "50.00", paymentMethod: "cash" }),
+        appt({ paidAmount: "30.00", paymentMethod: "card", employeeId: "emp-2" }),
+      ]);
+      expect(razem(sheets, "Wg usługi")).toEqual(["RAZEM", 2, "80.00", "40.00", "100.0"]);
+      expect(razem(sheets, "Wg pracownika")).toEqual(["RAZEM", 2, "80.00", "40.00", "100.0"]);
+    });
+
+    it("brak wizyt: udział RAZEM 0.0", async () => {
+      const sheets = await sheetsFor([]);
+      expect(razem(sheets, "Wg usługi")).toEqual(["RAZEM", 0, "0.00", "0.00", "0.0"]);
+      expect(razem(sheets, "Wg pracownika")).toEqual(["RAZEM", 0, "0.00", "0.00", "0.0"]);
+    });
+
+    it("wizyty za 0 zł: udział RAZEM 0.0", async () => {
+      const sheets = await sheetsFor([appt({ paidAmount: "0.00", paymentMethod: "cash" })]);
+      expect(razem(sheets, "Wg usługi")).toEqual(["RAZEM", 1, "0.00", "0.00", "0.0"]);
+      expect(razem(sheets, "Wg pracownika")).toEqual(["RAZEM", 1, "0.00", "0.00", "0.0"]);
+    });
+  });
+
+  describe("zdanie o grupie „Bez zapisu płatności” w eksporcie", () => {
+    const NO_RECORD_ROW_LITERAL =
+      'Bez zapisu płatności,"Bez zapisu płatności: wizyty zakończone, zanim aplikacja zaczęła pytać o kwotę i metodę. Ich kwota to cena usługi minus rabat."';
+    const SOURCE_ROW_LITERAL =
+      'Źródło kwot,"Przychód to kwoty wpisane przy zakończeniu wizyty. Nie pochodzi z kasy fiskalnej ani z terminala płatniczego."';
+
+    async function csvLines(rows: unknown[]) {
+      m.asOwnerOf(SALON_A);
+      m.txRows.push(rows);
+      const res = await call("csv");
+      expect(res.status).toBe(200);
+      return (await res.text()).split("\n");
+    }
+
+    async function summaryRows(rows: unknown[]) {
+      m.asOwnerOf(SALON_A);
+      m.txRows.push(rows);
+      const res = await call("xlsx");
+      expect(res.status).toBe(200);
+      const sheets = excel.createExcelWorkbook.mock.calls[0]![0] as { name: string; rows: (string | number)[][] }[];
+      return sheets.find((s) => s.name === "Podsumowanie")!.rows;
+    }
+
+    it("CSV z wizytą bez zapisu: oba zdania, drugie tuż po zdaniu o źródle", async () => {
+      const lines = await csvLines([
+        appt({ paidAmount: "50.00", paymentMethod: "cash" }),
+        appt({ basePrice: "100.00", discountAmount: "10.00" }),
+      ]);
+      expect(lines).toContain(SOURCE_ROW_LITERAL);
+      expect(lines).toContain(`Bez zapisu płatności,"${REVENUE_NO_RECORD_NOTE}"`);
+      expect(lines.indexOf(NO_RECORD_ROW_LITERAL)).toBe(lines.indexOf(SOURCE_ROW_LITERAL) + 1);
+      // wiersz grupy w sekcji metod zostaje jak był
+      expect(lines).toContain('"Bez zapisu płatności",1,90.00,64.3');
+    });
+
+    it("CSV tylko z wizytami z zapisem: zdanie o źródle bez drugiego zdania", async () => {
+      const lines = await csvLines([appt({ paidAmount: "50.00", paymentMethod: "cash" })]);
+      expect(lines).toContain(SOURCE_ROW_LITERAL);
+      expect(lines.filter((l) => l.startsWith("Bez zapisu płatności,"))).toEqual([]);
+      expect(lines).toContain('"Bez zapisu płatności",0,0.00,0.0');
+    });
+
+    it("CSV bez wizyt: bez drugiego zdania", async () => {
+      const lines = await csvLines([]);
+      expect(lines.filter((l) => l.startsWith("Bez zapisu płatności,"))).toEqual([]);
+    });
+
+    it("XLSX z wizytą bez zapisu: oba zdania w Podsumowaniu, drugie po źródle", async () => {
+      const rows = await summaryRows([
+        appt({ paidAmount: "50.00", paymentMethod: "cash" }),
+        appt({ basePrice: "100.00", discountAmount: "10.00" }),
+      ]);
+      const sourceIdx = rows.findIndex((r) => r[0] === "Źródło kwot");
+      expect(rows[sourceIdx]).toEqual([
+        "Źródło kwot",
+        "Przychód to kwoty wpisane przy zakończeniu wizyty. Nie pochodzi z kasy fiskalnej ani z terminala płatniczego.",
+      ]);
+      expect(rows[sourceIdx + 1]).toEqual([
+        "Bez zapisu płatności",
+        "Bez zapisu płatności: wizyty zakończone, zanim aplikacja zaczęła pytać o kwotę i metodę. Ich kwota to cena usługi minus rabat.",
+      ]);
+      expect(rows[sourceIdx + 1]).toEqual(["Bez zapisu płatności", REVENUE_NO_RECORD_NOTE]);
+    });
+
+    it("XLSX tylko z wizytami z zapisem: bez drugiego zdania", async () => {
+      const rows = await summaryRows([appt({ paidAmount: "50.00", paymentMethod: "card" })]);
+      expect(rows).toContainEqual(["Źródło kwot", REVENUE_SOURCE_NOTE]);
+      expect(rows.filter((r) => r[0] === "Bez zapisu płatności")).toEqual([]);
+    });
+
+    it("XLSX bez wizyt: bez drugiego zdania", async () => {
+      const rows = await summaryRows([]);
+      expect(rows.filter((r) => r[0] === "Bez zapisu płatności")).toEqual([]);
+    });
   });
 
   it("trasa woła forSalon z salonem sesji", async () => {
