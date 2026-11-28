@@ -53,6 +53,16 @@ function isSafeReturnTo(url: string | null | undefined): string {
 
 const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/**
+ * Jeden tekst dla obu odmów CSRF (brak tokenu i zły token): użytkownik nie
+ * widzi różnicy i w obu przypadkach robi to samo, więc rozróżnienie niesie
+ * pole `code`. Krok zapasowy (zamknięcie przeglądarki) jest potrzebny, bo
+ * ensureCsrfCookies nie odnawia ciasteczek, gdy `csrf-secret` już istnieje —
+ * wtedy samo odświeżenie strony nie pomaga.
+ */
+export const CSRF_REJECTED_MESSAGE =
+  "Nie udało się wysłać formularza. Odśwież stronę i spróbuj ponownie. Jeśli błąd wróci, zamknij przeglądarkę i otwórz ją ponownie.";
+
 const CSRF_SKIP_PREFIXES = [
   "/api/auth/",
   "/api/stripe/",
@@ -218,7 +228,7 @@ export async function proxy(request: NextRequest) {
 
     if (!headerToken || !secret) {
       return NextResponse.json(
-        { success: false, error: "CSRF token missing" },
+        { success: false, code: "CSRF_MISSING", error: CSRF_REJECTED_MESSAGE },
         { status: 403 }
       );
     }
@@ -226,7 +236,7 @@ export async function proxy(request: NextRequest) {
     const valid = await validateCsrfToken(secret, headerToken);
     if (!valid) {
       return NextResponse.json(
-        { success: false, error: "Invalid CSRF token" },
+        { success: false, code: "CSRF_INVALID", error: CSRF_REJECTED_MESSAGE },
         { status: 403 }
       );
     }
