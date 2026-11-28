@@ -12,7 +12,10 @@
  * środowiskowej (czerwony test `GOOGLE_VERTEX_LOCATION=global` i strażnik
  * manifestu); usunięcie odmowy przy `GOOGLE_APPLICATION_CREDENTIALS`
  * (czerwone testy odmowy); komunikat wyjątku w ciele odpowiedzi (czerwone
- * testy ciała); drugi import SDK pod `src/` (czerwony test statyczny).
+ * testy ciała); drugi import SDK pod `src/` (czerwony test statyczny);
+ * 401 usunięte ze statusów „niedostępny” (czerwony test 401); usunięte
+ * rozpoznawanie błędu gaxios po symbolu (czerwony test GaxiosError); wzorzec
+ * projektu dopuszcza `?` (czerwona próbka ze znakiem zapytania).
  */
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -185,7 +188,7 @@ describe("getChatModel — odmowa przed siecią", () => {
     ["nieustawiony", undefined, "missing_project"],
     ["pusty napis (pusta zmienna repo w workflow)", "", "missing_project"],
     ["z ukośnikiem", "test-project/locations/global", "invalid_project"],
-    ["ze znakiem zapytania", "test-project?x=1", "invalid_project"],
+    ["ze znakiem zapytania", "test-project?x", "invalid_project"],
     ["z wielkimi literami", "Test-Project", "invalid_project"],
     ["za krótki", "abc", "invalid_project"],
   ])("projekt %s → AIUnavailableError, zero fetch", (_label, value, reason) => {
@@ -274,6 +277,24 @@ describe("aiErrorResponse — błędy dostawcy", () => {
     });
   });
 
+  it("401 dostawcy (token odrzucony) → 503 AI_UNAVAILABLE, ciało bez tekstu wyjątku", async () => {
+    nextResponse = () =>
+      googleError(401, "UNAUTHENTICATED", "Request had invalid authentication credentials.");
+
+    const response = aiErrorResponse(await callModelError());
+    const { text, json } = await bodyOf(response);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBeNull();
+    expect(json).toEqual({ error: AI_ERROR_MESSAGES.AI_UNAVAILABLE, code: "AI_UNAVAILABLE" });
+    expect(text).not.toContain("invalid authentication");
+    expectSafeLog(["invalid authentication"]);
+    expect(vi.mocked(logger.warn).mock.calls[0]![1]).toMatchObject({
+      providerStatus: 401,
+      providerErrorStatus: "UNAUTHENTICATED",
+    });
+  });
+
   it("404 dostawcy (model niedostępny w lokalizacji) → 503 AI_UNAVAILABLE", async () => {
     nextResponse = () => googleError(404, "NOT_FOUND", "Publisher model was not found");
 
@@ -308,6 +329,29 @@ describe("aiErrorResponse — błędy dostawcy", () => {
     expect(json).toEqual({ error: AI_ERROR_MESSAGES.AI_UNAVAILABLE, code: "AI_UNAVAILABLE" });
     expect(text).not.toContain("credentials");
     expectSafeLog(["credentials", "cloud.google.com"]);
+  });
+
+  it("GaxiosError z biblioteki uwierzytelnienia (np. token z serwera metadanych) → 503 AI_UNAVAILABLE", async () => {
+    // gaxios oznacza swoje błędy właściwością pod symbolem z globalnego rejestru
+    // (`Symbol.for("gaxios-gaxios-error")`, wartość: wersja paczki). Komunikat
+    // celowo bez żadnego z rozpoznawanych początków: rozstrzyga tylko symbol.
+    const gaxiosError = Object.assign(
+      new Error("Unsuccessful response status code. Request failed with status code 403"),
+      { [Symbol.for("gaxios-gaxios-error")]: "7.1.4" },
+    );
+    gaxiosError.name = "GaxiosError";
+    getClientSpy.mockRejectedValue(gaxiosError);
+
+    const error = await callModelError();
+    const response = aiErrorResponse(error);
+    const { text, json } = await bodyOf(response);
+
+    expect(calls).toHaveLength(0);
+    expect(response.status).toBe(503);
+    expect(json).toEqual({ error: AI_ERROR_MESSAGES.AI_UNAVAILABLE, code: "AI_UNAVAILABLE" });
+    expect(text).not.toContain("status code");
+    expectSafeLog(["Unsuccessful", "status code"]);
+    expect(vi.mocked(logger.warn).mock.calls[0]![1]).toMatchObject({ errorName: "GaxiosError" });
   });
 
   it("błąd sieci → 502 AI_PROVIDER_ERROR (nie „niedostępny”)", async () => {

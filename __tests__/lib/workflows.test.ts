@@ -54,7 +54,8 @@ function triggers(yaml: string): string[] {
  * którego wdrażamy, więc nie zakładamy osobnej zmiennej repo z tą samą wartością.
  * Każda inna zmienna `var` nadal wymaga linii `NAZWA: ${{ vars.NAZWA }}`.
  * Mutacje: alias w workflow na `vars.GCP_REGION` → czerwony; drugi wpis w mapie
- * bez odpowiadającej linii w workflow → czerwony.
+ * bez odpowiadającej linii w workflow → czerwony; drugi wpis w mapie razem
+ * z linią w workflow → czerwony (asercja pełnej zawartości mapy).
  */
 const VAR_ALIASES: Readonly<Record<string, string>> = {
   GOOGLE_VERTEX_PROJECT: "GCP_PROJECT_ID",
@@ -206,6 +207,13 @@ describe("G-C6: deploy-cloud-run.yml", () => {
       const source = VAR_ALIASES[name] ?? name;
       expect(DEPLOY, name).toMatch(new RegExp(`^\\s+${name}: \\$\\{\\{ vars\\.${source} \\}\\}$`, "m"));
     }
+  });
+
+  it("mapa aliasów ma dokładnie jeden wpis (projekt Vertex AI → projekt GCP)", () => {
+    // Każdy nowy alias wymaga osobnej recenzji bezpieczeństwa: alias przekazuje
+    // usłudze wartość innej zmiennej repo. Dodanie wpisu do mapy razem z linią
+    // w workflow musi zmienić też tę asercję, a nie przejść po cichu.
+    expect(VAR_ALIASES).toEqual({ GOOGLE_VERTEX_PROJECT: "GCP_PROJECT_ID" });
   });
 
   it("alias zmiennej repo: tylko dla zmiennej klasy var, z linią w kroku wdrożenia", () => {
