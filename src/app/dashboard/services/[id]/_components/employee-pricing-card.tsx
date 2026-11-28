@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, DollarSign, Users, Trash2 } from "lucide-react";
+import { Plus, DollarSign, Users, Trash2, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +36,8 @@ interface EmployeePricingCardProps {
   empPriceCustomPrice: string;
   setEmpPriceCustomPrice: (value: string) => void;
   savingEmpPrice: boolean;
+  editingEmpPrice: EmployeePrice | null;
+  openEditEmployeePrice: (price: EmployeePrice) => void;
   resetEmpPriceForm: () => void;
   handleSaveEmployeePrice: () => Promise<void>;
   handleDeleteEmployeePrice: (price: EmployeePrice) => Promise<void>;
@@ -52,6 +54,8 @@ export function EmployeePricingCard({
   empPriceCustomPrice,
   setEmpPriceCustomPrice,
   savingEmpPrice,
+  editingEmpPrice,
+  openEditEmployeePrice,
   resetEmpPriceForm,
   handleSaveEmployeePrice,
   handleDeleteEmployeePrice,
@@ -61,6 +65,17 @@ export function EmployeePricingCard({
     (emp) =>
       !employeePrices.some((ep) => ep.employeeId === emp.id && !ep.variantId),
   );
+
+  // Przy zmianie ceny lista ma tylko pracownika tej ceny (pole zablokowane).
+  const editingEmployee = editingEmpPrice
+    ? (allEmployees.find((emp) => emp.id === editingEmpPrice.employeeId) ??
+      editingEmpPrice.employee)
+    : null;
+  const dialogEmployees: Employee[] = editingEmpPrice
+    ? editingEmployee
+      ? [editingEmployee]
+      : []
+    : employeesWithoutCustomPrice;
 
   return (
     <Card data-testid="employee-pricing-section">
@@ -84,15 +99,19 @@ export function EmployeePricingCard({
           <DialogTrigger asChild>
             <Button size="sm" data-testid="add-employee-price-btn">
               <Plus className="h-4 w-4 mr-2" />
-              Ustaw cene
+              Ustaw cenę
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[450px]">
             <DialogHeader>
-              <DialogTitle>Ustaw cene indywidualna</DialogTitle>
+              <DialogTitle>
+                {editingEmpPrice
+                  ? "Zmień cenę indywidualną"
+                  : "Ustaw cenę indywidualną"}
+              </DialogTitle>
               <DialogDescription>
-                Ustaw indywidualna cene za ta usluge dla wybranego pracownika.
-                Cena ta bedzie wyswietlana zamiast ceny bazowej przy rezerwacji
+                Ustaw indywidualną cenę za tę usługę dla wybranego pracownika.
+                Ta cena będzie wyświetlana zamiast ceny bazowej przy rezerwacji
                 wizyty u tego pracownika.
               </DialogDescription>
             </DialogHeader>
@@ -102,6 +121,7 @@ export function EmployeePricingCard({
                 <Select
                   value={empPriceEmployeeId}
                   onValueChange={setEmpPriceEmployeeId}
+                  disabled={editingEmpPrice !== null}
                 >
                   <SelectTrigger
                     id="emp-price-employee"
@@ -110,12 +130,16 @@ export function EmployeePricingCard({
                     <SelectValue placeholder="Wybierz pracownika" />
                   </SelectTrigger>
                   <SelectContent>
-                    {employeesWithoutCustomPrice.length === 0 ? (
+                    {editingEmpPrice && dialogEmployees.length === 0 ? (
+                      <SelectItem value={editingEmpPrice.employeeId}>
+                        Nieznany pracownik
+                      </SelectItem>
+                    ) : dialogEmployees.length === 0 ? (
                       <SelectItem value="__none" disabled>
-                        Wszyscy pracownicy maja juz ceny
+                        Wszyscy pracownicy mają już ceny
                       </SelectItem>
                     ) : (
-                      employeesWithoutCustomPrice.map((emp) => (
+                      dialogEmployees.map((emp) => (
                         <SelectItem key={emp.id} value={emp.id}>
                           <div className="flex items-center gap-2">
                             {emp.color && (
@@ -127,7 +151,7 @@ export function EmployeePricingCard({
                             {emp.firstName} {emp.lastName}
                             {emp.role === "owner" && (
                               <span className="text-xs text-muted-foreground">
-                                (wlasciciel)
+                                (właściciel)
                               </span>
                             )}
                           </div>
@@ -175,8 +199,8 @@ export function EmployeePricingCard({
                   data-testid="employee-price-input"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Cena bazowa uslugi: {formatPrice(service.basePrice)} PLN.
-                  Wprowadz cene, ktora zamiast niej bedzie stosowana dla tego
+                  Cena bazowa usługi: {formatPrice(service.basePrice)} PLN.
+                  Wprowadź cenę, która będzie stosowana zamiast niej dla tego
                   pracownika.
                 </p>
               </div>
@@ -196,7 +220,7 @@ export function EmployeePricingCard({
                 disabled={savingEmpPrice}
                 data-testid="save-employee-price-btn"
               >
-                {savingEmpPrice ? "Zapisywanie..." : "Zapisz cene"}
+                {savingEmpPrice ? "Zapisywanie..." : "Zapisz cenę"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -210,7 +234,7 @@ export function EmployeePricingCard({
               className="text-muted-foreground mb-4"
               data-testid="no-employee-prices-message"
             >
-              Brak indywidualnych cen. Wszyscy pracownicy stosuja cene bazowa (
+              Brak indywidualnych cen. Wszyscy pracownicy stosują cenę bazową (
               {formatPrice(service.basePrice)} PLN).
             </p>
             <Button
@@ -219,7 +243,7 @@ export function EmployeePricingCard({
               data-testid="empty-state-add-employee-price-btn"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Ustaw pierwsza cene indywidualna
+              Ustaw pierwszą cenę indywidualną
             </Button>
           </div>
         ) : (
@@ -232,6 +256,9 @@ export function EmployeePricingCard({
                 basePrice > 0
                   ? ((diff / basePrice) * 100).toFixed(0)
                   : "0";
+              const employeeName = ep.employee
+                ? `${ep.employee.firstName} ${ep.employee.lastName}`
+                : "Nieznany pracownik";
 
               return (
                 <div
@@ -251,13 +278,11 @@ export function EmployeePricingCard({
                         className="font-medium"
                         data-testid={`employee-price-name-${ep.id}`}
                       >
-                        {ep.employee
-                          ? `${ep.employee.firstName} ${ep.employee.lastName}`
-                          : "Nieznany pracownik"}
+                        {employeeName}
                       </span>
                       {ep.employee?.role === "owner" && (
                         <Badge variant="outline" className="text-xs">
-                          wlasciciel
+                          właściciel
                         </Badge>
                       )}
                     </div>
@@ -288,6 +313,19 @@ export function EmployeePricingCard({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* Panel ustawia tylko ceny bez wariantu i tylko takie zmienia. */}
+                    {!ep.variantId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditEmployeePrice(ep)}
+                        aria-label={`Zmień cenę: ${employeeName}`}
+                        data-testid={`edit-employee-price-${ep.id}`}
+                      >
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Zmień cenę
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
