@@ -3,6 +3,10 @@
  * - przeniesienie wizyty na innego pracownika i usługę zatwierdzone, gdy
  *   zakończenie czeka na blokadę wiersza → prowizja nowego pracownika od ceny
  *   nowej usługi (odczyt pod blokadą, nie odczyt sprzed transakcji);
+ * - wizyta bez usługi, której usługę przypisano w czasie czekania na blokadę
+ *   → prowizja od ceny przypisanej usługi (złączenie bez wiersza usługi);
+ * - stawka prowizji z body liczy się tylko od właściciela; pracownik dostaje
+ *   stawkę ze swoich danych;
  * - pracownik kończy swoją wizytę, którą w tej chwili przepisano na innego
  *   pracownika → 404, nic nie zapisane;
  * - dwa równoległe zakończenia → dokładnie jedno 200 i jedno 409
@@ -144,6 +148,36 @@ const complete = (id: string, body: Record<string, unknown> = {}) =>
 type Body = { success: boolean; code?: string; error?: string; data?: Record<string, unknown> };
 
 /**
+ * Wynik żądania do komunikatu bariery: sam status i `code`, bez body —
+ * przy danych klienta body niosłoby je do logu CI.
+ */
+function outcomeSummary(value: unknown): string {
+  const one = (r: unknown) => {
+    const res = r as { status?: unknown; body?: { code?: unknown } } | null;
+    return { status: res?.status ?? null, code: res?.body?.code ?? null };
+  };
+  return JSON.stringify(Array.isArray(value) ? value.map(one) : one(value));
+}
+
+/** Najdłużej tyle czeka sprzątanie na żądanie, które bariera zostawiła w locie. */
+const PENDING_SETTLE_MS = 5_000;
+
+/** Czeka na obietnicę najwyżej `ms`; jej błąd nie wychodzi poza sprzątanie. */
+async function settleWithin(pending: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    pending.then(
+      () => undefined,
+      () => undefined
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+/**
  * Liczba transakcji stojących za transakcją `holderPid`: wprost albo w kolejce
  * za inną czekającą (łańcuch `pg_blocking_pids`). Druga transakcja czekająca na
  * ten sam wiersz stoi za blokadą krotki PIERWSZEJ czekającej, nie bezpośrednio
@@ -209,30 +243,38 @@ async function underRowLock<T>(
   whileLocked: (tx: { unsafe: (q: string, p: unknown[]) => Promise<unknown> }) => Promise<void> = async () => {}
 ): Promise<T> {
   const box: { pending?: Promise<T> } = {};
-  await h!.observer.begin(async (tx) => {
-    await tx.unsafe("set local lock_timeout = '15s'");
-    const [me] = (await tx.unsafe("select pg_backend_pid() as pid")) as unknown as { pid: number }[];
-    const locked = (await tx.unsafe("select id from appointments where id = $1 for update", [appt])) as unknown as unknown[];
-    // Bez wiersza nie ma blokady, a bariera nie miałaby na co czekać.
-    if (locked.length !== 1) throw new Error("obserwator nie zablokował wiersza wizyty");
-    let done = false;
-    let result = "";
-    const pending = start();
-    box.pending = pending;
-    // Błąd żądania przed barierą nie może zostać nieobsłużoną obietnicą.
-    pending.then(
-      (v) => {
-        done = true;
-        result = JSON.stringify(v);
-      },
-      (e: unknown) => {
-        done = true;
-        result = e instanceof Error ? e.name : "rejected";
-      }
-    );
-    await waitForWaitersBehind(me!.pid, blocked, () => done, () => result);
-    await whileLocked(tx as never);
-  });
+  let barrierPassed = false;
+  try {
+    await h!.observer.begin(async (tx) => {
+      await tx.unsafe("set local lock_timeout = '15s'");
+      const [me] = (await tx.unsafe("select pg_backend_pid() as pid")) as unknown as { pid: number }[];
+      const locked = (await tx.unsafe("select id from appointments where id = $1 for update", [appt])) as unknown as unknown[];
+      // Bez wiersza nie ma blokady, a bariera nie miałaby na co czekać.
+      if (locked.length !== 1) throw new Error("obserwator nie zablokował wiersza wizyty");
+      let done = false;
+      let result = "";
+      const pending = start();
+      box.pending = pending;
+      // Błąd żądania przed barierą nie może zostać nieobsłużoną obietnicą.
+      pending.then(
+        (v) => {
+          done = true;
+          result = outcomeSummary(v);
+        },
+        (e: unknown) => {
+          done = true;
+          result = e instanceof Error ? e.name : "rejected";
+        }
+      );
+      await waitForWaitersBehind(me!.pid, blocked, () => done, () => result);
+      await whileLocked(tx as never);
+    });
+    barrierPassed = true;
+  } finally {
+    // Bariera padła: żądanie w locie nie może skończyć się po `afterAll`
+    // (zamknięte połączenia, usunięte dane). Czekamy na nie krótko.
+    if (!barrierPassed && box.pending) await settleWithin(box.pending, PENDING_SETTLE_MS);
+  }
   if (!box.pending) throw new Error("żądanie nie wystartowało");
   return box.pending;
 }
@@ -369,8 +411,9 @@ suite("zakończenie wizyty — odczyt pod blokadą wiersza i kontekst po savepoi
           `drop function if exists ${STOCK_FN}()`,
           `drop sequence if exists ${STOCK_SEQ}`,
         ]);
-      } catch (e) {
-        mocks.warn("stock trigger cleanup failed", e);
+      } catch {
+        // Prawdziwe ostrzeżenie, nie atrapa loggera: ma być widać w CI. Sama nazwa obiektu.
+        console.warn(`stock trigger cleanup failed: ${STOCK_TRIGGER}`);
       }
       const salonIds = [ids.salonA, ids.salonB].filter(Boolean);
       if (salonIds.length > 0) await h.db.delete(salons).where(inArray(salons.id, salonIds));
@@ -410,6 +453,59 @@ suite("zakończenie wizyty — odczyt pod blokadą wiersza i kontekst po savepoi
       expect(await commissionsOf(appt)).toEqual([{ employeeId: ids.empB, amount: "28.00", percentage: "10.00" }]);
       expect(await statusOf(appt)).toBe("completed");
       expect((res.body.data?.appointment as { employeeId?: string })?.employeeId).toBe(ids.empB);
+    },
+    30_000
+  );
+
+  it(
+    "wizyta bez usługi, usługa przypisana, gdy zakończenie czeka na blokadę → prowizja od ceny przypisanej usługi",
+    async () => {
+      const appt = await appointment({ serviceId: null });
+
+      const res = await underRowLock(
+        appt,
+        1,
+        async () => parseResponse<Body>(await complete(appt)),
+        async (tx) => {
+          await tx.unsafe("update appointments set service_id = $1 where id = $2", [ids.serviceB, appt]);
+        }
+      );
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      // Złączenie nie miało wiersza usługi (wizyta bez usługi) — usługa B z ponownego
+      // odczytu: pracownik A (40%), cena podstawowa B (300; cena indywidualna B ma tylko pracownik B).
+      expect(await commissionsOf(appt)).toEqual([{ employeeId: ids.empA, amount: "120.00", percentage: "40.00" }]);
+      expect(await statusOf(appt)).toBe("completed");
+      expect((res.body.data?.appointment as { serviceId?: string })?.serviceId).toBe(ids.serviceB);
+    },
+    30_000
+  );
+
+  it(
+    "pracownik kończy swoją wizytę ze stawką 100 w body → 200, stawka z danych pracownika",
+    async () => {
+      ctl.userId = EMP_USER;
+      const appt = await appointment();
+
+      const res = await parseResponse<Body>(await complete(appt, { commissionPercentage: 100 }));
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      // 40% z danych pracownika A od 150, nie 100%.
+      expect(await commissionsOf(appt)).toEqual([{ employeeId: ids.empA, amount: "60.00", percentage: "40.00" }]);
+      expect(await statusOf(appt)).toBe("completed");
+    },
+    30_000
+  );
+
+  it(
+    "kontrola: właściciel kończy wizytę ze stawką 100 w body → prowizja 100%",
+    async () => {
+      const appt = await appointment();
+
+      const res = await parseResponse<Body>(await complete(appt, { commissionPercentage: 100 }));
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(await commissionsOf(appt)).toEqual([{ employeeId: ids.empA, amount: "150.00", percentage: "100.00" }]);
     },
     30_000
   );

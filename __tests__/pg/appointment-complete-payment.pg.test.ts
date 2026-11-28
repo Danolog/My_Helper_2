@@ -330,7 +330,11 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
       const res = await parseResponse(await complete(apptB, { paidAmount: "50.00", paymentMethod: "cash" }));
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Appointment not found" });
+      expect(res.body).toEqual({
+        success: false,
+        code: "APPOINTMENT_NOT_FOUND",
+        error: "Nie znaleziono tej wizyty albo nie jest już przypisana do Ciebie. Odśwież kalendarz.",
+      });
       // Cudza wizyta i nieistniejąca: ta sama odpowiedź, bez śladu istnienia wizyty B.
       const missing = await parseResponse(await complete(randomUUID(), { paidAmount: "50.00", paymentMethod: "cash" }));
       expect({ status: missing.status, body: missing.body }).toEqual({ status: res.status, body: res.body });
@@ -360,7 +364,10 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
       );
 
       expect(res.status, JSON.stringify(res.body)).toBe(500);
-      expect(res.body).toEqual({ success: false, error: "Failed to complete appointment" });
+      expect(res.body).toEqual({
+        success: false,
+        error: "Nie udało się zakończyć wizyty. Nic nie zostało zapisane. Spróbuj ponownie za chwilę.",
+      });
       // UPDATE się wykonał: trigger zobaczył w tej transakcji status i płatność
       // wizyty (kod ROLLBACK_SEEN_CODE, nie UNSEEN). Log zakończenia pada dopiero
       // po zatwierdzeniu transakcji, więc przy wycofaniu go nie ma.

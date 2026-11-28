@@ -4,10 +4,8 @@ import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/rou
 import { parseBody, completeAppointmentSchema } from "@/lib/api-validation";
 import {
   APPOINTMENT_COMPLETED_CODE,
-  APPOINTMENT_COMPLETED_MESSAGE,
-  COMMISSION_RATE_INVALID_MESSAGE,
   COMPLETE_ERROR_CODES,
-  SERVICE_PRICE_INVALID_MESSAGE,
+  COMPLETE_MESSAGES,
   commissionFor,
 } from "@/lib/appointment-completion";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
@@ -20,7 +18,7 @@ import {
   NO_SHOW_STATUS,
 } from "@/lib/no-show";
 import { toErrorIdentity } from "@/lib/safe-error";
-import { getSalonContext } from "@/lib/salon-context";
+import { getSalonContext, type SalonRole } from "@/lib/salon-context";
 import {
   appointments,
   treatmentHistory,
@@ -100,35 +98,62 @@ function dbConstraintName(error: unknown): string | undefined {
   return undefined;
 }
 
-function noShowConflictResponse() {
-  return errorResponse(409, NO_SHOW_COMPLETE_BLOCKED_CODE, NO_SHOW_COMPLETE_BLOCKED_MESSAGE);
+function serverErrorResponse() {
+  return NextResponse.json({ success: false, error: COMPLETE_MESSAGES.serverError }, { status: 500 });
+}
+
+/**
+ * „Nie przyszedł”: oznaczenie cofają tylko właściciel i recepcja (trasa
+ * no-show), więc pracownik dostaje tekst, kto może to zrobić.
+ */
+function noShowConflictResponse(role: SalonRole | null) {
+  const message =
+    role === "employee" ? COMPLETE_MESSAGES.noShowEmployee : NO_SHOW_COMPLETE_BLOCKED_MESSAGE;
+  return errorResponse(409, NO_SHOW_COMPLETE_BLOCKED_CODE, message);
 }
 
 function appointmentNotFoundResponse() {
-  return errorResponse(404, COMPLETE_ERROR_CODES.appointmentNotFound, "Appointment not found");
+  return errorResponse(
+    404,
+    COMPLETE_ERROR_CODES.appointmentNotFound,
+    COMPLETE_MESSAGES.appointmentNotFound
+  );
 }
 
 /**
  * Odpowiedź dla wizyty, której nie da się zakończyć — wspólna dla
  * sprawdzenia pod blokadą wiersza i dla zapisu, który nie trafił w wiersz.
- * `null` dla statusu spoza listy (nie powinien wystąpić: UPDATE odrzuca
- * tylko te statusy).
+ * `null` dla statusu spoza listy: trasa oddaje wtedy 500 z logiem statusu.
  */
-function notCompletableResponse(status: string): NextResponse | null {
+function notCompletableResponse(status: string, role: SalonRole | null): NextResponse | null {
   if (status === "completed") {
-    return errorResponse(409, APPOINTMENT_COMPLETED_CODE, APPOINTMENT_COMPLETED_MESSAGE);
+    return errorResponse(409, APPOINTMENT_COMPLETED_CODE, COMPLETE_MESSAGES.appointmentCompleted);
   }
   if (status === "cancelled") {
     return errorResponse(
       400,
       COMPLETE_ERROR_CODES.appointmentCancelled,
-      "Nie mozna zakonczyc anulowanej wizyty"
+      COMPLETE_MESSAGES.appointmentCancelled
     );
   }
   if (status === NO_SHOW_STATUS) {
-    return noShowConflictResponse();
+    return noShowConflictResponse(role);
   }
   return null;
+}
+
+/**
+ * Body bez `commissionPercentage` dla ról innych niż właściciel. Stawkę
+ * prowizji dla konkretnej wizyty zmienia tylko właściciel; pracownik
+ * i recepcja dostają stawkę z danych pracownika. Pole jest pomijane przed
+ * walidacją, nie odrzucane: dialog wysyła je zawsze, więc odrzucenie
+ * zablokowałoby zakończenie każdej wizyty przez te role.
+ */
+function bodyForRole(body: unknown, role: SalonRole): unknown {
+  if (role === "owner" || !body || typeof body !== "object" || Array.isArray(body)) return body;
+  const rest: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  delete rest.commissionPercentage;
+  return rest;
 }
 
 /**
@@ -197,6 +222,9 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Do odpowiedzi i logu w `catch`: rola wołającego i id wizyty po walidacji.
+  let callerRole: SalonRole | null = null;
+  let appointmentId: string | null = null;
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
@@ -205,29 +233,36 @@ export async function POST(
     // employee wyłącznie własną (sprawdzenie po pobraniu wizyty niżej).
     const ctx = await getSalonContext();
     if (!ctx) {
-      return errorResponse(404, COMPLETE_ERROR_CODES.salonNotFound, "Salon not found");
+      return errorResponse(404, COMPLETE_ERROR_CODES.salonNotFound, COMPLETE_MESSAGES.salonNotFound);
     }
     const salonId = ctx.salonId;
+    callerRole = ctx.role;
 
     const { id } = await params;
     // Niepoprawny identyfikator dawał błąd bazy (22P02) i 500.
     if (!isValidUuid(id)) {
-      return errorResponse(400, COMPLETE_ERROR_CODES.invalidId, "Invalid appointment ID format");
+      return errorResponse(400, COMPLETE_ERROR_CODES.invalidId, COMPLETE_MESSAGES.invalidId);
     }
+    appointmentId = id;
 
     let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return errorResponse(400, COMPLETE_ERROR_CODES.invalidJson, "Invalid JSON body");
+      return errorResponse(400, COMPLETE_ERROR_CODES.invalidJson, COMPLETE_MESSAGES.invalidJson);
     }
 
     // Server-side validation with Zod schema. Sparsowane dane, nie surowe body:
-    // schemat zamienia kwotę na tekst dla kolumny numeric.
-    const parsed = parseBody(completeAppointmentSchema, body);
+    // schemat zamienia kwotę na tekst dla kolumny numeric. Stawka prowizji
+    // z body tylko od właściciela (pomijana przed walidacją u innych ról).
+    const parsed = parseBody(completeAppointmentSchema, bodyForRole(body, ctx.role));
     if (!parsed.ok) {
       return NextResponse.json(
-        { ...parsed.error, code: COMPLETE_ERROR_CODES.validationFailed },
+        {
+          ...parsed.error,
+          error: COMPLETE_MESSAGES.validationFailed,
+          code: COMPLETE_ERROR_CODES.validationFailed,
+        },
         { status: 400 }
       );
     }
@@ -329,11 +364,6 @@ export async function POST(
           .returning();
       }
 
-      logger.info("Treatment record saved", {
-        action: existingTreatment ? "updated" : "created",
-        appointmentId: id,
-      });
-
       // 2. Mark appointment as completed
       // Warunek statusu w samym UPDATE i ponowny odczyt przy 0 wierszach to
       // druga linia obrony: pod blokadą z kroku 0 status nie może się zmienić,
@@ -366,7 +396,8 @@ export async function POST(
       // 3. Calculate and record commission
       let commission = null;
 
-      // Determine commission percentage: use provided value, or employee's default, or fallback
+      // Stawka: z body (tylko właściciel — u innych ról pole pominięte przed
+      // walidacją), inaczej z danych pracownika, inaczej domyślna.
       let commPct = DEFAULT_COMMISSION_RATE;
       if (commissionPercentage !== undefined && commissionPercentage !== null) {
         // Schemat zwraca liczbę skończoną z zakresu 0–100.
@@ -387,6 +418,7 @@ export async function POST(
         // Determine effective service price
         // Check for employee-specific pricing first
         let effectivePrice = parseFloat(service.basePrice);
+        let priceInvalidMessage: string = COMPLETE_MESSAGES.servicePriceInvalid;
 
         const [employeePrice] = await tx
           .select()
@@ -401,20 +433,20 @@ export async function POST(
 
         if (employeePrice) {
           effectivePrice = parseFloat(employeePrice.customPrice);
+          priceInvalidMessage = COMPLETE_MESSAGES.employeePriceInvalid;
         }
 
         // 'NaN' albo 'Infinity' w kolumnie numeric dałyby prowizję „NaN”
-        // albo 500 z bazy. Błąd z kodem wycofuje całą transakcję.
-        if (!Number.isFinite(effectivePrice)) {
-          throw new CompletionDataError(
-            COMPLETE_ERROR_CODES.servicePriceInvalid,
-            SERVICE_PRICE_INVALID_MESSAGE
-          );
+        // albo 500 z bazy, a cena ujemna — ujemną prowizję (potrącenie
+        // u pracownika). Błąd z kodem wycofuje całą transakcję; tekst wskazuje
+        // cenę, której użyto (usługi albo pracownika).
+        if (!Number.isFinite(effectivePrice) || effectivePrice < 0) {
+          throw new CompletionDataError(COMPLETE_ERROR_CODES.servicePriceInvalid, priceInvalidMessage);
         }
         if (!Number.isFinite(commPct)) {
           throw new CompletionDataError(
             COMPLETE_ERROR_CODES.commissionRateInvalid,
-            COMMISSION_RATE_INVALID_MESSAGE
+            COMPLETE_MESSAGES.commissionRateInvalid
           );
         }
 
@@ -451,12 +483,7 @@ export async function POST(
             .returning();
         }
 
-        logger.info("Commission recorded", {
-          commissionPct: commissionPercentageSaved,
-          effectivePrice: effectivePrice.toFixed(2),
-          commissionAmount,
-          employeeId: appointment.employeeId,
-        });
+        // Log prowizji dopiero po zatwierdzeniu transakcji (w trasie), sam id.
       }
 
       // 4. Automatic stock deduction - deduct linked products from inventory
@@ -512,14 +539,6 @@ export async function POST(
               notes: "Automatyczne zuzycie (usluga)",
             });
 
-          logger.info("Stock deducted", {
-            productName: linked.productName,
-            quantityDeducted: qtyToDeduct,
-            unit: linked.productUnit || "szt.",
-            previousQty: currentQty,
-            newQty,
-          });
-
           // Check for low stock and notify. Najlepszy wysiłek w zagnieżdżonej
           // transakcji (savepoint): błąd bazy cofa tylko powiadomienie. Bez
           // savepointu Postgres oznacza całą transakcję jako przerwaną, COMMIT
@@ -546,13 +565,6 @@ export async function POST(
             newQuantity: newQty,
             unit: linked.productUnit,
             lowStockAlert,
-          });
-        }
-
-        if (stockDeductions.length > 0) {
-          logger.info("Auto-deducted products for service", {
-            productsCount: stockDeductions.length,
-            serviceName: service.name,
           });
         }
       }
@@ -695,22 +707,42 @@ export async function POST(
       }
 
       return {
-        appointment: updatedAppointment,
-        // Wartości zapisane w bazie (z RETURNING), nie echo żądania.
-        payment: {
-          paidAmount: updatedAppointment.paidAmount ?? null,
-          paymentMethod: updatedAppointment.paymentMethod ?? null,
+        data: {
+          appointment: updatedAppointment,
+          // Wartości zapisane w bazie (z RETURNING), nie echo żądania.
+          payment: {
+            paidAmount: updatedAppointment.paidAmount ?? null,
+            paymentMethod: updatedAppointment.paymentMethod ?? null,
+          },
+          treatment,
+          commission,
+          stockDeductions,
+          loyalty: loyaltyResult,
         },
-        treatment,
-        commission,
-        stockDeductions,
-        loyalty: loyaltyResult,
+        // Tylko do logu po zatwierdzeniu — nie trafia do odpowiedzi.
+        serviceId: service?.id ?? null,
       };
     });
+    const result = txResult.data;
 
-    // Po zatwierdzeniu transakcji: log nie twierdzi zakończenia, które COMMIT wycofał.
+    // Po zatwierdzeniu transakcji: log nie twierdzi zapisu, który COMMIT
+    // wycofał. Same identyfikatory — bez pracownika, nazw, cen, stawek, kwot
+    // i stanów magazynu (są w bazie).
     logger.info("Appointment marked as completed", { appointmentId: id });
-    for (const deduction of txResult.stockDeductions) {
+    logger.info("Treatment record saved", { appointmentId: id });
+    if (result.commission) {
+      logger.info("Commission recorded", { appointmentId: id, commissionId: result.commission.id });
+    }
+    for (const deduction of result.stockDeductions) {
+      logger.info("Stock deducted", { appointmentId: id, productId: deduction.productId });
+    }
+    if (result.stockDeductions.length > 0 && txResult.serviceId) {
+      logger.info("Auto-deducted products for service", {
+        appointmentId: id,
+        serviceId: txResult.serviceId,
+      });
+    }
+    for (const deduction of result.stockDeductions) {
       if (deduction.lowStockAlert?.notificationSent) {
         logger.info("Low stock alert notification sent", {
           appointmentId: id,
@@ -718,24 +750,32 @@ export async function POST(
         });
       }
     }
-    if (txResult.loyalty) {
+    if (result.loyalty) {
       logger.info("Loyalty points awarded", {
         appointmentId: id,
-        pointsAwarded: txResult.loyalty.pointsAwarded,
+        pointsAwarded: result.loyalty.pointsAwarded,
       });
     }
 
     return NextResponse.json({
       success: true,
-      data: txResult,
-      message: "Wizyta zakonczona pomyslnie",
+      data: result,
+      message: COMPLETE_MESSAGES.success,
     });
   } catch (error) {
     if (error instanceof AppointmentNotCompletableError) {
-      // Wiersz zniknął po odczycie → 404; status spoza listy (nie powinien
-      // wystąpić) → 409 jak dotąd, bo zakończenie i tak nie zostało zapisane.
+      // Wiersz zniknął po odczycie → 404.
       if (error.currentStatus === null) return appointmentNotFoundResponse();
-      return notCompletableResponse(error.currentStatus) ?? noShowConflictResponse();
+      const response = notCompletableResponse(error.currentStatus, callerRole);
+      if (response) return response;
+      // Status spoza listy przy nieudanym zapisie: stan, którego trasa nie
+      // obsługuje (np. nowy status wizyty). Transakcja wycofana, więc nic się
+      // nie zapisało; 500 z logiem statusu zamiast mylącego kodu.
+      logger.error("Appointment completion status not handled", {
+        appointmentId,
+        status: error.currentStatus,
+      });
+      return serverErrorResponse();
     }
     if (error instanceof CompletionDataError) {
       // Sam kod, bez ceny i stawki.
@@ -749,9 +789,6 @@ export async function POST(
       ...toErrorIdentity(error),
       ...(constraint ? { constraint } : {}),
     });
-    return NextResponse.json(
-      { success: false, error: "Failed to complete appointment" },
-      { status: 500 }
-    );
+    return serverErrorResponse();
   }
 }

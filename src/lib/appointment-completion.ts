@@ -5,6 +5,7 @@
 // Wizyta zakończona ma ostateczny wynik — żadna trasa nie zmienia już jej
 // statusu (przywrócenie, anulowanie, „Nie przyszedł”).
 // Moduł bez importów serwerowych.
+import { APPOINTMENT_ERROR_CODES } from "@/lib/appointment-codes";
 
 /** Status wizyty zakończonej. */
 export const COMPLETED_STATUS = "completed";
@@ -23,27 +24,54 @@ export const APPOINTMENT_COMPLETED_MESSAGE =
 
 /**
  * Kody błędów POST /api/appointments/[id]/complete (pole `code` każdej
- * odpowiedzi 4xx poza 401 z `requireAuth`). Wizyta zakończona: 409
- * `APPOINTMENT_COMPLETED` jak w PUT i DELETE; „Nie przyszedł”: 409
- * `APPOINTMENT_NO_SHOW` z `@/lib/no-show`.
+ * odpowiedzi 4xx poza 401 z `requireAuth`). Brak wizyty, zły identyfikator,
+ * brak salonu i wizyta anulowana — wspólne kody wizyty z `@/lib/appointment-codes`.
+ * Wizyta zakończona: 409 `APPOINTMENT_COMPLETED` jak w PUT i DELETE;
+ * „Nie przyszedł”: 409 `APPOINTMENT_NO_SHOW` z `@/lib/no-show`.
  */
 export const COMPLETE_ERROR_CODES = {
+  ...APPOINTMENT_ERROR_CODES,
   invalidJson: "INVALID_JSON",
-  invalidId: "INVALID_APPOINTMENT_ID",
   validationFailed: "VALIDATION_FAILED",
-  salonNotFound: "SALON_NOT_FOUND",
-  appointmentNotFound: "APPOINTMENT_NOT_FOUND",
-  appointmentCancelled: "APPOINTMENT_CANCELLED",
   servicePriceInvalid: "SERVICE_PRICE_INVALID",
   commissionRateInvalid: "COMMISSION_RATE_INVALID",
 } as const;
 
-/** 409: cena usługi (podstawowa albo pracownika) nie jest liczbą skończoną. */
-export const SERVICE_PRICE_INVALID_MESSAGE =
-  "Cena usługi jest nieprawidłowa. Popraw cenę usługi i zakończ wizytę ponownie.";
-/** 409: domyślna stawka prowizji pracownika nie jest liczbą skończoną. */
-export const COMMISSION_RATE_INVALID_MESSAGE =
-  "Stawka prowizji pracownika jest nieprawidłowa. Popraw ją w danych pracownika i zakończ wizytę ponownie.";
+/**
+ * Teksty `error` (i `message` sukcesu) trasy zakończenia — dialog pokazuje je
+ * w toaście, więc mówią salonowi, co się stało i kto może to poprawić.
+ * Wizyta zakończona ma tu własny tekst; PUT i DELETE zostają przy
+ * `APPOINTMENT_COMPLETED_MESSAGE` (ten sam kod).
+ */
+export const COMPLETE_MESSAGES = {
+  salonNotFound: "Nie znaleziono salonu przypisanego do Twojego konta. Zaloguj się ponownie.",
+  invalidId: "Nie rozpoznano tej wizyty. Odśwież stronę i spróbuj ponownie.",
+  invalidJson: "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.",
+  validationFailed: "Sprawdź dane w formularzu.",
+  appointmentNotFound:
+    "Nie znaleziono tej wizyty albo nie jest już przypisana do Ciebie. Odśwież kalendarz.",
+  appointmentCompleted: "Ta wizyta jest już zakończona. Odśwież widok, żeby zobaczyć zapisane dane.",
+  appointmentCancelled: "Tej wizyty nie można zakończyć, bo została anulowana.",
+  /**
+   * „Nie przyszedł” dla pracownika: oznaczenie cofają tylko właściciel i
+   * recepcja (`NO_SHOW_MARK_ROLES`), więc pracownik nie dostaje polecenia,
+   * którego nie może wykonać. Pozostałe role — tekst z `@/lib/no-show`.
+   */
+  noShowEmployee:
+    "Wizyta oznaczona jako »Nie przyszedł«. Właściciel lub recepcja może cofnąć oznaczenie.",
+  /** 409: cena podstawowa usługi nie jest liczbą skończoną ≥ 0. */
+  servicePriceInvalid:
+    "Nie można policzyć prowizji: cena tej usługi jest zapisana nieprawidłowo. Wizyta nie została zakończona. Właściciel salonu może poprawić cenę w ustawieniach usługi.",
+  /** 409: indywidualna cena pracownika nie jest liczbą skończoną ≥ 0. */
+  employeePriceInvalid:
+    "Nie można policzyć prowizji: indywidualna cena pracownika za tę usługę jest zapisana nieprawidłowo. Wizyta nie została zakończona. Właściciel salonu może ją poprawić w karcie „Ceny indywidualne pracowników” tej usługi.",
+  /** 409: stawka prowizji z danych pracownika nie jest liczbą skończoną. */
+  commissionRateInvalid:
+    "Nie można policzyć prowizji: stawka prowizji pracownika jest zapisana nieprawidłowo. Wizyta nie została zakończona. Właściciel salonu może ją poprawić w zakładce Finanse.",
+  /** 500: cała trasa działa w jednej transakcji, więc nic się nie zapisało. */
+  serverError: "Nie udało się zakończyć wizyty. Nic nie zostało zapisane. Spróbuj ponownie za chwilę.",
+  success: "Wizyta zakończona.",
+} as const;
 
 /**
  * Prowizja od ceny usługi. Stawka zaokrąglona do 2 miejsc (precyzja kolumny
