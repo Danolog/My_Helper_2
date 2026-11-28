@@ -6,6 +6,20 @@ import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import type { CommissionsData, EmployeeRate } from "../_types";
 
+// Ten sam zakres i tekst co commissionRateSchema po stronie serwera.
+const RATE_RANGE_MESSAGE = "Prowizja musi być liczbą od 0 do 100.";
+const VALIDATION_FALLBACK_MESSAGE =
+  "Nie udało się zapisać. Sprawdź wpisane wartości.";
+
+// 400 z validateBody: { error, details: { pole: komunikat } }.
+function firstDetail(details: unknown): string | null {
+  if (!details || typeof details !== "object") return null;
+  const message = Object.values(details).find(
+    (value) => typeof value === "string" && value.length > 0
+  );
+  return typeof message === "string" ? message : null;
+}
+
 export function useFinanceData() {
   const { data: session, isPending } = useSession();
   const [data, setData] = useState<CommissionsData | null>(null);
@@ -34,10 +48,10 @@ export function useFinanceData() {
       if (json.success) {
         setData(json.data);
       } else {
-        toast.error("Nie udalo sie pobrac prowizji");
+        toast.error("Nie udało się pobrać prowizji");
       }
     } catch {
-      toast.error("Blad polaczenia z serwerem");
+      toast.error("Błąd połączenia z serwerem");
     } finally {
       setLoading(false);
     }
@@ -68,7 +82,7 @@ export function useFinanceData() {
     if (!editingRate) return;
     const rate = parseFloat(newRate);
     if (isNaN(rate) || rate < 0 || rate > 100) {
-      toast.error("Prowizja musi byc liczba od 0 do 100");
+      toast.error(RATE_RANGE_MESSAGE);
       return;
     }
 
@@ -87,11 +101,13 @@ export function useFinanceData() {
         toast.success(json.message);
         setEditingRate(null);
         fetchRates();
+      } else if (res.status === 400) {
+        toast.error(firstDetail(json.details) ?? VALIDATION_FALLBACK_MESSAGE);
       } else {
-        toast.error(json.error || "Nie udalo sie zapisac");
+        toast.error(json.error || "Nie udało się zapisać");
       }
     } catch {
-      toast.error("Blad polaczenia z serwerem");
+      toast.error("Błąd połączenia z serwerem");
     } finally {
       setSavingRate(false);
     }

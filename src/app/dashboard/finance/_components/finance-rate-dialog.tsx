@@ -40,11 +40,11 @@ export function FinanceRateDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Percent className="h-5 w-5" />
-            Zmien stawke prowizji
+            Zmień stawkę prowizji
           </DialogTitle>
           <DialogDescription>
             {editingRate &&
-              `Ustaw domyslna prowizje dla ${editingRate.firstName} ${editingRate.lastName}`}
+              `Ustaw domyślną prowizję dla ${editingRate.firstName} ${editingRate.lastName}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -62,8 +62,8 @@ export function FinanceRateDialog({
               data-testid="new-rate-input"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Wartosc od 0% do 100%. Ta stawka bedzie domyslnie stosowana
-              przy konczeniu wizyt.
+              Wartość od 0% do 100%. Ta stawka będzie domyślnie stosowana
+              przy kończeniu wizyt.
             </p>
           </div>
 

@@ -103,10 +103,10 @@ export function FinanceDetails({
                     <th className="text-left p-3 font-medium">
                       Pracownik
                     </th>
-                    <th className="text-left p-3 font-medium">Usluga</th>
+                    <th className="text-left p-3 font-medium">Usługa</th>
                     <th className="text-left p-3 font-medium">Klient</th>
                     <th className="text-right p-3 font-medium">
-                      Cena uslugi
+                      Cena usługi
                     </th>
                     <th className="text-right p-3 font-medium">
                       Prowizja %
@@ -202,9 +202,9 @@ export function FinanceDetails({
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             <CalendarDays className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p className="text-lg font-medium">Brak prowizji do wyswietlenia</p>
+            <p className="text-lg font-medium">Brak prowizji do wyświetlenia</p>
             <p className="text-sm">
-              Sprobuj zmienic zakres dat lub filtr pracownika.
+              Spróbuj zmienić zakres dat lub filtr pracownika.
             </p>
           </CardContent>
         </Card>

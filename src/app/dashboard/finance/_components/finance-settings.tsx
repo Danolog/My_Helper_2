@@ -32,13 +32,13 @@ export function FinanceSettings({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Percent className="h-5 w-5" />
-            Domyslne stawki prowizji
+            Domyślne stawki prowizji
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Ustaw domyslny procent prowizji dla kazdego pracownika. Ta
-            stawka bedzie automatycznie stosowana przy konczeniu wizyt.
+            Ustaw domyślny procent prowizji dla każdego pracownika. Ta
+            stawka będzie automatycznie stosowana przy kończeniu wizyt.
           </p>
           {ratesLoading ? (
             <div className="flex justify-center py-8">
@@ -46,7 +46,7 @@ export function FinanceSettings({
             </div>
           ) : employeeRates.length === 0 ? (
             <p className="text-center py-8 text-muted-foreground">
-              Brak pracownikow
+              Brak pracowników
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -85,7 +85,7 @@ export function FinanceSettings({
                       <td className="p-3">
                         <Badge variant="outline">
                           {emp.role === "owner"
-                            ? "Wlasciciel"
+                            ? "Właściciel"
                             : emp.role === "receptionist"
                               ? "Recepcja"
                               : "Pracownik"}
@@ -110,7 +110,7 @@ export function FinanceSettings({
                           data-testid={`edit-rate-${emp.id}`}
                         >
                           <Settings className="h-3.5 w-3.5 mr-1" />
-                          Zmien
+                          Zmień
                         </Button>
                       </td>
                     </tr>

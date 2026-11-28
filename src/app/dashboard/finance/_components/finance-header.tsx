@@ -15,7 +15,7 @@ export function FinanceHeader() {
       <div>
         <h1 className="text-3xl font-bold">Finanse - Prowizje</h1>
         <p className="text-muted-foreground">
-          Zarzadzaj prowizjami pracownikow
+          Zarządzaj prowizjami pracowników
         </p>
       </div>
     </div>

@@ -39,14 +39,14 @@ export default function FinancePage() {
 
   if (isPending) {
     return (
-      <div className="flex justify-center items-center h-64">Loading...</div>
+      <div className="flex justify-center items-center h-64">Ładowanie…</div>
     );
   }
 
   if (!session) {
     return (
       <div className="container mx-auto p-6 text-center">
-        <p>Musisz byc zalogowany aby zobaczyc finanse.</p>
+        <p>Musisz być zalogowany, aby zobaczyć finanse.</p>
       </div>
     );
   }
@@ -59,11 +59,11 @@ export default function FinancePage() {
         <TabsList>
           <TabsTrigger value="overview" data-testid="tab-overview">
             <DollarSign className="h-4 w-4 mr-2" />
-            Przeglad prowizji
+            Przegląd prowizji
           </TabsTrigger>
           <TabsTrigger value="details" data-testid="tab-details">
             <CalendarDays className="h-4 w-4 mr-2" />
-            Szczegoly
+            Szczegóły
           </TabsTrigger>
           <TabsTrigger value="settings" data-testid="tab-settings">
             <Settings className="h-4 w-4 mr-2" />

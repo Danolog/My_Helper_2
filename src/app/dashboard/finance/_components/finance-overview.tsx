@@ -66,7 +66,7 @@ export function FinanceOverview({
               data-testid="refresh-btn"
             >
               <RefreshCw className="h-4 w-4 mr-2" />
-              Odswiez
+              Odśwież
             </Button>
           </div>
         </CardContent>
@@ -78,7 +78,7 @@ export function FinanceOverview({
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Laczne prowizje
+                Łączne prowizje
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -110,7 +110,7 @@ export function FinanceOverview({
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Pracownicy z prowizja
+                Pracownicy z prowizją
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -131,7 +131,7 @@ export function FinanceOverview({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Users className="h-5 w-5" />
-              Prowizje wg pracownikow
+              Prowizje wg pracowników
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -146,10 +146,10 @@ export function FinanceOverview({
                       Liczba wizyt
                     </th>
                     <th className="text-right p-3 font-medium">
-                      Sredni %
+                      Średni %
                     </th>
                     <th className="text-right p-3 font-medium">
-                      Domyslna stawka
+                      Domyślna stawka
                     </th>
                     <th className="text-right p-3 font-medium">
                       Suma prowizji
@@ -214,7 +214,7 @@ export function FinanceOverview({
             <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p className="text-lg font-medium">Brak prowizji</p>
             <p className="text-sm">
-              Prowizje pojawia sie po zakonczeniu wizyt z przypisanym
+              Prowizje pojawią się po zakończeniu wizyt z przypisanym
               pracownikiem.
             </p>
           </CardContent>
