@@ -300,13 +300,14 @@ describe("PUT /api/appointments/[id] — wyjście ze statusu `completed` zakazan
     expect(h.logger.error).not.toHaveBeenCalled();
   });
 
-  it("UPDATE bez wiersza, a wizyta nie jest zakończona (zniknęła) → odpowiedź jak dotąd, bez 409", async () => {
+  it("UPDATE bez wiersza, a wizyta zniknęła → 404 APPOINTMENT_NOT_FOUND, bez 409 i bez 200 z data: null", async () => {
     h.selectResults = [[], []];
     h.updated = [];
 
-    const res = await put({ status: "confirmed" });
+    const { status, body } = await parseResponse<Err>(await put({ status: "confirmed" }));
 
-    expect(res.status).toBe(200);
+    expect(status).toBe(404);
+    expect(body.code).toBe("APPOINTMENT_NOT_FOUND");
   });
 
   it("500 przy błędzie bazy w transakcji (nie mylony z 409)", async () => {
