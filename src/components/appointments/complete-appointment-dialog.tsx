@@ -13,6 +13,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,7 +29,80 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { mutationFetch } from "@/lib/api-client";
+// Moduł bez importów serwerowych — bezpieczny w kodzie klienta.
+import { COMPLETE_MESSAGES } from "@/lib/appointment-completion";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
+
+/**
+ * Metody płatności — ta sama lista co `APPOINTMENT_PAYMENT_METHODS` w
+ * `@/lib/api-validation`. Kopia, bo tamten moduł wciąga walidacje całego API;
+ * zgodność pilnuje test komponentu.
+ */
+export const PAYMENT_METHOD_OPTIONS = [
+  { value: "cash", label: "Gotówka" },
+  { value: "card", label: "Karta" },
+  { value: "blik", label: "BLIK" },
+] as const;
+
+type PaymentMethod = (typeof PAYMENT_METHOD_OPTIONS)[number]["value"];
+
+/**
+ * Teksty błędów kwoty — kopia tekstów schematu `completeAppointmentSchema`
+ * (`@/lib/api-validation`), z tego samego powodu co lista metod. Okno sprawdza
+ * pole przed wysłaniem tymi samymi słowami, które oddałby serwer; równość
+ * pilnuje test komponentu.
+ */
+export const PAID_AMOUNT_MESSAGES = {
+  required: COMPLETE_MESSAGES.paidAmountRequired,
+  notNumber: "Kwota musi być liczbą.",
+  negative: "Kwota nie może być ujemna.",
+  tooManyDecimals: "Kwota może mieć najwyżej 2 miejsca po przecinku.",
+  outOfRange: "Kwota musi być liczbą od 0 do 99 999 999,99.",
+} as const;
+
+/** Ten sam wzorzec co na serwerze: do 8 cyfr przed kropką, najwyżej 2 po niej (numeric(10,2)). */
+const PAID_AMOUNT_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
+
+const RECEIPT_NOTICE =
+  "Kwota trafi tylko do raportu w MyHelper. To nie jest paragon. Paragon wystaw jak zwykle w kasie fiskalnej.";
+
+const COMPLETE_FAILED_MESSAGE = "Nie udało się zakończyć wizyty. Spróbuj ponownie.";
+
+type PaidAmountCheck = { ok: true; value: string } | { ok: false; error: string };
+
+/**
+ * Kwota wpisana w oknie → tekst z kropką dla trasy zakończenia. Przycięcie
+ * spacji i przecinek na kropkę przed sprawdzeniem; kolejność warunków jak w
+ * schemacie serwera. Jedna różnica: tekst niebędący liczbą („abc”) serwer
+ * opisuje zakresem, a okno krótko „Kwota musi być liczbą.” — zakres zostaje
+ * dla liczby za dużej dla kolumny.
+ */
+export function checkPaidAmount(raw: string): PaidAmountCheck {
+  const value = raw.trim().replace(/,/g, ".");
+  if (value === "") return { ok: false, error: PAID_AMOUNT_MESSAGES.required };
+  if (value.startsWith("-")) return { ok: false, error: PAID_AMOUNT_MESSAGES.negative };
+  if (/^\d+\.\d{3,}$/.test(value)) return { ok: false, error: PAID_AMOUNT_MESSAGES.tooManyDecimals };
+  if (/^\d+(\.\d{1,2})?$/.test(value) && !PAID_AMOUNT_PATTERN.test(value)) {
+    return { ok: false, error: PAID_AMOUNT_MESSAGES.outOfRange };
+  }
+  if (!PAID_AMOUNT_PATTERN.test(value)) return { ok: false, error: PAID_AMOUNT_MESSAGES.notNumber };
+  return { ok: true, value };
+}
+
+/**
+ * Domyślna kwota w polu: cena usługi taka, jaką pokazuje strona wizyty
+ * (`service.basePrice`), nie mniejsza niż 0, z przecinkiem i dwoma miejscami.
+ * Dane okna nie zawierają rabatu wizyty, więc rabat nie jest odejmowany.
+ * Brak ceny (albo cena nieczytelna) — puste pole, nie „0,00”.
+ */
+export function defaultPaidAmount(basePrice: string | null | undefined): string {
+  if (basePrice == null || basePrice.trim() === "") return "";
+  const price = Number(basePrice);
+  if (!Number.isFinite(price)) return "";
+  return Math.max(0, price).toFixed(2).replace(".", ",");
+}
+
+type PaymentFieldErrors = { paidAmount?: string | undefined; paymentMethod?: string | undefined };
 
 interface MaterialRecord {
   id: string;
@@ -89,14 +163,35 @@ export function CompleteAppointmentDialog({
   onCompleted,
   onScheduleNext,
 }: CompleteAppointmentDialogProps) {
+  // Rola z kontekstu panelu: prowizję, jej stawkę i koszt materiałów widzi
+  // (i wysyła) tylko właściciel. Recepcja i pracownik zapisują prowizję według
+  // stawki pracownika, którą serwer bierze sam.
+  const isOwner = useSalonRole() === "owner";
+  const initialPaidAmount = defaultPaidAmount(appointment.service?.basePrice);
+
   const [recipe, setRecipe] = useState("");
   const [techniques, setTechniques] = useState("");
   const [notes, setNotes] = useState("");
   const [commissionPercentage, setCommissionPercentage] = useState(String(DEFAULT_COMMISSION_RATE));
+  const [paidAmount, setPaidAmount] = useState(initialPaidAmount);
+  // Bez wartości domyślnej: salon wybiera metodę świadomie przy każdej wizycie.
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<PaymentFieldErrors>({});
   const [completing, setCompleting] = useState(false);
   const [completedSuccessfully, setCompletedSuccessfully] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [aiSummaryText, setAiSummaryText] = useState<string | null>(null);
+
+  // Kalendarz trzyma okno zamontowane i podmienia wizytę: pola płatności
+  // zaczynają od nowa dla innej wizyty (zmiana stanu w renderze zamiast
+  // efektu — wzorzec z dokumentacji Reacta).
+  const [formAppointmentId, setFormAppointmentId] = useState(appointment.id);
+  if (formAppointmentId !== appointment.id) {
+    setFormAppointmentId(appointment.id);
+    setPaidAmount(initialPaidAmount);
+    setPaymentMethod(null);
+    setFieldErrors({});
+  }
 
   const handleGenerateAISummary = async () => {
     setGeneratingSummary(true);
@@ -163,6 +258,15 @@ export function CompleteAppointmentDialog({
   };
 
   const handleComplete = async () => {
+    // Sprawdzenie przed wysłaniem: przy błędzie żądanie nie wychodzi, a tekst
+    // stoi pod polem. Okno nigdy nie wysyła pustej kwoty ani pustej metody.
+    const amountCheck = checkPaidAmount(paidAmount);
+    const errors: PaymentFieldErrors = {};
+    if (!amountCheck.ok) errors.paidAmount = amountCheck.error;
+    if (paymentMethod === null) errors.paymentMethod = COMPLETE_MESSAGES.paymentMethodRequired;
+    setFieldErrors(errors);
+    if (!amountCheck.ok || paymentMethod === null) return;
+
     setCompleting(true);
     try {
       const res = await mutationFetch(
@@ -174,24 +278,48 @@ export function CompleteAppointmentDialog({
             recipe: recipe || null,
             techniques: techniques || null,
             notes: notes || null,
-            commissionPercentage: commPct,
+            paidAmount: amountCheck.value,
+            paymentMethod,
+            // Stawkę dla tej wizyty podaje tylko właściciel; inne role nie
+            // wysyłają pola, więc serwer liczy prowizję według stawki pracownika.
+            ...(isOwner ? { commissionPercentage: commPct } : {}),
           }),
         }
       );
 
       const data = await res.json();
       if (data.success) {
-        toast.success("Wizyta zakonczona pomyslnie");
+        toast.success(COMPLETE_MESSAGES.success);
         setCompletedSuccessfully(true);
         onCompleted();
-      } else {
-        toast.error(data.error || "Nie udalo sie zakonczyc wizyty");
+        return;
       }
+      // 400 z walidacji: teksty pól pod polami, ogólny tekst w toaście.
+      // Okno zostaje otwarte z wpisanymi danymi.
+      const details: Record<string, unknown> =
+        data.details && typeof data.details === "object" ? data.details : {};
+      const serverErrors: PaymentFieldErrors = {};
+      if (typeof details.paidAmount === "string") serverErrors.paidAmount = details.paidAmount;
+      if (typeof details.paymentMethod === "string") serverErrors.paymentMethod = details.paymentMethod;
+      setFieldErrors(serverErrors);
+      toast.error(typeof data.error === "string" && data.error ? data.error : COMPLETE_FAILED_MESSAGE);
     } catch {
-      toast.error("Blad podczas konczenia wizyty");
+      toast.error(COMPLETE_FAILED_MESSAGE);
     } finally {
       setCompleting(false);
     }
+  };
+
+  const resetForm = () => {
+    setCompletedSuccessfully(false);
+    setRecipe("");
+    setTechniques("");
+    setNotes("");
+    setCommissionPercentage(String(DEFAULT_COMMISSION_RATE));
+    setPaidAmount(initialPaidAmount);
+    setPaymentMethod(null);
+    setFieldErrors({});
+    setAiSummaryText(null);
   };
 
   const handleScheduleNext = () => {
@@ -210,14 +338,7 @@ export function CompleteAppointmentDialog({
 
     onOpenChange(false);
     // Reset state after closing
-    setTimeout(() => {
-      setCompletedSuccessfully(false);
-      setRecipe("");
-      setTechniques("");
-      setNotes("");
-      setCommissionPercentage("50");
-      setAiSummaryText(null);
-    }, 300);
+    setTimeout(resetForm, 300);
 
     onScheduleNext(data);
   };
@@ -225,14 +346,16 @@ export function CompleteAppointmentDialog({
   const handleClose = () => {
     onOpenChange(false);
     // Reset state after closing
-    setTimeout(() => {
-      setCompletedSuccessfully(false);
-      setRecipe("");
-      setTechniques("");
-      setNotes("");
-      setCommissionPercentage("50");
-      setAiSummaryText(null);
-    }, 300);
+    setTimeout(resetForm, 300);
+  };
+
+  // Zamknięcie formularza (Esc, klik poza oknem, Anuluj) też czyści pola.
+  const handleFormOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      onOpenChange(true);
+      return;
+    }
+    handleClose();
   };
 
   // Show success state with "Schedule Next" prompt
@@ -376,7 +499,7 @@ export function CompleteAppointmentDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleFormOpenChange}>
       <DialogContent
         className="max-w-lg max-h-[90vh] overflow-y-auto"
         data-testid="complete-appointment-dialog"
@@ -415,6 +538,93 @@ export function CompleteAppointmentDialog({
                 {appointment.employee.lastName}
               </p>
             )}
+          </div>
+
+          <Separator />
+
+          {/* Płatność — wymagana dla każdej roli */}
+          <div className="space-y-4" data-testid="payment-section">
+            <div>
+              <Label htmlFor="paid-amount">
+                Kwota zapłacona przez klienta (zł)
+                <span aria-hidden="true" className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="paid-amount"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                required
+                aria-required="true"
+                aria-invalid={fieldErrors.paidAmount ? true : undefined}
+                aria-describedby={fieldErrors.paidAmount ? "paid-amount-error" : undefined}
+                value={paidAmount}
+                onChange={(e) => {
+                  setPaidAmount(e.target.value);
+                  setFieldErrors((prev) => ({ ...prev, paidAmount: undefined }));
+                }}
+                placeholder="np. 120,00"
+                data-testid="paid-amount-input"
+              />
+              {fieldErrors.paidAmount && (
+                <p
+                  id="paid-amount-error"
+                  className="mt-1 text-sm text-destructive"
+                  data-testid="paid-amount-error"
+                >
+                  {fieldErrors.paidAmount}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <p id="payment-method-label" className="text-sm font-medium leading-none mb-2">
+                Metoda płatności
+                <span aria-hidden="true" className="text-destructive">*</span>
+              </p>
+              <div
+                role="radiogroup"
+                aria-labelledby="payment-method-label"
+                aria-required="true"
+                aria-invalid={fieldErrors.paymentMethod ? true : undefined}
+                aria-describedby={fieldErrors.paymentMethod ? "payment-method-error" : undefined}
+                className="flex flex-wrap gap-2"
+                data-testid="payment-method-group"
+              >
+                {PAYMENT_METHOD_OPTIONS.map((option) => (
+                  <label
+                    key={option.value}
+                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+                  >
+                    <input
+                      type="radio"
+                      name="payment-method"
+                      value={option.value}
+                      checked={paymentMethod === option.value}
+                      onChange={() => {
+                        setPaymentMethod(option.value);
+                        setFieldErrors((prev) => ({ ...prev, paymentMethod: undefined }));
+                      }}
+                      data-testid={`payment-method-${option.value}`}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+              {fieldErrors.paymentMethod && (
+                <p
+                  id="payment-method-error"
+                  className="mt-1 text-sm text-destructive"
+                  data-testid="payment-method-error"
+                >
+                  {fieldErrors.paymentMethod}
+                </p>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground" data-testid="receipt-notice">
+              {RECEIPT_NOTICE}
+            </p>
           </div>
 
           <Separator />
@@ -463,93 +673,98 @@ export function CompleteAppointmentDialog({
             </div>
           </div>
 
-          <Separator />
+          {/* Materiały z kosztem i prowizja — tylko właściciel */}
+          {isOwner && (
+            <>
+              <Separator />
 
-          {/* Materials summary */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Package className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">
-                Uzyte materialy ({materials.length})
-              </h3>
-            </div>
-            {materials.length === 0 ? (
-              <p className="text-sm text-muted-foreground italic">
-                Brak dodanych materialow
-              </p>
-            ) : (
-              <div className="space-y-1">
-                {materials.map((m) => (
-                  <div
-                    key={m.id}
-                    className="flex justify-between text-sm"
-                  >
-                    <span>
-                      {m.product?.name || "Nieznany"} ({m.quantityUsed}{" "}
-                      {m.product?.unit || "szt."})
-                    </span>
-                    {m.product?.pricePerUnit && (
-                      <span className="text-muted-foreground">
-                        {(
-                          parseFloat(m.quantityUsed) *
-                          parseFloat(m.product.pricePerUnit)
-                        ).toFixed(2)}{" "}
-                        PLN
-                      </span>
+              {/* Materials summary */}
+              <div className="space-y-2" data-testid="materials-section">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-primary" />
+                  <h3 className="font-semibold text-sm">
+                    Uzyte materialy ({materials.length})
+                  </h3>
+                </div>
+                {materials.length === 0 ? (
+                  <p className="text-sm text-muted-foreground italic">
+                    Brak dodanych materialow
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {materials.map((m) => (
+                      <div
+                        key={m.id}
+                        className="flex justify-between text-sm"
+                      >
+                        <span>
+                          {m.product?.name || "Nieznany"} ({m.quantityUsed}{" "}
+                          {m.product?.unit || "szt."})
+                        </span>
+                        {m.product?.pricePerUnit && (
+                          <span className="text-muted-foreground">
+                            {(
+                              parseFloat(m.quantityUsed) *
+                              parseFloat(m.product.pricePerUnit)
+                            ).toFixed(2)}{" "}
+                            PLN
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {totalMaterialCost > 0 && (
+                      <div className="flex justify-between text-sm font-medium pt-1 border-t">
+                        <span>Laczny koszt materialow:</span>
+                        <span>{totalMaterialCost.toFixed(2)} PLN</span>
+                      </div>
                     )}
-                  </div>
-                ))}
-                {totalMaterialCost > 0 && (
-                  <div className="flex justify-between text-sm font-medium pt-1 border-t">
-                    <span>Laczny koszt materialow:</span>
-                    <span>{totalMaterialCost.toFixed(2)} PLN</span>
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          <Separator />
+              <Separator />
 
-          {/* Commission section */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Prowizja pracownika</h3>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <Label htmlFor="commission-pct">Procent prowizji (%)</Label>
-                <Input
-                  id="commission-pct"
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={commissionPercentage}
-                  onChange={(e) => setCommissionPercentage(e.target.value)}
-                  data-testid="commission-percentage-input"
-                />
-              </div>
-              <div className="flex-1">
-                <Label>Kwota prowizji</Label>
-                <div
-                  className="h-9 flex items-center px-3 rounded-md border bg-muted text-sm font-medium"
-                  data-testid="commission-amount-display"
-                >
-                  {commissionAmount.toFixed(2)} PLN
+              {/* Commission section */}
+              <div className="space-y-3" data-testid="commission-section">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-primary" />
+                  <h3 className="font-semibold text-sm">Prowizja pracownika</h3>
                 </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <Label htmlFor="commission-pct">Procent prowizji (%)</Label>
+                    <Input
+                      id="commission-pct"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={commissionPercentage}
+                      onChange={(e) => setCommissionPercentage(e.target.value)}
+                      data-testid="commission-percentage-input"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Label>Kwota prowizji</Label>
+                    <div
+                      className="h-9 flex items-center px-3 rounded-md border bg-muted text-sm font-medium"
+                      data-testid="commission-amount-display"
+                    >
+                      {commissionAmount.toFixed(2)} PLN
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Cena uslugi: {servicePrice.toFixed(2)} PLN x{" "}
+                  {commPct.toFixed(0)}% = {commissionAmount.toFixed(2)} PLN
+                </p>
               </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Cena uslugi: {servicePrice.toFixed(2)} PLN x{" "}
-              {commPct.toFixed(0)}% = {commissionAmount.toFixed(2)} PLN
-            </p>
-          </div>
+            </>
+          )}
         </div>
 
         <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={handleClose}>
             Anuluj
           </Button>
           <Button
@@ -562,7 +777,7 @@ export function CompleteAppointmentDialog({
             ) : (
               <>
                 <CheckCircle className="h-4 w-4 mr-2" />
-                Potwierdz zakonczenie
+                Zakończ wizytę
               </>
             )}
           </Button>
