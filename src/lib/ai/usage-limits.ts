@@ -11,9 +11,9 @@
  */
 
 import { eq, and, gte, count } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Cost-per-use map keyed by "type:provider"
@@ -95,8 +95,9 @@ export function getAIBudgetLimits(): AIBudgetLimits {
  * @param op      - Optional operation about to be performed; "image" / "banner"
  *                  additionally enforce the per-unit monthly cap.
  *
- * Fail-open: on a DB error the check returns `allowed: true` (with a warning
- * logged) so transient DB issues never take down all AI features.
+ * Fail-open: on a DB error (or an empty salonId) the check returns
+ * `allowed: true` (with a warning logged) so transient DB issues never take
+ * down all AI features.
  */
 export async function checkAIBudget(
   salonId: string,
@@ -110,21 +111,25 @@ export async function checkAIBudget(
 
   let usage: AIBudgetUsage = { totalCostUSD: 0, imageCount: 0 };
 
+  // `forSalon` w `try`: pusty salonId rzuca synchronicznie i ma dać ten sam
+  // fail-open co błąd bazy, a nie wyjątek u wołającego.
   try {
-    const stats = await db
-      .select({
-        type: aiGeneratedMedia.type,
-        provider: aiGeneratedMedia.provider,
-        count: count(),
-      })
-      .from(aiGeneratedMedia)
-      .where(
-        and(
-          eq(aiGeneratedMedia.salonId, salonId),
-          gte(aiGeneratedMedia.createdAt, monthStart),
-        ),
-      )
-      .groupBy(aiGeneratedMedia.type, aiGeneratedMedia.provider);
+    const stats = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          type: aiGeneratedMedia.type,
+          provider: aiGeneratedMedia.provider,
+          count: count(),
+        })
+        .from(aiGeneratedMedia)
+        .where(
+          and(
+            eq(aiGeneratedMedia.salonId, salonId),
+            gte(aiGeneratedMedia.createdAt, monthStart),
+          ),
+        )
+        .groupBy(aiGeneratedMedia.type, aiGeneratedMedia.provider),
+    );
 
     let totalCostUSD = 0;
     let imageCount = 0;

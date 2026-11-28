@@ -4,10 +4,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 // Mocks
 // ────────────────────────────────────────────────────────────
 
-const mockGroupBy = vi.fn();
-
-vi.mock("@/lib/db", () => ({
-  db: {
+const { mockGroupBy, mockForSalon } = vi.hoisted(() => {
+  const mockGroupBy = vi.fn();
+  const tx = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -15,8 +14,22 @@ vi.mock("@/lib/db", () => ({
         })),
       })),
     })),
-  },
+  };
+  // Atrapa bramy: jak prawdziwa rzuca synchronicznie przy pustym salonId,
+  // a zapytanie dostaje klienta transakcyjnego (`tx`), nie surowe `db`.
+  const mockForSalon = vi.fn((salonId: string) => {
+    if (!salonId) throw new Error("repository.forSalon: salonId wymagany");
+    return { salonId, raw: (fn: (t: typeof tx) => unknown) => fn(tx) };
+  });
+  return { mockGroupBy, mockForSalon };
+});
+
+vi.mock("@/lib/server/repository", () => ({
+  forSalon: (salonId: string) => mockForSalon(salonId),
 }));
+
+// Surowe `db` bez metod: odczyt z pominięciem `forSalon` nie trafi do atrapy.
+vi.mock("@/lib/db", () => ({ db: {} }));
 
 vi.mock("@/lib/logger", () => ({
   logger: {
@@ -194,6 +207,28 @@ describe("checkAIBudget", () => {
       imageCount: 0,
     });
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("odczyt idzie przez forSalon z salonId sprawdzanego salonu, raz", async () => {
+    mockUsageRows([{ type: "text", provider: "openrouter", count: 100 }]);
+
+    const result = await checkAIBudget(SALON_ID);
+
+    expect(mockForSalon).toHaveBeenCalledTimes(1);
+    expect(mockForSalon).toHaveBeenCalledWith(SALON_ID);
+    expect(result.usage.totalCostUSD).toBe(0.2);
+  });
+
+  it("pusty salonId: fail-open bez wyjątku, bez zapytania", async () => {
+    const result = await checkAIBudget("", "image");
+
+    expect(result.allowed).toBe(true);
+    expect(result.usage).toEqual({ totalCostUSD: 0, imageCount: 0 });
+    expect(mockGroupBy).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      "[AI Budget] Failed to compute usage — failing open",
+      expect.objectContaining({ salonId: "" }),
+    );
   });
 });
 

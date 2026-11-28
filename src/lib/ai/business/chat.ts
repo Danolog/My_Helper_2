@@ -9,9 +9,6 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
 import { firstNameForReply } from "@/lib/ai/client-context";
-// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
- 
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
   appointments,
@@ -22,6 +19,7 @@ import {
   products,
   salons,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Industry-specific context for AI assistant
@@ -245,15 +243,22 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   try {
+    // Wszystkie odczyty w kontekście RLS salonu; `forSalon` w `try`, bo przy
+    // pustym salonId rzuca synchronicznie (wtedy komunikat o braku danych).
+    // Warunki `eq(...salonId, salonId)` zostają jako druga warstwa.
+    const scoped = forSalon(salonId);
+
     // Fetch salon info first
-    const salonInfo = await db
-      .select({
-        name: salons.name,
-        industryType: salons.industryType,
-      })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .then((r) => r[0] ?? { name: "Salon", industryType: null });
+    const salonInfo = await scoped.raw((tx) =>
+      tx
+        .select({
+          name: salons.name,
+          industryType: salons.industryType,
+        })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .then((r) => r[0] ?? { name: "Salon", industryType: null }),
+    );
 
     const [
       totalClients,
@@ -266,14 +271,14 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
       avgRatingResult,
       lowStockItems,
       revenueResult,
-    ] = await Promise.all([
-      db
+    ] = await scoped.raw((tx) => Promise.all([
+      tx
         .select({ count: count() })
         .from(clients)
         .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
-      db
+      tx
         .select({ count: count() })
         .from(employees)
         .where(
@@ -284,7 +289,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         )
         .then((r) => r[0]?.count ?? 0),
 
-      db
+      tx
         .select({ count: count() })
         .from(services)
         .where(
@@ -295,7 +300,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         )
         .then((r) => r[0]?.count ?? 0),
 
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -306,7 +311,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         )
         .then((r) => r[0]?.count ?? 0),
 
-      db
+      tx
         .select({
           status: appointments.status,
           count: count(),
@@ -320,7 +325,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         )
         .groupBy(appointments.status),
 
-      db
+      tx
         .select({
           serviceName: services.name,
           servicePrice: services.basePrice,
@@ -338,7 +343,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         .orderBy(desc(count()))
         .limit(5),
 
-      db
+      tx
         .select({
           firstName: employees.firstName,
           lastName: employees.lastName,
@@ -356,7 +361,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         .orderBy(desc(count()))
         .limit(5),
 
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -373,7 +378,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
           total: r[0]?.count ?? 0,
         })),
 
-      db
+      tx
         .select({
           name: products.name,
           quantity: products.quantity,
@@ -389,7 +394,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
         )
         .limit(10),
 
-      db
+      tx
         .select({
           total:
             sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
@@ -404,7 +409,7 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
           ),
         )
         .then((r) => parseFloat(r[0]?.total ?? "0")),
-    ]);
+    ]));
 
     // Build status breakdown string
     const statusMap: Record<string, number> = {};
