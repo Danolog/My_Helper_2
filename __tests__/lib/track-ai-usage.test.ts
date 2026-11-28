@@ -44,16 +44,24 @@ describe("trackAIUsage", () => {
     vi.clearAllMocks();
   });
 
-  it("defaults to text/openrouter (backward compatible)", async () => {
+  it("defaults to text/vertex (new records go to the Vertex AI cost key)", async () => {
     await trackAIUsage("salon-1", "search");
 
     expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         salonId: "salon-1",
         type: "text",
-        provider: "openrouter",
+        provider: "vertex",
         prompt: "search",
       }),
+    );
+  });
+
+  it("explicit openrouter provider is still accepted (historical key)", async () => {
+    await trackAIUsage("salon-1", "search", {}, { provider: "openrouter" });
+
+    expect(mockValues).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "text", provider: "openrouter" }),
     );
   });
 
@@ -117,7 +125,7 @@ describe("trackAIUsage", () => {
       expect(context).toEqual({
         salonId: "salon-1",
         type: String(options.type ?? "text"),
-        provider: String(options.provider ?? "openrouter"),
+        provider: String(options.provider ?? "vertex"),
       });
       expect(JSON.stringify(context)).not.toContain("treść żądania");
     });
@@ -147,6 +155,7 @@ describe("trackAIUsage", () => {
     it("allowlista nie zawiera wideo ani Veo", () => {
       expect([...TRACKED_AI_USAGE_TYPES]).toEqual(["text", "image", "banner"]);
       expect([...TRACKED_AI_USAGE_PROVIDERS]).toEqual([
+        "vertex",
         "openrouter",
         "google_imagen",
         "sharp",

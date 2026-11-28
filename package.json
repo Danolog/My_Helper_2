@@ -33,6 +33,7 @@
     "logs:read": "tsx scripts/logs/read.ts"
   },
   "dependencies": {
+    "@ai-sdk/google-vertex": "3.0.195",
     "@ai-sdk/react": "^2.0.125",
     "@google-cloud/storage": "^9.0.0",
     "@google/genai": "^1.46.0",

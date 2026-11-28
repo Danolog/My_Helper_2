@@ -244,4 +244,10 @@ describe("COST_MAP", () => {
     expect(COST_MAP["image:sharp"]).toBe(0);
     expect(COST_MAP["text:openrouter"]).toBe(0.002);
   });
+
+  it("text:vertex is an overstated estimate, above the old text cost and the default", () => {
+    expect(COST_MAP["text:vertex"]).toBe(0.03);
+    expect(COST_MAP["text:vertex"]!).toBeGreaterThan(COST_MAP["text:openrouter"]!);
+    expect(COST_MAP["text:vertex"]!).toBeGreaterThan(DEFAULT_COST_PER_USE);
+  });
 });

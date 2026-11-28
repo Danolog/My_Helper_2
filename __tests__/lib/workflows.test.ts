@@ -48,6 +48,18 @@ function triggers(yaml: string): string[] {
   return [...block[1]!.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]!);
 }
 
+/**
+ * Zmienne klasy `var`, które w workflow biorą wartość z innej zmiennej repo niż
+ * ich własna nazwa. Jeden wpis: projekt Vertex AI to ten sam projekt GCP, do
+ * którego wdrażamy, więc nie zakładamy osobnej zmiennej repo z tą samą wartością.
+ * Każda inna zmienna `var` nadal wymaga linii `NAZWA: ${{ vars.NAZWA }}`.
+ * Mutacje: alias w workflow na `vars.GCP_REGION` → czerwony; drugi wpis w mapie
+ * bez odpowiadającej linii w workflow → czerwony.
+ */
+const VAR_ALIASES: Readonly<Record<string, string>> = {
+  GOOGLE_VERTEX_PROJECT: "GCP_PROJECT_ID",
+};
+
 /** Jedyna nazwa środowiska wdrożeń Cloud Run (decyzja produktowa 15:52). */
 const DEPLOY_ENVIRONMENT = "production-gcp";
 
@@ -191,8 +203,24 @@ describe("G-C6: deploy-cloud-run.yml", () => {
       .filter(([, e]) => e.class === "var")
       .map(([n]) => n);
     for (const name of vars) {
-      expect(DEPLOY, name).toMatch(new RegExp(`^\\s+${name}: \\$\\{\\{ vars\\.${name} \\}\\}$`, "m"));
+      const source = VAR_ALIASES[name] ?? name;
+      expect(DEPLOY, name).toMatch(new RegExp(`^\\s+${name}: \\$\\{\\{ vars\\.${source} \\}\\}$`, "m"));
     }
+  });
+
+  it("alias zmiennej repo: tylko dla zmiennej klasy var, z linią w kroku wdrożenia", () => {
+    const deployStep = code(DEPLOY).slice(code(DEPLOY).indexOf("- name: Deploy new revision without traffic"));
+    for (const [name, source] of Object.entries(VAR_ALIASES)) {
+      expect(MANIFEST.variables[name]?.class, name).toBe("var");
+      expect(deployStep, name).toMatch(new RegExp(`^\\s+${name}: \\$\\{\\{ vars\\.${source} \\}\\}$`, "m"));
+      // alias nie zastępuje zmiennej repo o tej samej nazwie — nie ma jej w workflow
+      expect(code(DEPLOY), name).not.toContain(`vars.${name}`);
+    }
+  });
+
+  it("OPENROUTER_MODEL nie jest już przekazywana do usługi", () => {
+    expect(MANIFEST.variables.OPENROUTER_MODEL?.class).toBe("vercel-only");
+    expect(code(DEPLOY)).not.toContain("OPENROUTER_MODEL");
   });
 
   it("nic spoza klas secret/var/build nie jest przekazywane do workflow", () => {

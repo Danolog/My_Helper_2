@@ -32,7 +32,7 @@ function codeOnly(text: string): string {
 
 /** Wywołanie albo import modelu (ten sam wzorzec co w strażniku bramki tras AI). */
 const MODEL_CALL =
-  /\b(generateText|streamText|generateObject|streamObject|generateImage|streamBusinessChat|createAIClient|createOpenRouter)\s*\(|\bfrom\s*["'`](ai|@openrouter\/ai-sdk-provider|@google\/genai|@ai-sdk\/[^"'`]+)["'`]/;
+  /\b(generateText|streamText|generateObject|streamObject|generateImage|streamBusinessChat|createAIClient|createOpenRouter|getChatModel)\s*\(|\bfrom\s*["'`](ai|@openrouter\/ai-sdk-provider|@google\/genai|@ai-sdk\/[^"'`]+)["'`]/;
 const ALLERGIES = /allerg(y|ies)/i;
 const LAST_NAME = /last_?name/i;
 

@@ -34,7 +34,7 @@ export function codeOnly(text: string): string {
 
 /** Wywołanie albo import modelu (SDK AI, dostawca, helpery wołające model). */
 export const MODEL_CALL =
-  /\b(generateText|streamText|generateObject|streamObject|generateImage|streamBusinessChat|createAIClient|createOpenRouter)\s*\(|\bfrom\s*["'`](ai|@openrouter\/ai-sdk-provider|@google\/genai|@ai-sdk\/[^"'`]+)["'`]/;
+  /\b(generateText|streamText|generateObject|streamObject|generateImage|streamBusinessChat|createAIClient|createOpenRouter|getChatModel)\s*\(|\bfrom\s*["'`](ai|@openrouter\/ai-sdk-provider|@google\/genai|@ai-sdk\/[^"'`]+)["'`]/;
 const REQUIRE_PRO_AI = /\brequireProAI\s*\(/;
 const REQUIRE_PRO_PLAN = /\brequireProPlan\s*\(/;
 const IS_PRO_PLAN = /\bisProPlan\s*\(/;
@@ -150,6 +150,7 @@ describe("strażnik bramki tras AI", () => {
       `import { GoogleGenAI } from "@google/genai";`,
       `const img = await generateImage(prompt);`,
       `return streamBusinessChat({ salonId, apiKey, messages });`,
+      `const model = getChatModel();`,
     ]) {
       expect(MODEL_CALL.test(sample), sample).toBe(true);
     }

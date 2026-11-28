@@ -138,6 +138,7 @@ export function isParseError(result: unknown): result is Response {
  */
 export const TRACKED_AI_USAGE_TYPES = ["text", "image", "banner"] as const;
 export const TRACKED_AI_USAGE_PROVIDERS = [
+  "vertex",
   "openrouter",
   "google_imagen",
   "sharp",
@@ -165,7 +166,7 @@ export async function trackAIUsage(
   options?: { type?: TrackedAIUsageType; provider?: TrackedAIUsageProvider },
 ): Promise<void> {
   const type: unknown = options?.type ?? "text";
-  const provider: unknown = options?.provider ?? "openrouter";
+  const provider: unknown = options?.provider ?? "vertex";
   if (
     !(TRACKED_AI_USAGE_TYPES as readonly unknown[]).includes(type) ||
     !(TRACKED_AI_USAGE_PROVIDERS as readonly unknown[]).includes(provider)

@@ -19,9 +19,9 @@ const serverEnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
 
-  // AI (Pro plan only)
-  OPENROUTER_API_KEY: z.string().optional(),
-  OPENROUTER_MODEL: z.string().default("anthropic/claude-sonnet-4"),
+  // AI (Pro plan only): projekt GCP dla Vertex AI. Opcjonalny — bez niego
+  // aplikacja startuje, a funkcje AI odpowiadają AI_UNAVAILABLE (getChatModel()).
+  GOOGLE_VERTEX_PROJECT: z.string().optional(),
 
   // Storage (sterownik: lib/storage.resolveStorageDriver)
   STORAGE_DRIVER: z.string().optional(),
@@ -124,8 +124,8 @@ export function checkEnv(): void {
     warnings.push("Google OAuth is not configured. Social login will be disabled.");
   }
 
-  if (!process.env.OPENROUTER_API_KEY) {
-    warnings.push("OPENROUTER_API_KEY is not set. AI chat will not work.");
+  if (!process.env.GOOGLE_VERTEX_PROJECT) {
+    warnings.push("GOOGLE_VERTEX_PROJECT is not set. AI features will return AI_UNAVAILABLE.");
   }
 
   try {

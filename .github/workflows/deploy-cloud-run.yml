@@ -174,7 +174,8 @@ jobs:
           SMSAPI_SENDER: ${{ vars.SMSAPI_SENDER }}
           VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
           UPSTASH_REDIS_REST_URL: ${{ vars.UPSTASH_REDIS_REST_URL }}
-          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          # Projekt Vertex AI = projekt wdrożenia; bez osobnej zmiennej repo.
+          GOOGLE_VERTEX_PROJECT: ${{ vars.GCP_PROJECT_ID }}
           DB_POOL_MAX: ${{ vars.DB_POOL_MAX }}
           MYHELPER_APP_DB_ROLE: ${{ vars.MYHELPER_APP_DB_ROLE }}
           COMPANY_NAME: ${{ vars.COMPANY_NAME }}

@@ -31,7 +31,17 @@ export const COST_MAP: Record<string, number> = {
   // (`ai_generated_media.type = 'video'`): bez niego budżet bieżącego miesiąca
   // i raport GET /api/ai/usage liczyłyby je po DEFAULT_COST_PER_USE.
   "video:google_veo": 0.15,
-  // Text AI costs (OpenRouter — Claude Sonnet)
+  // Text AI: Gemini 3.8 Flash na Vertex AI (`eu`). Szacunek celowo zawyżony:
+  // cennik Vertex AI (cloud.google.com/vertex-ai/generative-ai/pricing, odczyt
+  // 2026-11-28), stawka od 2027-01-01 (wyższa od obecnej promocyjnej):
+  // 1,50 USD / 1M tokenów wejścia, 7,50 USD / 1M tokenów wyjścia (myślenie liczy
+  // się jako wyjście). Wejście: ~8000 tokenów (prompt systemowy z danymi
+  // `gatherSalonData` i kilka wiadomości rozmowy) × 1,50e-6 = 0,012 USD.
+  // Wyjście: pełne `maxOutputTokens` czatu, 2000 × 7,50e-6 = 0,015 USD.
+  // Razem 0,027 USD, w górę do 0,03. Do korekty po testach na żywo, przed
+  // otwarciem AI dla salonów.
+  "text:vertex": 0.03,
+  // Tylko dane historyczne: wiersze z czasów OpenRoutera (Claude Sonnet).
   "text:openrouter": 0.002,
 };
 
