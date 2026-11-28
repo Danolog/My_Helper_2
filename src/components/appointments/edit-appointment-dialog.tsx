@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Pencil, User, Scissors, Clock, AlertTriangle, Bell } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Pencil, User, Scissors, Clock, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -119,6 +118,26 @@ export const ASSIGNMENT_CHANGED_DESCRIPTION =
 /** Ponowny odczyt wizyty się nie udał: własny tekst okna, nie `error` z odpowiedzi GET. */
 export const RELOAD_FAILED_DESCRIPTION =
   "Nie udało się wczytać aktualnych danych wizyty. Odśwież stronę i spróbuj ponownie.";
+export const UPDATED_TITLE = "Wizyta została zaktualizowana";
+export const UPDATE_NETWORK_ERROR = "Błąd podczas aktualizacji wizyty";
+export const NO_CLIENT_LABEL = "Bez klienta";
+export const NO_SERVICE_LABEL = "Bez usługi";
+
+/** Lokalna data (RRRR-MM-DD) i godzina (GG:MM) chwili zapisanej w wizycie. */
+function localDateAndTime(iso: string): { date: string; time: string } {
+  const d = new Date(iso);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}` };
+}
+
+/** Zapisany czas trwania wizyty w milisekundach. */
+function savedDurationMs(appt: { startTime: string; endTime: string }): number {
+  return new Date(appt.endTime).getTime() - new Date(appt.startTime).getTime();
+}
 
 interface ApiResponse {
   success?: boolean;
@@ -152,16 +171,26 @@ export function EditAppointmentDialog({
   // Wizyta z ponownego odczytu po 403 przypisania; null = dane z `appointment`.
   const [reloaded, setReloaded] = useState<AppointmentData | null>(null);
   const current = reloaded ?? appointment;
+  // Wizyta zakończona: termin się nie zmienia (serwer odrzuca każdą zmianę
+  // terminu), okno zapisuje tylko notatkę.
+  const termLocked = current.status === COMPLETED_STATUS;
 
   // Form state
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [selectedVariantId, setSelectedVariantId] = useState("");
+  // Wariant wybrany w oknie na nowo (także „Wariant podstawowy”). Okno nie
+  // zna zapisanego wariantu, więc bez tego wyboru czas trwania zostaje z wizyty.
+  const [variantChosen, setVariantChosen] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("");
   const [notes, setNotes] = useState("");
-  const [notifyClient, setNotifyClient] = useState(false);
+
+  // Wizyta, dla której formularz jest wypełniony (null = okno zamknięte).
+  const populatedFor = useRef<string | null>(null);
+  // Trwający ponowny odczyt wizyty; przerywany przy zamknięciu okna.
+  const reloadAbort = useRef<AbortController | null>(null);
 
   // Data lists
   const [clients, setClients] = useState<Client[]>([]);
@@ -194,28 +223,35 @@ export function EditAppointmentDialog({
     });
   };
 
-  // Populate form with appointment data when dialog opens
+  // Formularz wypełnia się przy otwarciu okna albo przy innej wizycie.
+  // Nowy obiekt tej samej wizyty przy otwartym oknie (np. synchronizacja kart)
+  // nie nadpisuje wpisanego terminu i notatki.
   useEffect(() => {
-    if (open && appointment) {
-      setReloaded(null);
-      setSelectedClientId(appointment.clientId || "none");
-      setSelectedServiceId(appointment.serviceId || "none");
-      setSelectedEmployeeId(appointment.employeeId);
-      setNotes(appointment.notes || "");
-      setNotifyClient(false);
-      setFieldErrors({});
-
-      const start = new Date(appointment.startTime);
-      const yyyy = start.getFullYear();
-      const mm = String(start.getMonth() + 1).padStart(2, "0");
-      const dd = String(start.getDate()).padStart(2, "0");
-      setAppointmentDate(`${yyyy}-${mm}-${dd}`);
-
-      const hh = String(start.getHours()).padStart(2, "0");
-      const min = String(start.getMinutes()).padStart(2, "0");
-      setAppointmentTime(`${hh}:${min}`);
+    if (!open) {
+      populatedFor.current = null;
+      return;
     }
+    if (populatedFor.current === appointment.id) return;
+    populatedFor.current = appointment.id;
+
+    setReloaded(null);
+    setSelectedClientId(appointment.clientId || "none");
+    setSelectedServiceId(appointment.serviceId || "none");
+    setSelectedEmployeeId(appointment.employeeId);
+    setVariantChosen(false);
+    setNotes(appointment.notes || "");
+    setFieldErrors({});
+
+    const { date, time } = localDateAndTime(appointment.startTime);
+    setAppointmentDate(date);
+    setAppointmentTime(time);
   }, [open, appointment]);
+
+  // Zamknięcie okna (także przez stronę) i odmontowanie przerywają ponowny odczyt.
+  useEffect(() => {
+    if (!open) reloadAbort.current?.abort();
+  }, [open]);
+  useEffect(() => () => reloadAbort.current?.abort(), []);
 
   // Fetch clients
   const fetchClients = useCallback(async () => {
@@ -277,8 +313,9 @@ export function EditAppointmentDialog({
     }
   }, [open, salonId, fetchClients, fetchServices, fetchEmployees]);
 
-  // Fetch variants when service changes
+  // Fetch variants when service changes (wybór wariantu zaczyna się od nowa)
   useEffect(() => {
+    setVariantChosen(false);
     if (selectedServiceId && selectedServiceId !== "none") {
       setLoadingVariants(true);
       setSelectedVariantId("");
@@ -303,7 +340,10 @@ export function EditAppointmentDialog({
 
   // Calculate effective price and duration
   const getEffectivePriceAndDuration = () => {
-    const service = allServices.find((s) => s.id === selectedServiceId);
+    // Usługa nieaktywna nie ma pozycji na liście (activeOnly): dane z wizyty.
+    const service =
+      allServices.find((s) => s.id === selectedServiceId) ??
+      (current.service && current.service.id === selectedServiceId ? current.service : undefined);
     if (!service) return { price: 0, duration: 0 };
 
     let price = parseFloat(service.basePrice);
@@ -332,8 +372,25 @@ export function EditAppointmentDialog({
     );
   });
 
-  // Get selected client
-  const selectedClient = clients.find((c) => c.id === selectedClientId);
+  // Pola przypisania tylko do odczytu: zapis wysyła przypisanie z wizyty,
+  // to samo, które okno pokazuje jako tekst.
+  const employeeIdForSave = assignmentLocked ? current.employeeId : selectedEmployeeId;
+  const clientIdForSave = assignmentLocked
+    ? current.clientId
+    : selectedClientId === "none" ? null : selectedClientId || null;
+  const serviceIdForSave = assignmentLocked
+    ? current.serviceId
+    : selectedServiceId === "none" ? null : selectedServiceId || null;
+
+  // Zmiana samego terminu nie zmienia czasu trwania: z usługi i wariantu
+  // liczy się tylko po zmianie usługi albo ponownym wyborze wariantu.
+  // Pracownik nie zmienia usługi ani wariantu, więc u niego zawsze z wizyty.
+  const keepSavedDuration = serviceIdForSave === current.serviceId && !variantChosen;
+
+  // Get selected client (lista albo, u pracownika i przy braku na liście, wizyta)
+  const selectedClient =
+    clients.find((c) => c.id === selectedClientId) ??
+    (current.client && current.client.id === clientIdForSave ? current.client : undefined);
 
   // Wizyty nie ma (usunięta albo przepisana na innego pracownika): zamknięcie
   // okna i odświeżenie widoku zamiast kolejnych prób zapisu.
@@ -343,16 +400,33 @@ export function EditAppointmentDialog({
     (onAppointmentGone ?? onAppointmentUpdated)();
   };
 
+  // Zamknięcie bez zapisu: przerwanie ponownego odczytu, a po udanym odczycie
+  // odświeżenie wizyty na stronie (inaczej strona zostaje ze starymi danymi).
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      reloadAbort.current?.abort();
+      if (reloaded) onAppointmentUpdated();
+    }
+    onOpenChange(next);
+  };
+
   // Ponowny odczyt wizyty po 403 przypisania: pracownik, klient i usługa
   // z bazy, termin i notatka wpisane w oknie zostają, okno zostaje otwarte.
   const reloadAssignment = async () => {
+    reloadAbort.current?.abort();
+    const controller = new AbortController();
+    reloadAbort.current = controller;
+
     let data: ApiResponse | null = null;
     try {
-      const res = await fetch(`/api/appointments/${appointment.id}`);
+      const res = await fetch(`/api/appointments/${appointment.id}`, { signal: controller.signal });
       data = await readJson(res);
     } catch {
       data = null;
     }
+    // Okno zamknięte w trakcie odczytu: bez toasta i bez przejścia dalej.
+    if (controller.signal.aborted) return;
+    reloadAbort.current = null;
 
     if (data?.code === APPOINTMENT_ERROR_CODES.appointmentNotFound) {
       handleGone(data.error);
@@ -368,6 +442,12 @@ export function EditAppointmentDialog({
     setSelectedEmployeeId(fresh.employeeId);
     setSelectedClientId(fresh.clientId || "none");
     setSelectedServiceId(fresh.serviceId || "none");
+    if (fresh.status === COMPLETED_STATUS) {
+      // Termin wizyty zakończonej się nie zmienia: okno pokazuje zapisany.
+      const { date, time } = localDateAndTime(fresh.startTime);
+      setAppointmentDate(date);
+      setAppointmentTime(time);
+    }
     // Listy z otwarcia okna mogą nie mieć nowego klienta albo usługi.
     fetchClients();
     fetchServices();
@@ -379,16 +459,20 @@ export function EditAppointmentDialog({
   const handleSubmit = async () => {
     // Validate required fields
     const errors: Record<string, string> = {};
-    if (!selectedEmployeeId) {
+    if (!employeeIdForSave) {
       errors.employee = "Wybierz pracownika z listy";
     }
-    if (!appointmentDate) {
-      errors.date = "Wybierz date wizyty z kalendarza";
-    } else if (appointmentDate < todayStr) {
-      errors.date = "Data nie moze byc z przeszlosci. Wybierz dzisiejsza lub przyszla date";
-    }
-    if (!appointmentTime) {
-      errors.time = "Wybierz godzine rozpoczecia wizyty";
+    // Wizyta zakończona: termin z zapisu, bez walidacji daty (notatkę wizyty
+    // sprzed północy da się zapisać po północy).
+    if (!termLocked) {
+      if (!appointmentDate) {
+        errors.date = "Wybierz datę wizyty z kalendarza";
+      } else if (appointmentDate < todayStr) {
+        errors.date = "Data nie może być z przeszłości. Wybierz dzisiejszą lub przyszłą datę";
+      }
+      if (!appointmentTime) {
+        errors.time = "Wybierz godzinę rozpoczęcia wizyty";
+      }
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -396,29 +480,35 @@ export function EditAppointmentDialog({
       return;
     }
 
-    // Calculate start and end time
-    const startTime = new Date(`${appointmentDate}T${appointmentTime}:00`);
-    let durationMs: number;
-    if (current.status === COMPLETED_STATUS) {
-      // Wizyta zakończona: czas trwania z zapisanej wizyty, nie z bieżącej
-      // usługi — inaczej sama zmiana notatki po zmianie czasu trwania usługi
-      // przesuwa koniec wizyty i serwer odrzuca zapis.
-      durationMs = new Date(current.endTime).getTime() - new Date(current.startTime).getTime();
+    let startIso: string;
+    let endIso: string;
+    if (termLocked) {
+      // Zapisane chwile bez przeliczania: start z sekundami nie zmienia się
+      // w „GG:MM:00”, więc serwer nie widzi zmiany terminu.
+      startIso = current.startTime;
+      endIso = current.endTime;
     } else {
-      const { duration } = getEffectivePriceAndDuration();
-      const effectiveDuration = duration > 0 ? duration : 60; // Default to 60 min if no service
-      durationMs = effectiveDuration * 60 * 1000;
+      const startTime = new Date(`${appointmentDate}T${appointmentTime}:00`);
+      let durationMs: number;
+      if (keepSavedDuration) {
+        durationMs = savedDurationMs(current);
+      } else {
+        const { duration } = getEffectivePriceAndDuration();
+        const effectiveDuration = duration > 0 ? duration : 60; // Default to 60 min if no service
+        durationMs = effectiveDuration * 60 * 1000;
+      }
+      startIso = startTime.toISOString();
+      endIso = new Date(startTime.getTime() + durationMs).toISOString();
     }
-    const endTime = new Date(startTime.getTime() + durationMs);
 
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
-        employeeId: selectedEmployeeId,
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-        clientId: selectedClientId === "none" ? null : selectedClientId || null,
-        serviceId: selectedServiceId === "none" ? null : selectedServiceId || null,
+        employeeId: employeeIdForSave,
+        startTime: startIso,
+        endTime: endIso,
+        clientId: clientIdForSave,
+        serviceId: serviceIdForSave,
         // Tylko zmienione notatki (#90): wizyta z notatkami ponad limit
         // sprzed #71 da się przesunąć bez 400 za nietknięte pole.
         ...notesChange(notes, appointment.notes),
@@ -441,12 +531,7 @@ export function EditAppointmentDialog({
         // znaczy: okno ma nieaktualną wizytę. Wczytujemy ją ponownie.
         await reloadAssignment();
       } else if (data.success) {
-        const notificationMsg = notifyClient && appointment.client
-          ? "Klient zostanie powiadomiony o zmianie"
-          : undefined;
-        toast.success("Wizyta zostala zaktualizowana", {
-          description: notificationMsg,
-        });
+        toast.success(UPDATED_TITLE);
         onOpenChange(false);
         onAppointmentUpdated();
       } else if (depositsDisabledError) {
@@ -457,21 +542,25 @@ export function EditAppointmentDialog({
         });
       }
     } catch {
-      toast.error("Blad podczas aktualizacji wizyty");
+      toast.error(UPDATE_NETWORK_ERROR);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const { price, duration } = getEffectivePriceAndDuration();
+  const { price, duration: serviceDuration } = getEffectivePriceAndDuration();
+  // Podsumowanie pokazuje czas trwania, z którym okno zapisze wizytę.
+  const duration = keepSavedDuration
+    ? Math.round(savedDurationMs(current) / 60000)
+    : serviceDuration;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="edit-appointment-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Pencil className="h-5 w-5 text-primary" />
-            Edytuj wizyte
+            Edytuj wizytę
           </DialogTitle>
         </DialogHeader>
 
@@ -482,37 +571,43 @@ export function EditAppointmentDialog({
               <User className="h-3.5 w-3.5" />
               Klient
             </Label>
-            <Input
-              placeholder="Szukaj klienta (imie, nazwisko, telefon, email)..."
-              value={clientSearch}
-              onChange={(e) => setClientSearch(e.target.value)}
-              className="mb-2"
-              disabled={assignmentLocked}
-              data-testid="edit-client-search-input"
-            />
-            <Select
-              value={selectedClientId}
-              onValueChange={setSelectedClientId}
-              disabled={assignmentLocked}
-            >
-              <SelectTrigger data-testid="edit-client-select">
-                <SelectValue placeholder={loadingClients ? "Ladowanie klientow..." : "Wybierz klienta (opcjonalnie)"} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Bez klienta</SelectItem>
-                {filteredClients.map((client) => (
-                  <SelectItem key={client.id} value={client.id}>
-                    {client.firstName} {client.lastName}
-                    {client.phone ? ` (${client.phone})` : ""}
-                  </SelectItem>
-                ))}
-                {filteredClients.length === 0 && !loadingClients && (
-                  <div className="py-2 px-3 text-sm text-muted-foreground">
-                    Brak klientow
-                  </div>
-                )}
-              </SelectContent>
-            </Select>
+            {assignmentLocked ? (
+              // Pracownik nie dostaje listy klientów (403): tekst z wizyty.
+              <p className="text-sm font-medium" data-testid="edit-client-readonly">
+                {current.client
+                  ? `${current.client.firstName} ${current.client.lastName}`
+                  : NO_CLIENT_LABEL}
+              </p>
+            ) : (
+              <>
+                <Input
+                  placeholder="Szukaj klienta (imię, nazwisko, telefon, email)..."
+                  value={clientSearch}
+                  onChange={(e) => setClientSearch(e.target.value)}
+                  className="mb-2"
+                  data-testid="edit-client-search-input"
+                />
+                <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                  <SelectTrigger data-testid="edit-client-select">
+                    <SelectValue placeholder={loadingClients ? "Ładowanie klientów..." : "Wybierz klienta (opcjonalnie)"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{NO_CLIENT_LABEL}</SelectItem>
+                    {filteredClients.map((client) => (
+                      <SelectItem key={client.id} value={client.id}>
+                        {client.firstName} {client.lastName}
+                        {client.phone ? ` (${client.phone})` : ""}
+                      </SelectItem>
+                    ))}
+                    {filteredClients.length === 0 && !loadingClients && (
+                      <div className="py-2 px-3 text-sm text-muted-foreground">
+                        Brak klientów
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
 
             {/* Allergy warning */}
             {selectedClient?.allergies && (
@@ -530,38 +625,43 @@ export function EditAppointmentDialog({
           <div>
             <Label className="flex items-center gap-1.5 mb-1.5">
               <Scissors className="h-3.5 w-3.5" />
-              Usluga
+              Usługa
             </Label>
-            <Select
-              value={selectedServiceId}
-              onValueChange={setSelectedServiceId}
-              disabled={assignmentLocked}
-            >
-              <SelectTrigger data-testid="edit-service-select">
-                <SelectValue placeholder={loadingServices ? "Ladowanie uslug..." : "Wybierz usluge (opcjonalnie)"} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Bez uslugi</SelectItem>
-                {allServices.map((service) => (
-                  <SelectItem key={service.id} value={service.id}>
-                    {service.name} - {parseFloat(service.basePrice).toFixed(2)} PLN ({service.baseDuration} min)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {assignmentLocked ? (
+              // Tekst z wizyty, także dla usługi nieaktywnej (lista ma tylko aktywne).
+              <p className="text-sm font-medium" data-testid="edit-service-readonly">
+                {current.service ? current.service.name : NO_SERVICE_LABEL}
+              </p>
+            ) : (
+              <Select value={selectedServiceId} onValueChange={setSelectedServiceId}>
+                <SelectTrigger data-testid="edit-service-select">
+                  <SelectValue placeholder={loadingServices ? "Ładowanie usług..." : "Wybierz usługę (opcjonalnie)"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{NO_SERVICE_LABEL}</SelectItem>
+                  {allServices.map((service) => (
+                    <SelectItem key={service.id} value={service.id}>
+                      {service.name} - {parseFloat(service.basePrice).toFixed(2)} PLN ({service.baseDuration} min)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
-          {/* Variant Selection (conditional) */}
-          {selectedServiceId && selectedServiceId !== "none" && variants.length > 0 && (
+          {/* Variant Selection (conditional; pracownik nie zmienia wariantu) */}
+          {!assignmentLocked && selectedServiceId && selectedServiceId !== "none" && variants.length > 0 && (
             <div>
-              <Label className="mb-1.5 block">Wariant uslugi</Label>
+              <Label className="mb-1.5 block">Wariant usługi</Label>
               <Select
                 value={selectedVariantId}
-                onValueChange={setSelectedVariantId}
-                disabled={assignmentLocked}
+                onValueChange={(val) => {
+                  setSelectedVariantId(val);
+                  setVariantChosen(true);
+                }}
               >
                 <SelectTrigger data-testid="edit-variant-select">
-                  <SelectValue placeholder={loadingVariants ? "Ladowanie wariantow..." : "Wybierz wariant (opcjonalnie)"} />
+                  <SelectValue placeholder={loadingVariants ? "Ładowanie wariantów..." : "Wybierz wariant (opcjonalnie)"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Wariant podstawowy</SelectItem>
@@ -604,36 +704,41 @@ export function EditAppointmentDialog({
               <User className="h-3.5 w-3.5" />
               Pracownik *
             </Label>
-            <Select
-              value={selectedEmployeeId}
-              onValueChange={(val) => {
-                setSelectedEmployeeId(val);
-                if (val) clearFieldError("employee");
-              }}
-              disabled={assignmentLocked}
-            >
-              <SelectTrigger
-                data-testid="edit-employee-select"
-                className={fieldErrors.employee ? "border-destructive" : ""}
+            {assignmentLocked ? (
+              <p className="text-sm font-medium" data-testid="edit-employee-readonly">
+                {current.employee ? `${current.employee.firstName} ${current.employee.lastName}` : ""}
+              </p>
+            ) : (
+              <Select
+                value={selectedEmployeeId}
+                onValueChange={(val) => {
+                  setSelectedEmployeeId(val);
+                  if (val) clearFieldError("employee");
+                }}
               >
-                <SelectValue placeholder={loadingEmployees ? "Ladowanie pracownikow..." : "Wybierz pracownika"} />
-              </SelectTrigger>
-              <SelectContent>
-                {employees.map((emp) => (
-                  <SelectItem key={emp.id} value={emp.id}>
-                    <span className="flex items-center gap-2">
-                      {emp.color && (
-                        <span
-                          className="inline-block w-3 h-3 rounded-full border"
-                          style={{ backgroundColor: emp.color }}
-                        />
-                      )}
-                      {emp.firstName} {emp.lastName}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  data-testid="edit-employee-select"
+                  className={fieldErrors.employee ? "border-destructive" : ""}
+                >
+                  <SelectValue placeholder={loadingEmployees ? "Ładowanie pracowników..." : "Wybierz pracownika"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      <span className="flex items-center gap-2">
+                        {emp.color && (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full border"
+                            style={{ backgroundColor: emp.color }}
+                          />
+                        )}
+                        {emp.firstName} {emp.lastName}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {fieldErrors.employee && (
               <p className="text-sm text-destructive mt-1" data-testid="error-edit-employee">
                 {fieldErrors.employee}
@@ -653,6 +758,7 @@ export function EditAppointmentDialog({
                   type="date"
                   value={appointmentDate}
                   min={todayStr}
+                  disabled={termLocked}
                   onChange={(e) => {
                     setAppointmentDate(e.target.value);
                     if (e.target.value) clearFieldError("date");
@@ -676,6 +782,7 @@ export function EditAppointmentDialog({
                     if (e.target.value) clearFieldError("time");
                   }}
                   step="900"
+                  disabled={termLocked}
                   aria-invalid={!!fieldErrors.time}
                   className={fieldErrors.time ? "border-destructive" : ""}
                   data-testid="edit-appointment-time-input"
@@ -691,54 +798,29 @@ export function EditAppointmentDialog({
 
           {/* Notes */}
           <div>
-            <Label className="mb-1.5 block">Notatki wewnetrzne</Label>
+            <Label className="mb-1.5 block">Notatki wewnętrzne</Label>
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               maxLength={APPOINTMENT_NOTES_MAX_LENGTH}
-              placeholder="Notatki wewnetrzne dla personelu (np. preferencje klienta, uwagi, szczegoly zabiegu)..."
+              placeholder="Notatki wewnętrzne dla personelu (np. preferencje klienta, uwagi, szczegóły zabiegu)..."
               className="min-h-[80px]"
               data-testid="edit-appointment-notes-input"
             />
           </div>
-
-          {/* Notify client option */}
-          {current.client && (
-            <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30" data-testid="notify-client-section">
-              <Checkbox
-                id="notify-client"
-                checked={notifyClient}
-                onCheckedChange={(checked) => setNotifyClient(checked === true)}
-                data-testid="notify-client-checkbox"
-              />
-              <div className="flex-1">
-                <label
-                  htmlFor="notify-client"
-                  className="text-sm font-medium flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Bell className="h-3.5 w-3.5 text-primary" />
-                  Powiadom klienta o zmianach
-                </label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {current.client.firstName} {current.client.lastName}
-                  {current.client.phone ? ` - ${current.client.phone}` : ""}
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         <DialogFooter className="mt-4">
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             data-testid="cancel-edit-btn"
           >
             Anuluj
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || !selectedEmployeeId || !appointmentDate || !appointmentTime}
+            disabled={submitting || !employeeIdForSave || !appointmentDate || !appointmentTime}
             data-testid="save-edit-btn"
           >
             {submitting ? "Zapisywanie..." : "Zapisz zmiany"}
