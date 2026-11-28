@@ -137,12 +137,6 @@ function changedAssignmentFields(
   return changed.filter((field) => (ASSIGNMENT_FIELDS as readonly string[]).includes(field));
 }
 
-/**
- * Stały tekst śladu w logu: anulowanie wizyty jest zatwierdzone w bazie, a krok
- * po nim się nie wykonał. Bez kwoty i bez treści błędu.
- */
-const CANCEL_COMMITTED_STEP_SKIPPED = "[Appointments API] anulowanie zatwierdzone, skutek pominięty";
-
 /** Kroki DELETE po zatwierdzeniu anulowania (nazwa w śladzie w logu). */
 type CancelFollowUpStep =
   | "expire_checkout_sessions"
@@ -151,6 +145,20 @@ type CancelFollowUpStep =
   | "sms"
   | "notification"
   | "waiting_list";
+
+/**
+ * Stały tekst śladu w logu: anulowanie wizyty jest zatwierdzone w bazie, a krok
+ * po nim się nie wykonał. Nazwa kroku w tekście (odczyt logów pokazuje tylko
+ * komunikat), bez kwoty, bez identyfikatorów i bez treści błędu.
+ */
+const CANCEL_COMMITTED_STEP_SKIPPED: Record<CancelFollowUpStep, string> = {
+  expire_checkout_sessions: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: expire_checkout_sessions",
+  refund: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: refund",
+  read_names: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: read_names",
+  sms: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: sms",
+  notification: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: notification",
+  waiting_list: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: waiting_list",
+};
 
 /** Warunek „wiersz wołającego”: pracownik zapisuje tylko własną wizytę. */
 function callerRowWhere(ctx: SalonContext, id: string) {
@@ -758,7 +766,7 @@ export async function DELETE(
     // (ponowna próba dałaby „już odwołana”, a panel pokazałby porażkę).
     // Krok, który się nie wykona, zostawia ślad w logu stałym tekstem.
     const skipped = (step: CancelFollowUpStep) =>
-      logger.warn(CANCEL_COMMITTED_STEP_SKIPPED, { appointmentId: id, step, hasDeposit, depositPaid });
+      logger.warn(CANCEL_COMMITTED_STEP_SKIPPED[step], { appointmentId: id, step, hasDeposit, depositPaid });
 
     // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
     const now = new Date();
