@@ -371,7 +371,9 @@ suite("zamknięcie wizyty — savepointy i jedna droga statusu, prawdziwy Postgr
     const before = await rowOf(appt);
 
     await expect(
-      forSalon(ids.salonA).raw((tx) => cancelAppointmentInTx(tx, ids.salonA, appt))
+      forSalon(ids.salonA).raw((tx) =>
+        cancelAppointmentInTx(tx, ids.salonA, appt, { role: "owner", employeeId: null })
+      )
     ).rejects.toBeInstanceOf(AppointmentCompletedError);
 
     expect(await rowOf(appt)).toEqual(before);

@@ -229,7 +229,12 @@ describe("DELETE /api/appointments/[id] — anulowanie wizyty oznaczonej", () =>
       code: NO_SHOW_DEDICATED_ROUTE_CODE,
       error: "Najpierw cofnij oznaczenie „Nie przyszedł” w szczegółach wizyty",
     });
-    expect(h.cancelInTx).toHaveBeenCalledWith(expect.anything(), SALON, APPOINTMENT);
+    expect(h.cancelInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      SALON,
+      APPOINTMENT,
+      expect.objectContaining({ role: "owner" })
+    );
     expect(h.expireSessions).not.toHaveBeenCalled();
     expect(h.buildSms).not.toHaveBeenCalled();
     expect(h.notifyWaitingList).not.toHaveBeenCalled();

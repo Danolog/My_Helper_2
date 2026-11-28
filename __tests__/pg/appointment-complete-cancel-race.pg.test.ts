@@ -9,6 +9,16 @@
  *   zakończenie 400 `APPOINTMENT_CANCELLED`; wizyta anulowana, płatność
  *   `failed`, bez zabiegu i prowizji.
  *
+ * Na tej samej barierze warunek pracownika pod blokadą (obserwator przepisuje
+ * wizytę na innego pracownika, zanim zatwierdzi):
+ * - pracownik odwołuje wizytę przepisaną → 404, wizyta nieanulowana,
+ *   płatność `pending`, bez wpisu w `notifications`, bez listy oczekujących
+ *   i zwrotu; przepisana i zakończona → 404, nie 409;
+ * - pracownik zapisuje notatkę własnej wizyty → 200; wizyty przepisanej → 404,
+ *   notatka bez zmian;
+ * - PUT właściciela z body dialogu edycji czeka za zakończeniem: nowa notatka
+ *   → 200, zapisana tylko notatka; zmieniony termin → 409, wiersz bez zmian.
+ *
  * Kolejność wymusza obserwator: trzyma blokadę wiersza wizyty w swojej
  * transakcji, uruchamia pierwsze żądanie, czeka, aż stanie za jego blokadą,
  * uruchamia drugie, czeka, aż w łańcuchu `pg_blocking_pids` stoją dwie
@@ -24,8 +34,9 @@
  * loggera, zwrotu zadatku i listy oczekujących. `@/lib/db` wskazuje bazę
  * testową, kontekst salonu i `forSalon` prawdziwe.
  *
- * Dane: konto `it-t3-ccr-…` (właściciel), salon, pracownik, usługa, wizyty
- * w 2097 z zadatkiem 50.00 i płatnością `pending`. Salon usuwany w `afterAll` (kaskada).
+ * Dane: konta `it-t3-ccr-…` (właściciel i pracownik), salon, trzech
+ * pracowników (jeden z kontem), klient bez telefonu, usługa, wizyty w 2097
+ * z zadatkiem 50.00 i płatnością `pending`. Salon usuwany w `afterAll` (kaskada).
  */
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
@@ -36,9 +47,11 @@ import { APPOINTMENT_ERROR_CODES } from "@/lib/appointment-codes";
 import { APPOINTMENT_COMPLETED_CODE } from "@/lib/appointment-completion";
 import {
   appointments,
+  clients,
   depositPayments,
   employeeCommissions,
   employees,
+  notifications,
   salons,
   services,
   treatmentHistory,
@@ -90,24 +103,30 @@ const suite = h ? describe : describe.skip;
 
 const RUN = randomUUID().slice(0, 8);
 const OWNER = `it-t3-ccr-o-${RUN}`;
+const EMP_USER = `it-t3-ccr-e-${RUN}`;
 
-const ids = { salon: "", emp: "", service: "" };
+const ids = { salon: "", emp: "", service: "", empOwn: "", empOther: "", client: "" };
 let slot = 0;
 
 type Body = { success: boolean; code?: string; error?: string; data?: Record<string, unknown> };
 type Outcome = { status: number; body: Body };
+type ObserverTx = { unsafe: (query: string, params?: unknown[]) => Promise<unknown> };
 
 /** Wizyta salonu (rola migracji) z zadatkiem i płatnością `pending`; każda w osobnym terminie. */
-async function appointmentWithPendingDeposit(): Promise<{ appt: string; payment: string }> {
+async function appointmentWithPendingDeposit(
+  overrides: { employeeId?: string; clientId?: string } = {}
+): Promise<{ appt: string; payment: string; start: Date; end: Date }> {
   const start = new Date(Date.UTC(2097, 2, 1, 8) + slot++ * 3_600_000);
+  const end = new Date(start.getTime() + 1_800_000);
   const [a] = await h!.db
     .insert(appointments)
     .values({
       salonId: ids.salon,
-      employeeId: ids.emp,
+      employeeId: overrides.employeeId ?? ids.emp,
       serviceId: ids.service,
+      clientId: overrides.clientId ?? null,
       startTime: start,
-      endTime: new Date(start.getTime() + 1_800_000),
+      endTime: end,
       status: "scheduled",
       depositAmount: "50.00",
       depositPaid: false,
@@ -117,7 +136,7 @@ async function appointmentWithPendingDeposit(): Promise<{ appt: string; payment:
     .insert(depositPayments)
     .values({ appointmentId: a!.id, salonId: ids.salon, amount: "50.00", paymentMethod: "blik", status: "pending" })
     .returning({ id: depositPayments.id });
-  return { appt: a!.id, payment: p!.id };
+  return { appt: a!.id, payment: p!.id, start, end };
 }
 
 const complete = (id: string) =>
@@ -131,6 +150,34 @@ const cancel = (id: string) =>
     createMockRequest(`http://localhost/api/appointments/${id}`, { method: "DELETE" }),
     createRouteParams(id)
   );
+
+/** Odwołanie z SMS-em do klienta (wpis w `notifications`). */
+const cancelNotify = (id: string) =>
+  appointmentRoute.DELETE(
+    createMockRequest(`http://localhost/api/appointments/${id}?notifyClient=true`, { method: "DELETE" }),
+    createRouteParams(id)
+  );
+
+const update = (id: string, body: Record<string, unknown>) =>
+  appointmentRoute.PUT(
+    createMockRequest(`http://localhost/api/appointments/${id}`, { method: "PUT", body }),
+    createRouteParams(id)
+  );
+
+/** Obserwator pod blokadą przepisuje wizytę na innego pracownika (opcjonalnie też ją kończy). */
+const reassignUnderLock =
+  (appt: string, status?: string) =>
+  async (tx: ObserverTx): Promise<void> => {
+    if (status) {
+      await tx.unsafe("update appointments set employee_id = $1, status = $2 where id = $3", [
+        ids.empOther,
+        status,
+        appt,
+      ]);
+    } else {
+      await tx.unsafe("update appointments set employee_id = $1 where id = $2", [ids.empOther, appt]);
+    }
+  };
 
 /** Wynik do komunikatu bariery: sam status i `code`, bez body. */
 function outcomeSummary(value: unknown): string {
@@ -205,9 +252,15 @@ async function waitForWaitersBehind(
 /**
  * Obserwator blokuje wiersz wizyty, uruchamia żądania po kolei — każde
  * następne dopiero, gdy poprzednie stoi w kolejce do blokady — i zatwierdza.
+ * `underLock` (opcjonalnie) zmienia wiersz w transakcji obserwatora zaraz po
+ * blokadzie: żądania widzą stan sprzed zmiany, dopóki obserwator nie zatwierdzi.
  * Zwraca wyniki w kolejności uruchomienia.
  */
-async function inLockOrder(appt: string, starts: Array<() => Promise<Outcome>>): Promise<Outcome[]> {
+async function inLockOrder(
+  appt: string,
+  starts: Array<() => Promise<Outcome>>,
+  underLock?: (tx: ObserverTx) => Promise<void>
+): Promise<Outcome[]> {
   const pending: Promise<Outcome>[] = [];
   let barrierPassed = false;
   try {
@@ -216,6 +269,7 @@ async function inLockOrder(appt: string, starts: Array<() => Promise<Outcome>>):
       const [me] = (await tx.unsafe("select pg_backend_pid() as pid")) as unknown as { pid: number }[];
       const locked = (await tx.unsafe("select id from appointments where id = $1 for update", [appt])) as unknown as unknown[];
       if (locked.length !== 1) throw new Error("obserwator nie zablokował wiersza wizyty");
+      if (underLock) await underLock(tx as unknown as ObserverTx);
       const finished: string[] = [];
       for (const start of starts) {
         const p = start();
@@ -249,6 +303,25 @@ async function paymentStatusOf(payment: string) {
   return p!.status;
 }
 
+async function rowOf(appt: string) {
+  const [a] = await h!.db
+    .select({
+      status: appointments.status,
+      employeeId: appointments.employeeId,
+      notes: appointments.notes,
+      startTime: appointments.startTime,
+      endTime: appointments.endTime,
+      depositPaid: appointments.depositPaid,
+    })
+    .from(appointments)
+    .where(eq(appointments.id, appt));
+  return a!;
+}
+
+async function notificationsOfClient() {
+  return h!.db.select({ id: notifications.id }).from(notifications).where(eq(notifications.clientId, ids.client));
+}
+
 async function treatmentsOf(appt: string) {
   return h!.db.select({ id: treatmentHistory.id }).from(treatmentHistory).where(eq(treatmentHistory.appointmentId, appt));
 }
@@ -263,7 +336,10 @@ async function commissionsOf(appt: string) {
 suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Postgres", () => {
   beforeAll(async () => {
     const db = h!.db;
-    await db.insert(user).values([{ id: OWNER, name: "IT ccr", email: `${OWNER}@example.invalid` }]);
+    await db.insert(user).values([
+      { id: OWNER, name: "IT ccr", email: `${OWNER}@example.invalid` },
+      { id: EMP_USER, name: "IT ccr pracownik", email: `${EMP_USER}@example.invalid` },
+    ]);
     const [s] = await db.insert(salons).values({ name: `IT ccr ${RUN}`, ownerId: OWNER }).returning({ id: salons.id });
     ids.salon = s!.id;
     const [e] = await db
@@ -271,6 +347,28 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
       .values({ salonId: ids.salon, firstName: "IT", lastName: "Pracownik ccr", commissionRate: "40" })
       .returning({ id: employees.id });
     ids.emp = e!.id;
+    const [own] = await db
+      .insert(employees)
+      .values({
+        salonId: ids.salon,
+        userId: EMP_USER,
+        firstName: "IT",
+        lastName: "Pracownik z kontem ccr",
+        role: "employee",
+        isActive: true,
+      })
+      .returning({ id: employees.id });
+    ids.empOwn = own!.id;
+    const [other] = await db
+      .insert(employees)
+      .values({ salonId: ids.salon, firstName: "IT", lastName: "Inny pracownik ccr" })
+      .returning({ id: employees.id });
+    ids.empOther = other!.id;
+    const [c] = await db
+      .insert(clients)
+      .values({ salonId: ids.salon, firstName: "IT", lastName: "Klient ccr" })
+      .returning({ id: clients.id });
+    ids.client = c!.id;
     const [sv] = await db
       .insert(services)
       .values({ salonId: ids.salon, name: "IT ccr usługa", basePrice: "150.00", baseDuration: 30 })
@@ -282,7 +380,7 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
     if (!h) return;
     try {
       if (ids.salon) await h.db.delete(salons).where(inArray(salons.id, [ids.salon]));
-      await h.db.delete(user).where(inArray(user.id, [OWNER]));
+      await h.db.delete(user).where(inArray(user.id, [OWNER, EMP_USER]));
     } finally {
       await h.end();
     }
@@ -314,6 +412,8 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
       expect(await statusOf(appt)).toBe("completed");
       // Krok `pending → failed` anulowania wycofany razem z jego transakcją.
       expect(await paymentStatusOf(payment)).toBe("pending");
+      // Zadatek wizyty bez zmian (anulowanie niczego nie zatwierdziło).
+      expect((await rowOf(appt)).depositPaid).toBe(false);
       expect(await treatmentsOf(appt)).toHaveLength(1);
       expect(await commissionsOf(appt)).toHaveLength(1);
       expect(mocks.refund).not.toHaveBeenCalled();
@@ -342,7 +442,148 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
       expect(await treatmentsOf(appt)).toHaveLength(0);
       expect(await commissionsOf(appt)).toHaveLength(0);
       expect(mocks.refund).not.toHaveBeenCalled();
+      // Zwolniony termin zgłoszony liście oczekujących dokładnie raz.
+      expect(mocks.notifyWaitingList).toHaveBeenCalledTimes(1);
       expect(mocks.error).not.toHaveBeenCalled();
+    },
+    30_000
+  );
+
+  it(
+    "pracownik odwołuje wizytę przepisaną pod blokadą → 404; nieanulowana, płatność pending, bez powiadomienia, listy i zwrotu",
+    async () => {
+      const { appt, payment } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn, clientId: ids.client });
+      ctl.userId = EMP_USER;
+
+      const [cancelled] = await inLockOrder(
+        appt,
+        [async () => parseResponse<Body>(await cancelNotify(appt))],
+        reassignUnderLock(appt)
+      );
+
+      expect(cancelled!.status, outcomeSummary(cancelled)).toBe(404);
+      expect(cancelled!.body.code).toBe(APPOINTMENT_ERROR_CODES.appointmentNotFound);
+      const row = await rowOf(appt);
+      expect(row.status).toBe("scheduled");
+      expect(row.employeeId).toBe(ids.empOther);
+      // Krok `pending → failed` wycofany razem z transakcją odwołania.
+      expect(await paymentStatusOf(payment)).toBe("pending");
+      expect(await notificationsOfClient()).toHaveLength(0);
+      expect(mocks.notifyWaitingList).not.toHaveBeenCalled();
+      expect(mocks.refund).not.toHaveBeenCalled();
+      expect(mocks.error).not.toHaveBeenCalled();
+    },
+    30_000
+  );
+
+  it(
+    "pracownik odwołuje wizytę przepisaną i zakończoną pod blokadą → 404, nie 409",
+    async () => {
+      const { appt, payment } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn, clientId: ids.client });
+      ctl.userId = EMP_USER;
+
+      const [cancelled] = await inLockOrder(
+        appt,
+        [async () => parseResponse<Body>(await cancelNotify(appt))],
+        reassignUnderLock(appt, "completed")
+      );
+
+      expect(cancelled!.status, outcomeSummary(cancelled)).toBe(404);
+      expect(cancelled!.body.code).toBe(APPOINTMENT_ERROR_CODES.appointmentNotFound);
+      expect(await statusOf(appt)).toBe("completed");
+      expect(await paymentStatusOf(payment)).toBe("pending");
+      expect(await notificationsOfClient()).toHaveLength(0);
+      expect(mocks.notifyWaitingList).not.toHaveBeenCalled();
+      expect(mocks.refund).not.toHaveBeenCalled();
+    },
+    30_000
+  );
+
+  it("kontrola: pracownik zapisuje notatkę własnej wizyty → 200, notatka w bazie", async () => {
+    const { appt } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn });
+    ctl.userId = EMP_USER;
+
+    const res = await parseResponse<Body>(await update(appt, { notes: "IT notatka własna" }));
+
+    expect(res.status, outcomeSummary(res)).toBe(200);
+    expect((await rowOf(appt)).notes).toBe("IT notatka własna");
+  });
+
+  it(
+    "pracownik zapisuje notatkę wizyty przepisanej pod blokadą → 404, notatka bez zmian",
+    async () => {
+      const { appt } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn });
+      ctl.userId = EMP_USER;
+
+      const [saved] = await inLockOrder(
+        appt,
+        [async () => parseResponse<Body>(await update(appt, { notes: "IT notatka po przepisaniu" }))],
+        reassignUnderLock(appt)
+      );
+
+      expect(saved!.status, outcomeSummary(saved)).toBe(404);
+      expect(saved!.body.code).toBe(APPOINTMENT_ERROR_CODES.appointmentNotFound);
+      const row = await rowOf(appt);
+      expect(row.notes).toBeNull();
+      expect(row.employeeId).toBe(ids.empOther);
+    },
+    30_000
+  );
+
+  it(
+    "PUT z body dialogu edycji czeka za zakończeniem: nowa notatka → 200, zapisana tylko notatka",
+    async () => {
+      const { appt, start, end } = await appointmentWithPendingDeposit();
+      const dialogBody = {
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        employeeId: ids.emp,
+        serviceId: ids.service,
+        notes: "IT notatka z dialogu",
+      };
+
+      const [done, saved] = await inLockOrder(appt, [
+        async () => parseResponse<Body>(await complete(appt)),
+        async () => parseResponse<Body>(await update(appt, dialogBody)),
+      ]);
+
+      expect(done!.status, outcomeSummary(done)).toBe(200);
+      expect(saved!.status, outcomeSummary(saved)).toBe(200);
+      const row = await rowOf(appt);
+      expect(row.status).toBe("completed");
+      expect(row.notes).toBe("IT notatka z dialogu");
+      expect(row.startTime.getTime()).toBe(start.getTime());
+      expect(row.endTime.getTime()).toBe(end.getTime());
+      expect(row.employeeId).toBe(ids.emp);
+    },
+    30_000
+  );
+
+  it(
+    "PUT ze zmienionym terminem czeka za zakończeniem → 409 APPOINTMENT_COMPLETED, wiersz bez zmian",
+    async () => {
+      const { appt, start, end } = await appointmentWithPendingDeposit();
+      const moved = {
+        startTime: new Date(start.getTime() + 900_000).toISOString(),
+        endTime: new Date(end.getTime() + 900_000).toISOString(),
+        employeeId: ids.emp,
+        serviceId: ids.service,
+        notes: "IT notatka z przeniesieniem",
+      };
+
+      const [done, saved] = await inLockOrder(appt, [
+        async () => parseResponse<Body>(await complete(appt)),
+        async () => parseResponse<Body>(await update(appt, moved)),
+      ]);
+
+      expect(done!.status, outcomeSummary(done)).toBe(200);
+      expect(saved!.status, outcomeSummary(saved)).toBe(409);
+      expect(saved!.body.code).toBe(APPOINTMENT_COMPLETED_CODE);
+      const row = await rowOf(appt);
+      expect(row.status).toBe("completed");
+      expect(row.notes).toBeNull();
+      expect(row.startTime.getTime()).toBe(start.getTime());
+      expect(row.endTime.getTime()).toBe(end.getTime());
     },
     30_000
   );
