@@ -79,13 +79,8 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/lib/subscription-confirmation.ts",
     "src/lib/subscription-locks.ts",
   ],
-  P2_FILES: [
-    "src/app/api/ai/content/newsletter/route.ts",
-    "src/app/api/dashboard/stats/route.ts",
-    "src/lib/ai/business/chat.ts",
-    "src/lib/ai/openrouter.ts",
-    "src/lib/ai/usage-limits.ts",
-  ],
+  // Pliki AI zdjęte: odczyty i zapisy danych salonu przez forSalon(salonId).
+  P2_FILES: ["src/app/api/dashboard/stats/route.ts"],
   P3_FILES: [],
   // #193 (ADR-002): anulowanie przez klienta zdjęte — odczyt systemowy + forSalon.
   P4_FILES: [

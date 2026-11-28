@@ -6,12 +6,27 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockValues = vi.fn().mockResolvedValue(undefined);
-const mockInsert = vi.fn(() => ({ values: mockValues }));
+const { mockValues, mockInsert, mockForSalon } = vi.hoisted(() => {
+  const mockValues = vi.fn().mockResolvedValue(undefined);
+  const mockInsert = vi.fn(() => ({ values: mockValues }));
+  // Atrapa bramy: jak prawdziwa rzuca synchronicznie przy pustym salonId,
+  // a zapytanie dostaje klienta transakcyjnego (`tx`), nie surowe `db`.
+  const mockForSalon = vi.fn((salonId: string) => {
+    if (!salonId) throw new Error("repository.forSalon: salonId wymagany");
+    return {
+      salonId,
+      raw: (fn: (tx: unknown) => unknown) => fn({ insert: () => mockInsert() }),
+    };
+  });
+  return { mockValues, mockInsert, mockForSalon };
+});
 
-vi.mock("@/lib/db", () => ({
-  db: { insert: () => mockInsert() },
+vi.mock("@/lib/server/repository", () => ({
+  forSalon: (salonId: string) => mockForSalon(salonId),
 }));
+
+// Surowe `db` bez metod: zapis z pominięciem `forSalon` nie trafi do atrapy.
+vi.mock("@/lib/db", () => ({ db: {} }));
 
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -142,5 +157,35 @@ describe("trackAIUsage", () => {
   it("never throws when the insert fails", async () => {
     mockValues.mockRejectedValueOnce(new Error("db down"));
     await expect(trackAIUsage("salon-1", "chat")).resolves.toBeUndefined();
+  });
+
+  describe("zapis przez forSalon (rozdzielenie salonów)", () => {
+    it("zapis idzie przez forSalon z salonId wołającego, raz", async () => {
+      await trackAIUsage("salon-1", "search");
+
+      expect(mockForSalon).toHaveBeenCalledTimes(1);
+      expect(mockForSalon).toHaveBeenCalledWith("salon-1");
+      expect(mockInsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("salonId w metadata nie zmienia kolumny salonId", async () => {
+      await trackAIUsage("salon-1", "chat", { salonId: "salon-2" });
+
+      expect(mockForSalon).toHaveBeenCalledWith("salon-1");
+      expect(mockForSalon).not.toHaveBeenCalledWith("salon-2");
+      const row = mockValues.mock.calls[0]![0] as { salonId: string; metadata: Record<string, unknown> };
+      expect(row.salonId).toBe("salon-1");
+      expect(row.metadata).toEqual({ feature: "chat", salonId: "salon-2" });
+    });
+
+    it("pusty salonId: obietnica rozwiązana, bez zapisu, ostrzeżenie w logu", async () => {
+      await expect(trackAIUsage("", "chat")).resolves.toBeUndefined();
+
+      expect(mockInsert).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        "[AI] Failed to track usage",
+        expect.objectContaining({ feature: "chat" }),
+      );
+    });
   });
 });

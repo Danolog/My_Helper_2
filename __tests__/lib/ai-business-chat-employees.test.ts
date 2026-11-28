@@ -13,10 +13,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks
 // -------------------------------------------------------
 
-const mockDbSelect = vi.fn();
-vi.mock("@/lib/db", () => ({
-  db: { select: (...args: unknown[]) => mockDbSelect(...args) },
+const { mockDbSelect, mockForSalon, mockRaw } = vi.hoisted(() => {
+  const mockDbSelect = vi.fn();
+  const tx = { select: (...args: unknown[]) => mockDbSelect(...args) };
+  const mockRaw = vi.fn((fn: (t: typeof tx) => unknown) => fn(tx));
+  // Atrapa bramy: jak prawdziwa rzuca synchronicznie przy pustym salonId,
+  // a zapytania dostają klienta transakcyjnego (`tx`), nie surowe `db`.
+  const mockForSalon = vi.fn((salonId: string) => {
+    if (!salonId) throw new Error("repository.forSalon: salonId wymagany");
+    return { salonId, raw: mockRaw };
+  });
+  return { mockDbSelect, mockForSalon, mockRaw };
+});
+vi.mock("@/lib/server/repository", () => ({
+  forSalon: (salonId: string) => mockForSalon(salonId),
 }));
+// Surowe `db` bez metod: zapytanie z pominięciem `forSalon` nie trafi do atrapy.
+vi.mock("@/lib/db", () => ({ db: {} }));
 
 vi.mock("@/lib/schema", () => {
   const createTable = (name: string) =>
@@ -160,6 +173,8 @@ describe("employeeLabelsForModel", () => {
 describe("gatherSalonData — employees in the salon data text", () => {
   beforeEach(() => {
     mockDbSelect.mockReset();
+    mockForSalon.mockClear();
+    mockRaw.mockClear();
   });
 
   it("lists employees by label and count, without last names", async () => {
@@ -186,5 +201,53 @@ describe("gatherSalonData — employees in the salon data text", () => {
 
     expect(data).toContain("  1. Pracownik - 4 wizyt");
     expect(data).not.toContain("Kowalska");
+  });
+});
+
+describe("gatherSalonData — odczyty przez forSalon (rozdzielenie salonów)", () => {
+  const FALLBACK = "Nie udalo sie pobrac danych salonu. Prosze sprobowac ponownie.";
+
+  beforeEach(() => {
+    mockDbSelect.mockReset();
+    mockForSalon.mockClear();
+    mockRaw.mockClear();
+  });
+
+  it("wszystkie 11 zapytań idzie przez forSalon z salonId wołającego", async () => {
+    mockSalonQueries([{ firstName: "Ewa", lastName: "Nowak", count: 6 }]);
+
+    const result = await gatherSalonData("salon-1");
+
+    expect(mockForSalon).toHaveBeenCalledTimes(1);
+    expect(mockForSalon).toHaveBeenCalledWith("salon-1");
+    // Salon osobno, potem 10 agregatów w jednej transakcji.
+    expect(mockRaw).toHaveBeenCalledTimes(2);
+    expect(mockDbSelect).toHaveBeenCalledTimes(11);
+    expect(result.salonName).toBe("Salon Testowy");
+    expect(result.industryType).toBe("hair_salon");
+    expect(result.data).toContain("- Liczba klientow: 10");
+    expect(result.data).toContain("- Przychod z ukonczonych wizyt: 1440.00 PLN");
+    expect(result.data).toContain("- Wskaznik anulacji: 10.0%");
+  });
+
+  it("pusty salonId: komunikat o braku danych, bez zapytań i bez wyjątku", async () => {
+    await expect(gatherSalonData("")).resolves.toEqual({
+      data: FALLBACK,
+      industryType: null,
+      salonName: "Salon",
+    });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("błąd bazy: komunikat o braku danych, bez wyjątku", async () => {
+    mockDbSelect.mockImplementationOnce(() => {
+      throw new Error("db down");
+    });
+
+    await expect(gatherSalonData("salon-1")).resolves.toEqual({
+      data: FALLBACK,
+      industryType: null,
+      salonName: "Salon",
+    });
   });
 });

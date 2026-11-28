@@ -102,6 +102,7 @@ import { GET as reviewAlerts } from "@/app/api/ai/business/review-alerts/route";
 import { GET as trends } from "@/app/api/ai/business/trends/route";
 import { GET as newsletterList, POST as newsletter } from "@/app/api/ai/content/newsletter/route";
 import { GET as usage } from "@/app/api/ai/usage/route";
+import { db } from "@/lib/db";
 import { newsletters } from "@/lib/schema";
 
 const SALON = "salon-1";
@@ -411,6 +412,9 @@ describe("ai/content/newsletter", () => {
 
   it("GET: salon zawsze z sesji — handler nie czyta parametrów zapytania", async () => {
     expect(newsletterList.length).toBe(0);
+    // Odczyt listy idzie przez forSalon(...).raw — wykonaj zapytanie na atrapie,
+    // żeby sprawdzić warunek WHERE.
+    m.raw.mockImplementationOnce((fn: (tx: unknown) => unknown) => fn(db));
     const res = await (newsletterList as unknown as (r: Request) => Promise<Response>)(
       createMockRequest("http://localhost/api/ai/content/newsletter?salonId=obcy-salon"),
     );

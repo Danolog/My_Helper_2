@@ -1,8 +1,8 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia, salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Shared AI client factory
@@ -64,14 +64,18 @@ export type SalonContext = {
 
 /**
  * Fetch basic salon info (name + industry type) for AI prompts.
+ * Odczyt przez `forSalon` (kontekst RLS salonu); `forSalon` rzuca synchronicznie
+ * przy pustym salonId, dlatego wywołanie jest w `try` — wtedy wartości domyślne.
  */
 export async function getSalonContext(salonId: string): Promise<SalonContext> {
   try {
-    const salonInfo = await db
-      .select({ name: salons.name, industryType: salons.industryType })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .then((r) => r[0]);
+    const salonInfo = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ name: salons.name, industryType: salons.industryType })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .then((r) => r[0]),
+    );
 
     const industryType = salonInfo?.industryType ?? null;
     const industryLabel =
@@ -174,15 +178,19 @@ export async function trackAIUsage(
     });
     return;
   }
+  // `forSalon` w `try`: pusty salonId rzuca synchronicznie, a ta funkcja nigdy
+  // nie rzuca (wołający używają `void trackAIUsage(...)`).
   try {
-    await db.insert(aiGeneratedMedia).values({
-      salonId,
-      type: type as TrackedAIUsageType,
-      provider: provider as TrackedAIUsageProvider,
-      prompt: feature,
-      status: "completed",
-      metadata: { feature, ...metadata },
-    });
+    await forSalon(salonId).raw((tx) =>
+      tx.insert(aiGeneratedMedia).values({
+        salonId,
+        type: type as TrackedAIUsageType,
+        provider: provider as TrackedAIUsageProvider,
+        prompt: feature,
+        status: "completed",
+        metadata: { feature, ...metadata },
+      }),
+    );
   } catch (error) {
     logger.warn("[AI] Failed to track usage", { error, feature });
   }

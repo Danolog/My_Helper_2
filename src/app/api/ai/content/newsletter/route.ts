@@ -4,8 +4,6 @@ import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
 import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -14,6 +12,7 @@ import {
   promotions,
   newsletters,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 const requestSchema = z.object({
   topic: z.string().min(1).max(500),
   goals: z
@@ -111,17 +110,21 @@ export async function POST(req: Request) {
   let salonServices: string[] = [];
   let activePromotions: string[] = [];
 
+  // Każde zapytanie w osobnej `forSalon(...).raw` (kontekst RLS salonu): błąd
+  // promocji ma nie unieważniać odczytu salonu i usług, jak przed zmianą.
   try {
-    const salonInfo = await db
-      .select({
-        name: salons.name,
-        industryType: salons.industryType,
-        address: salons.address,
-        phone: salons.phone,
-      })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .then((r) => r[0]);
+    const salonInfo = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          name: salons.name,
+          industryType: salons.industryType,
+          address: salons.address,
+          phone: salons.phone,
+        })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .then((r) => r[0]),
+    );
 
     if (salonInfo) {
       salonName = salonInfo.name;
@@ -134,13 +137,15 @@ export async function POST(req: Request) {
     }
 
     // Fetch top services
-    const serviceList = await db
-      .select({ name: services.name, basePrice: services.basePrice })
-      .from(services)
-      .where(
-        and(eq(services.salonId, salonId), eq(services.isActive, true))
-      )
-      .limit(10);
+    const serviceList = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ name: services.name, basePrice: services.basePrice })
+        .from(services)
+        .where(
+          and(eq(services.salonId, salonId), eq(services.isActive, true))
+        )
+        .limit(10)
+    );
 
     salonServices = serviceList.map(
       (s) => `${s.name} (${s.basePrice} PLN)`
@@ -148,20 +153,22 @@ export async function POST(req: Request) {
 
     // Fetch active promotions
     try {
-      const promoList = await db
-        .select({
-          name: promotions.name,
-          type: promotions.type,
-          value: promotions.value,
-        })
-        .from(promotions)
-        .where(
-          and(
-            eq(promotions.salonId, salonId),
-            eq(promotions.isActive, true)
+      const promoList = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({
+            name: promotions.name,
+            type: promotions.type,
+            value: promotions.value,
+          })
+          .from(promotions)
+          .where(
+            and(
+              eq(promotions.salonId, salonId),
+              eq(promotions.isActive, true)
+            )
           )
-        )
-        .limit(5);
+          .limit(5)
+      );
 
       activePromotions = promoList.map(
         (p) =>
@@ -264,14 +271,16 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
     let savedId: string | null = null;
     if (save) {
       try {
-        const [saved] = await db
-          .insert(newsletters)
-          .values({
-            salonId: salonId,
-            subject,
-            content,
-          })
-          .returning({ id: newsletters.id });
+        const [saved] = await forSalon(salonId).raw((tx) =>
+          tx
+            .insert(newsletters)
+            .values({
+              salonId: salonId,
+              subject,
+              content,
+            })
+            .returning({ id: newsletters.id })
+        );
 
         savedId = saved!.id;
       } catch (error) {
@@ -308,12 +317,14 @@ export async function GET() {
   }
 
   try {
-    const result = await db
-      .select()
-      .from(newsletters)
-      .where(eq(newsletters.salonId, salonId))
-      .orderBy(desc(newsletters.createdAt))
-      .limit(20);
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(newsletters)
+        .where(eq(newsletters.salonId, salonId))
+        .orderBy(desc(newsletters.createdAt))
+        .limit(20)
+    );
 
     return Response.json({ newsletters: result });
   } catch (error) {
