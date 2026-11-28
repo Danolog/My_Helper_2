@@ -13,9 +13,13 @@ vi.mock("next/navigation", () => ({
   useRouter: () => router,
 }));
 
-// Dialogi ładowane leniwie nie są przedmiotem testu.
+// Dialogi ładowane leniwie nie renderują się; test czyta tylko ich propsy.
+const dialogProps = vi.hoisted(() => ({ all: [] as Record<string, unknown>[] }));
 vi.mock("next/dynamic", () => ({
-  default: () => () => null,
+  default: () => (props: Record<string, unknown>) => {
+    dialogProps.all.push(props);
+    return null;
+  },
 }));
 
 vi.mock("sonner", () => ({
@@ -215,5 +219,36 @@ describe("AppointmentDetailPage — odświeżenie stanu zadatku", () => {
 
     expect(countFetches(REFUND_STATUS_URL)).toBe(2);
     expect(countFetches(APPOINTMENT_URL)).toBe(2);
+  });
+});
+
+describe("AppointmentDetailPage — wizyty nie ma po zapisie w oknie edycji", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch());
+    dialogProps.all = [];
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("okno edycji dostaje przejście do kalendarza, a nie odczyt strony", async () => {
+    const replace = vi.spyOn(router, "replace");
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("stub-header")).toBeInTheDocument();
+    });
+
+    const editProps = dialogProps.all.filter((p) => typeof p.onAppointmentGone === "function").pop();
+    expect(editProps).toBeDefined();
+    const appointmentFetches = fetchedUrls().filter((u) => u === "/api/appointments/appt-1").length;
+
+    act(() => {
+      (editProps?.onAppointmentGone as () => void)();
+    });
+
+    expect(replace).toHaveBeenCalledWith("/dashboard/calendar");
+    expect(fetchedUrls().filter((u) => u === "/api/appointments/appt-1")).toHaveLength(appointmentFetches);
   });
 });

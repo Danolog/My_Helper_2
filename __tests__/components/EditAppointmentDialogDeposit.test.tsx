@@ -67,7 +67,7 @@ describe("EditAppointmentDialog — zadatek", () => {
     await save();
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(DEPOSITS_DISABLED_MESSAGE));
-    expect(toast.error).not.toHaveBeenCalledWith("Nie udalo sie zaktualizowac wizyty", expect.anything());
+    expect(toast.error).not.toHaveBeenCalledWith("Nie udało się zaktualizować wizyty", expect.anything());
   });
 
   it("inny błąd: ogólny komunikat z opisem z API, jak dotąd", async () => {
@@ -78,7 +78,7 @@ describe("EditAppointmentDialog — zadatek", () => {
     await save();
 
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Nie udalo sie zaktualizowac wizyty", { description: "Termin zajety" })
+      expect(toast.error).toHaveBeenCalledWith("Nie udało się zaktualizować wizyty", { description: "Termin zajety" })
     );
   });
 });
