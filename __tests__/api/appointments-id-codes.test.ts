@@ -442,13 +442,45 @@ describe("PUT — zapis bez wiersza nie daje 200 z data: null", () => {
     expect(h.update).not.toHaveBeenCalled();
   });
 
+  // Body przekazuje wizytę innemu pracownikowi: sprawdzenie kolizji woła
+  // eq(employeeId, OTHER_EMPLOYEE), więc eq(employeeId, EMPLOYEE) może pochodzić
+  // tylko z warunku wiersza wołającego w UPDATE.
   it("pracownik: UPDATE ma warunek własnego pracownika", async () => {
     h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
 
-    const res = await put({ notes: "x" });
+    const res = await put({ employeeId: OTHER_EMPLOYEE });
 
     expect(res.status).toBe(200);
+    expect(vi.mocked(eq)).toHaveBeenCalledWith(appointments.employeeId, OTHER_EMPLOYEE);
     expect(vi.mocked(eq)).toHaveBeenCalledWith(appointments.employeeId, EMPLOYEE);
+  });
+
+  it.each([
+    ["właściciel", OWNER_CTX],
+    ["recepcja", RECEPTION_CTX],
+  ])("kontrola: %s, UPDATE bez warunku pracownika", async (_n, ctx) => {
+    h.salonCtx.mockResolvedValue(ctx);
+
+    const res = await put({ employeeId: OTHER_EMPLOYEE });
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(eq)).toHaveBeenCalledWith(appointments.employeeId, OTHER_EMPLOYEE);
+    expect(vi.mocked(eq)).not.toHaveBeenCalledWith(appointments.employeeId, EMPLOYEE);
+  });
+
+  it("UPDATE bez wiersza, wizyta jest i nie jest zakończona → 500, jeden log, bez drugiego UPDATE", async () => {
+    // 1) kolizje, 2) ponowny odczyt po UPDATE bez wiersza: wizyta niezakończona.
+    h.selectResults = [[], [appt({ status: "confirmed" })]];
+    h.updateResults = [[]];
+
+    const { status } = await parseResponse<Err>(await put({ status: "confirmed" }));
+
+    expect(status).toBe(500);
+    expect(h.set).toHaveBeenCalledTimes(1);
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+    const [, meta] = h.logger.error.mock.calls[0]!;
+    expect(meta).toMatchObject({ errorName: "Error" });
   });
 });
 
