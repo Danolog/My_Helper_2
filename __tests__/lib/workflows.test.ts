@@ -9,8 +9,8 @@
  *  - każda zmienna klasy `var` z manifestu idzie do usługi z `vars.*`,
  *    nic spoza klas secret/var nie trafia do usługi;
  *  - `STORAGE_DRIVER=gcs` nie jest wpisane na sztywno nigdzie w infra/ ani workflow;
- *  - e2e-production.yml: workflow_call + workflow_dispatch z base_url,
- *    deployment_status (Vercel) zostaje do C4.
+ *  - e2e-production.yml: jedyny wyzwalacz workflow_call z wymaganym base_url;
+ *    BASE_URL wyłącznie z inputs.base_url, bez sekretów; allowlista zawsze.
  *  - wdraża tylko commit przebiegu z main: bez wejścia `ref`, warunek
  *    refs/heads/main, `merge-base --is-ancestor` przed budową; środowisko
  *    `production-gcp` (nie „Production" Vercela); jedna grupa concurrency;
@@ -58,12 +58,14 @@ const code = (text: string) =>
     .join("\n");
 
 /**
- * Wykonuje w bash skrypt kroku-allowlisty e2e-production.yml („Cloud Run mode must
- * target our tagged Cloud Run URL") dla podanego BASE_URL. Wspólne dla testów
+ * Wykonuje w bash skrypt kroku-allowlisty e2e-production.yml („Base URL must be
+ * our tagged Cloud Run URL") dla podanego BASE_URL. Wspólne dla testów
  * allowlisty i testów run-deploy.sh (tag_url musi przejść tę samą allowlistę).
  */
+const E2E_GUARD_STEP = "- name: Base URL must be our tagged Cloud Run URL";
+
 function runE2eGuard(url: string) {
-  const at = E2E.indexOf("Cloud Run mode must target our tagged Cloud Run URL");
+  const at = E2E.indexOf(E2E_GUARD_STEP);
   if (at < 0) throw new Error("Brak kroku allowlisty w e2e-production.yml");
   const lines = E2E.slice(at, E2E.indexOf("\n\n", at)).split("\n");
   const script = lines
@@ -310,32 +312,40 @@ describe("G-C6: e2e-production.yml", () => {
     }
   });
 
-  it("deployment_status (Vercel, do C4) + workflow_call", () => {
-    expect(triggers(E2E)).toEqual(["deployment_status", "workflow_call"]);
+  it("jedyny wyzwalacz: workflow_call; bez deployment_status", () => {
+    expect(triggers(E2E)).toEqual(["workflow_call"]);
+    expect(code(E2E)).not.toContain("deployment_status");
   });
 
-  it("workflow_call: base_url wymagane", () => {
+  it("workflow_call: jedyne wejście base_url, wymagane", () => {
     expect(E2E).toMatch(/ {2}workflow_call:\n {4}inputs:\n {6}base_url:\n(?: {8}.*\n)*? {8}required: true\n/);
+    const wf = load(E2E) as { on: { workflow_call: { inputs: Record<string, unknown>; secrets?: unknown } } };
+    expect(Object.keys(wf.on.workflow_call.inputs)).toEqual(["base_url"]);
+    expect(wf.on.workflow_call).not.toHaveProperty("secrets");
   });
 
-  it("BASE_URL: sekret Vercela tylko dla deployment_status, w workflow_call wyłącznie inputs.base_url", () => {
-    expect(E2E).toContain(
-      "BASE_URL: ${{ github.event_name == 'deployment_status' && secrets.BETTER_AUTH_BASE_URL_PROD || inputs.base_url }}",
-    );
-    // sekret produkcji pojawia się dokładnie raz, w gałęzi deployment_status
-    expect(code(E2E).match(/secrets\./g)).toHaveLength(1);
+  it("BASE_URL: dokładnie inputs.base_url; plik bez żadnego secrets.", () => {
+    const envLines = [...code(E2E).matchAll(/^\s+BASE_URL:.*$/gm)].map((m) => m[0].trim());
+    expect(envLines).toEqual(["BASE_URL: ${{ inputs.base_url }}"]);
+    expect(code(E2E)).not.toMatch(/secrets\./);
   });
 
   const guardStep = () => {
-    const at = E2E.indexOf("Cloud Run mode must target our tagged Cloud Run URL");
+    const at = E2E.indexOf(E2E_GUARD_STEP);
     expect(at).toBeGreaterThan(0);
     return { at, step: E2E.slice(at, E2E.indexOf("\n\n", at)) };
   };
 
-  it("tryb Cloud Run: krok-allowlista przed checkoutem, tylko poza deployment_status", () => {
+  it("krok-allowlista przed checkoutem, bez if: (biegnie zawsze)", () => {
     const { at, step } = guardStep();
     expect(at).toBeLessThan(E2E.indexOf("actions/checkout"));
-    expect(step).toContain("if: github.event_name != 'deployment_status'");
+    expect(step).not.toMatch(/^\s+if:/m);
+    // jest pierwszym krokiem joba i nie ma continue-on-error
+    const job = (load(E2E) as { jobs: Record<string, { if?: unknown; steps: Array<Record<string, unknown>> }> }).jobs["e2e-production"]!;
+    expect(job).not.toHaveProperty("if");
+    expect(job.steps[0]!.name).toBe("Base URL must be our tagged Cloud Run URL");
+    expect(job.steps[0]).not.toHaveProperty("if");
+    expect(job.steps[0]).not.toHaveProperty("continue-on-error");
     expect(step).toContain('"$BASE_URL" != https://*');
     expect(step).toContain('"$BASE_URL" == *vercel.app*');
     // #121 (h): sufiks naszej usługi (usługa, numer projektu, region), bez ścieżki.
@@ -377,12 +387,6 @@ describe("G-C6: e2e-production.yml", () => {
   ])("allowlista (wykonana w bash): %j → exit %i", (url, exit) => {
     const r = runE2eGuard(url);
     expect(r.status, r.stderr).toBe(exit);
-  });
-
-  it("deployment_status nadal tylko dla udanego Production", () => {
-    expect(E2E).toContain(
-      "github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'",
-    );
   });
 });
 
