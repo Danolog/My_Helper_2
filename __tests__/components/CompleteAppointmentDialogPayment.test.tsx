@@ -3,9 +3,9 @@
  * sprawdzenie pól przed wysłaniem, teksty błędów z serwera pod polami,
  * a prowizja, jej stawka i materiały z kosztem tylko dla właściciela.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   CompleteAppointmentDialog,
   PAID_AMOUNT_MESSAGES,
@@ -27,12 +27,14 @@ const RECEIPT_NOTICE =
   "Kwota trafi tylko do raportu w MyHelper. To nie jest paragon. Paragon wystaw jak zwykle w kasie fiskalnej.";
 
 type ServiceOverride = { basePrice: string } | null;
+type AppointmentExtra = { id?: string; discountAmount?: string | number | null };
 
-function appointment(service: ServiceOverride = { basePrice: "120.00" }) {
+function appointment(service: ServiceOverride = { basePrice: "120.00" }, extra: AppointmentExtra = {}) {
   return {
-    id: "appt-1",
+    id: extra.id ?? "appt-1",
     employeeId: "emp-1",
     status: "scheduled",
+    ...(extra.discountAmount !== undefined ? { discountAmount: extra.discountAmount } : {}),
     service: service
       ? { id: "svc-1", name: "Strzyżenie", basePrice: service.basePrice, baseDuration: 60 }
       : null,
@@ -49,21 +51,24 @@ const materials = [
   },
 ];
 
-function renderDialog(role: SalonRole, service?: ServiceOverride) {
+function renderDialog(role: SalonRole, service?: ServiceOverride, extra?: AppointmentExtra) {
   const onOpenChange = vi.fn();
   const onCompleted = vi.fn();
-  render(
+  const view = (appt: ReturnType<typeof appointment>, open = true) => (
     <RoleProvider role={role}>
       <CompleteAppointmentDialog
-        open
+        open={open}
         onOpenChange={onOpenChange}
-        appointment={appointment(service)}
+        appointment={appt}
         materials={materials}
         onCompleted={onCompleted}
       />
     </RoleProvider>
   );
-  return { onOpenChange, onCompleted };
+  const { rerender } = render(view(appointment(service, extra)));
+  // Tak jak kalendarz: to samo zamontowane okno dostaje inną wizytę albo inne `open`.
+  const showAppointment = (appt: ReturnType<typeof appointment>, open = true) => rerender(view(appt, open));
+  return { onOpenChange, onCompleted, showAppointment };
 }
 
 function amountInput() {
@@ -137,10 +142,10 @@ describe.each(ROLES)("CompleteAppointmentDialog — rola %s", (role) => {
     expectVisibility("materials-section");
     if (isOwner) {
       expect(screen.getByText("Prowizja pracownika")).toBeInTheDocument();
-      expect(screen.getByText("Laczny koszt materialow:")).toBeInTheDocument();
+      expect(screen.getByText("Łączny koszt materiałów:")).toBeInTheDocument();
     } else {
       expect(screen.queryByText("Prowizja pracownika")).not.toBeInTheDocument();
-      expect(screen.queryByText("Laczny koszt materialow:")).not.toBeInTheDocument();
+      expect(screen.queryByText("Łączny koszt materiałów:")).not.toBeInTheDocument();
       expect(screen.queryByText("30.00 PLN")).not.toBeInTheDocument();
     }
   });
@@ -208,6 +213,34 @@ describe.each(ROLES)("CompleteAppointmentDialog — rola %s", (role) => {
     renderDialog(role, null);
     await screen.findByTestId("payment-section");
     expect(amountInput().value).toBe("");
+  });
+
+  it("domyślna kwota to cena minus rabat wizyty: 120 zł − 20 zł = „100,00”", async () => {
+    renderDialog(role, { basePrice: "120.00" }, { discountAmount: "20.00" });
+    await screen.findByTestId("payment-section");
+    expect(amountInput().value).toBe("100,00");
+  });
+
+  it("rabat większy od ceny: pole „0,00”, wysyłka idzie z \"0.00\"", async () => {
+    renderDialog(role, { basePrice: "120.00" }, { discountAmount: "150.00" });
+    await screen.findByTestId("payment-section");
+    expect(amountInput().value).toBe("0,00");
+    chooseMethod("cash");
+    submit();
+    await waitFor(() => expect(mutationFetch).toHaveBeenCalledTimes(1));
+    expect(sentBody()).toMatchObject({ paidAmount: "0.00", paymentMethod: "cash" });
+  });
+
+  it("bez ceny usługi pole jest puste także przy rabacie", async () => {
+    renderDialog(role, null, { discountAmount: "20.00" });
+    await screen.findByTestId("payment-section");
+    expect(amountInput().value).toBe("");
+  });
+
+  it("rabat null: pełna cena „120,00”", async () => {
+    renderDialog(role, { basePrice: "120.00" }, { discountAmount: null });
+    await screen.findByTestId("payment-section");
+    expect(amountInput().value).toBe("120,00");
   });
 
   it("kwota 0 jest dozwolona (wizyta gratis)", async () => {
@@ -336,6 +369,81 @@ describe("CompleteAppointmentDialog — domyślna kwota", () => {
     [undefined, ""],
   ])("cena %s => „%s”", (price, expected) => {
     expect(defaultPaidAmount(price)).toBe(expected);
+  });
+
+  it.each([
+    ["120.00", "20.00", "100,00"],
+    ["120.00", 20, "100,00"],
+    ["120.00", "150.00", "0,00"],
+    ["120.00", "120.00", "0,00"],
+    ["99.99", "10.10", "89,89"],
+    ["0.30", "0.10", "0,20"],
+    ["120.00", null, "120,00"],
+    ["120.00", undefined, "120,00"],
+    ["120.00", "", "120,00"],
+    ["120.00", "  ", "120,00"],
+    ["120.00", "abc", "120,00"],
+    ["120.00", "-20.00", "120,00"],
+    [null, "20.00", ""],
+    ["", "20.00", ""],
+    ["abc", "20.00", ""],
+  ])("cena %s, rabat %s => „%s”", (price, discount, expected) => {
+    expect(defaultPaidAmount(price, discount)).toBe(expected);
+  });
+});
+
+describe("CompleteAppointmentDialog — podmiana wizyty, podwójne kliknięcie, czyszczenie po zamknięciu", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("podmiana wizyty w otwartym oknie: kwota nowej wizyty, metoda pusta, bez błędów", async () => {
+    const { showAppointment } = renderDialog("receptionist", { basePrice: "120.00" }, { discountAmount: "20.00" });
+    setAmount("");
+    chooseMethod("cash");
+    submit();
+    expect(await screen.findByTestId("paid-amount-error")).toBeInTheDocument();
+
+    showAppointment(appointment({ basePrice: "200.00" }, { id: "appt-2", discountAmount: "50.00" }));
+
+    expect(amountInput().value).toBe("150,00");
+    for (const option of PAYMENT_METHOD_OPTIONS) {
+      expect(screen.getByTestId(`payment-method-${option.value}`)).not.toBeChecked();
+    }
+    expect(screen.queryByTestId("paid-amount-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("payment-method-error")).not.toBeInTheDocument();
+  });
+
+  it("dwa kliknięcia „Zakończ wizytę” przed odpowiedzią serwera: jedno żądanie", async () => {
+    mutationFetch.mockReturnValue(new Promise(() => {}));
+    renderDialog("owner");
+    chooseMethod("card");
+    submit();
+    submit();
+    await waitFor(() => expect(mutationFetch).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("confirm-complete-btn")).toBeDisabled();
+    expect(screen.getByTestId("confirm-complete-btn")).toHaveTextContent("Kończenie…");
+    expect(mutationFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("czyszczenie po zamknięciu nie nadpisuje kwoty wizyty otwartej przed upływem 300 ms", () => {
+    vi.useFakeTimers();
+    const { showAppointment } = renderDialog("receptionist", { basePrice: "120.00" });
+    setAmount("55,00");
+    fireEvent.click(screen.getByText("Anuluj"));
+    showAppointment(appointment({ basePrice: "120.00" }), false);
+
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    showAppointment(appointment({ basePrice: "200.00" }, { id: "appt-2", discountAmount: "50.00" }));
+    expect(amountInput().value).toBe("150,00");
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(amountInput().value).toBe("150,00");
+    expect(screen.getByTestId("payment-method-cash")).not.toBeChecked();
   });
 });
 

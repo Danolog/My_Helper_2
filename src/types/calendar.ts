@@ -54,6 +54,8 @@ export interface Appointment {
   notes: string | null;
   depositAmount: string | null;
   depositPaid: boolean;
+  /** Rabat z kodu promocyjnego (numeric jako tekst); lista wizyt zwraca go z wierszem. */
+  discountAmount?: string | null;
   createdAt: Date;
   updatedAt: Date;
   client?: Client | null;

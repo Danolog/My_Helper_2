@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle,
   Scissors,
@@ -89,18 +89,37 @@ export function checkPaidAmount(raw: string): PaidAmountCheck {
   return { ok: true, value };
 }
 
-/**
- * Domyślna kwota w polu: cena usługi taka, jaką pokazuje strona wizyty
- * (`service.basePrice`), nie mniejsza niż 0, z przecinkiem i dwoma miejscami.
- * Dane okna nie zawierają rabatu wizyty, więc rabat nie jest odejmowany.
- * Brak ceny (albo cena nieczytelna) — puste pole, nie „0,00”.
- */
-export function defaultPaidAmount(basePrice: string | null | undefined): string {
-  if (basePrice == null || basePrice.trim() === "") return "";
-  const price = Number(basePrice);
-  if (!Number.isFinite(price)) return "";
-  return Math.max(0, price).toFixed(2).replace(".", ",");
+/** Kwota z bazy (numeric jako tekst) albo liczba → grosze; brak albo nieczytelna → null. */
+function toCents(value: string | number | null | undefined): number | null {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return Math.round(amount * 100);
 }
+
+/**
+ * Domyślna kwota w polu: cena usługi (`service.basePrice`) pomniejszona o rabat
+ * zapisany na wizycie przy rezerwacji z kodem (`discountAmount`), nie mniejsza
+ * niż 0, z przecinkiem i dwoma miejscami. Tak samo liczą raporty przychodu.
+ * Rachunek w groszach, żeby uniknąć wyników w rodzaju 89,88999.
+ * Brak ceny (albo cena nieczytelna) — puste pole, nie „0,00”, także z rabatem.
+ * Rabat pusty, nieczytelny albo ujemny liczy się jak 0.
+ */
+export function defaultPaidAmount(
+  basePrice: string | null | undefined,
+  discountAmount?: string | number | null
+): string {
+  const priceCents = toCents(basePrice);
+  if (priceCents === null) return "";
+  const discountCents = toCents(discountAmount);
+  const appliedDiscount = discountCents !== null && discountCents > 0 ? discountCents : 0;
+  const paidCents = Math.max(0, priceCents - appliedDiscount);
+  return (paidCents / 100).toFixed(2).replace(".", ",");
+}
+
+/** Czas animacji zamknięcia okna — pola czyszczą się dopiero po niej. */
+const RESET_AFTER_CLOSE_MS = 300;
 
 type PaymentFieldErrors = { paidAmount?: string | undefined; paymentMethod?: string | undefined };
 
@@ -118,6 +137,8 @@ interface AppointmentData {
   id: string;
   employeeId: string;
   status: string;
+  /** Rabat z kodu promocyjnego zapisany na wizycie; brak = bez rabatu. */
+  discountAmount?: string | number | null;
   service: {
     id: string;
     name: string;
@@ -167,7 +188,10 @@ export function CompleteAppointmentDialog({
   // (i wysyła) tylko właściciel. Recepcja i pracownik zapisują prowizję według
   // stawki pracownika, którą serwer bierze sam.
   const isOwner = useSalonRole() === "owner";
-  const initialPaidAmount = defaultPaidAmount(appointment.service?.basePrice);
+  const initialPaidAmount = defaultPaidAmount(
+    appointment.service?.basePrice,
+    appointment.discountAmount
+  );
 
   const [recipe, setRecipe] = useState("");
   const [techniques, setTechniques] = useState("");
@@ -182,16 +206,20 @@ export function CompleteAppointmentDialog({
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [aiSummaryText, setAiSummaryText] = useState<string | null>(null);
 
-  // Kalendarz trzyma okno zamontowane i podmienia wizytę: pola płatności
-  // zaczynają od nowa dla innej wizyty (zmiana stanu w renderze zamiast
-  // efektu — wzorzec z dokumentacji Reacta).
   const [formAppointmentId, setFormAppointmentId] = useState(appointment.id);
-  if (formAppointmentId !== appointment.id) {
-    setFormAppointmentId(appointment.id);
-    setPaidAmount(initialPaidAmount);
-    setPaymentMethod(null);
-    setFieldErrors({});
-  }
+  // Czyszczenie pól odłożone do końca animacji zamknięcia.
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Podmiana wizyty (albo odmontowanie) anuluje odłożone czyszczenie: inaczej
+  // timer zamkniętej wizyty wpisałby jej kwotę do pola następnej wizyty.
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, [appointment.id]);
 
   const handleGenerateAISummary = async () => {
     setGeneratingSummary(true);
@@ -206,12 +234,12 @@ export function CompleteAppointmentDialog({
         setAiSummaryText(data.summary.fullSummary);
         toast.success("Podsumowanie AI wygenerowane");
       } else if (data.code === "PLAN_UPGRADE_REQUIRED") {
-        toast.error("Podsumowanie AI dostepne tylko w Planie Pro");
+        toast.error("Podsumowanie AI dostępne tylko w Planie Pro");
       } else {
-        toast.error(data.error || "Nie udalo sie wygenerowac podsumowania");
+        toast.error(data.error || "Nie udało się wygenerować podsumowania");
       }
     } catch {
-      toast.error("Blad generowania podsumowania AI");
+      toast.error("Błąd generowania podsumowania AI");
     } finally {
       setGeneratingSummary(false);
     }
@@ -252,7 +280,7 @@ export function CompleteAppointmentDialog({
     const suggestedDays = days && days > 0 ? days : 30;
     if (suggestedDays % 7 === 0) {
       const weeks = suggestedDays / 7;
-      return weeks === 1 ? "1 tydzien" : `${weeks} tygodni`;
+      return weeks === 1 ? "1 tydzień" : `${weeks} tygodni`;
     }
     return `${suggestedDays} dni`;
   };
@@ -322,6 +350,23 @@ export function CompleteAppointmentDialog({
     setAiSummaryText(null);
   };
 
+  // Kalendarz trzyma okno zamontowane i podmienia wizytę: cały formularz
+  // zaczyna od nowa dla innej wizyty, z jej domyślną kwotą (zmiana stanu w
+  // renderze zamiast efektu — wzorzec z dokumentacji Reacta). Pełny reset,
+  // bo odłożone czyszczenie poprzedniej wizyty zostaje anulowane.
+  if (formAppointmentId !== appointment.id) {
+    setFormAppointmentId(appointment.id);
+    resetForm();
+  }
+
+  const scheduleResetAfterClose = () => {
+    if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
+      resetForm();
+    }, RESET_AFTER_CLOSE_MS);
+  };
+
   const handleScheduleNext = () => {
     if (!onScheduleNext) return;
 
@@ -337,16 +382,14 @@ export function CompleteAppointmentDialog({
     };
 
     onOpenChange(false);
-    // Reset state after closing
-    setTimeout(resetForm, 300);
+    scheduleResetAfterClose();
 
     onScheduleNext(data);
   };
 
   const handleClose = () => {
     onOpenChange(false);
-    // Reset state after closing
-    setTimeout(resetForm, 300);
+    scheduleResetAfterClose();
   };
 
   // Zamknięcie formularza (Esc, klik poza oknem, Anuluj) też czyści pola.
@@ -369,10 +412,10 @@ export function CompleteAppointmentDialog({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-green-600" />
-              Wizyta zakonczona
+              Wizyta zakończona
             </DialogTitle>
             <DialogDescription>
-              Wizyta zostala pomyslnie zakonczona
+              Wizyta została pomyślnie zakończona
             </DialogDescription>
           </DialogHeader>
 
@@ -437,10 +480,10 @@ export function CompleteAppointmentDialog({
             <div className="space-y-3" data-testid="schedule-next-prompt">
               <div className="flex items-center gap-2">
                 <CalendarClock className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold">Umow nastepna wizyte?</h3>
+                <h3 className="font-semibold">Umów następną wizytę?</h3>
               </div>
               <p className="text-sm text-muted-foreground">
-                Sugerowany termin nastepnej wizyty: za{" "}
+                Sugerowany termin następnej wizyty: za{" "}
                 <span className="font-medium text-foreground">
                   {getSuggestedDaysLabel()}
                 </span>{" "}
@@ -460,7 +503,7 @@ export function CompleteAppointmentDialog({
                     </span>
                   </p>
                   <p>
-                    <span className="text-muted-foreground">Usluga:</span>{" "}
+                    <span className="text-muted-foreground">Usługa:</span>{" "}
                     <span className="font-medium">{appointment.service.name}</span>
                   </p>
                   {appointment.employee && (
@@ -490,7 +533,7 @@ export function CompleteAppointmentDialog({
               data-testid="schedule-next-btn"
             >
               <CalendarPlus className="h-4 w-4 mr-2" />
-              Umow nastepna wizyte
+              Umów następną wizytę
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -507,10 +550,10 @@ export function CompleteAppointmentDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CheckCircle className="h-5 w-5 text-green-600" />
-            Zakoncz wizyte
+            Zakończ wizytę
           </DialogTitle>
           <DialogDescription>
-            Wypelnij notatki z zabiegu i potwierdz zakonczenie wizyty
+            Wypełnij notatki z zabiegu i potwierdź zakończenie wizyty
           </DialogDescription>
         </DialogHeader>
 
@@ -666,7 +709,7 @@ export function CompleteAppointmentDialog({
                 id="treatment-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="np. Klientka preferuje cieplejsze odcienie, nastepna wizyta za 6 tygodni"
+                placeholder="np. Klientka preferuje cieplejsze odcienie, następna wizyta za 6 tygodni"
                 rows={2}
                 data-testid="treatment-notes-input"
               />
@@ -683,12 +726,12 @@ export function CompleteAppointmentDialog({
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-primary" />
                   <h3 className="font-semibold text-sm">
-                    Uzyte materialy ({materials.length})
+                    Użyte materiały ({materials.length})
                   </h3>
                 </div>
                 {materials.length === 0 ? (
                   <p className="text-sm text-muted-foreground italic">
-                    Brak dodanych materialow
+                    Brak dodanych materiałów
                   </p>
                 ) : (
                   <div className="space-y-1">
@@ -714,7 +757,7 @@ export function CompleteAppointmentDialog({
                     ))}
                     {totalMaterialCost > 0 && (
                       <div className="flex justify-between text-sm font-medium pt-1 border-t">
-                        <span>Laczny koszt materialow:</span>
+                        <span>Łączny koszt materiałów:</span>
                         <span>{totalMaterialCost.toFixed(2)} PLN</span>
                       </div>
                     )}
@@ -755,7 +798,7 @@ export function CompleteAppointmentDialog({
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Cena uslugi: {servicePrice.toFixed(2)} PLN x{" "}
+                  Cena usługi: {servicePrice.toFixed(2)} PLN x{" "}
                   {commPct.toFixed(0)}% = {commissionAmount.toFixed(2)} PLN
                 </p>
               </div>
@@ -773,7 +816,7 @@ export function CompleteAppointmentDialog({
             data-testid="confirm-complete-btn"
           >
             {completing ? (
-              "Konczenie..."
+              "Kończenie…"
             ) : (
               <>
                 <CheckCircle className="h-4 w-4 mr-2" />

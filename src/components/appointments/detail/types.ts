@@ -12,6 +12,8 @@ export interface AppointmentDetail {
   notes: string | null;
   depositAmount: string | null;
   depositPaid: boolean;
+  /** Rabat z kodu promocyjnego (numeric jako tekst); GET wizyty zwraca go z wierszem. */
+  discountAmount?: string | null;
   createdAt: string;
   updatedAt: string;
   client: {
