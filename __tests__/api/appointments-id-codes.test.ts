@@ -20,7 +20,7 @@
  * - Dialog edycji wysyła termin, pracownika, klienta i usługę także przy samej
  *   zmianie notatki: zakończenie wizyty między odczytem a zapisem nie blokuje
  *   samej notatki, jeśli te pola są takie jak w zakończonej wizycie.
- * - Logi błędów PUT i DELETE: nazwa i kod błędu, bez obiektu błędu.
+ * - Logi błędów GET, PUT i DELETE: nazwa i kod błędu, bez obiektu błędu.
  * - Statusy według ról: 200, 400, 401, 403, 404, 409, 500.
  *
  * Atrapą jest baza (forSalon), sesja i kontekst salonu.
@@ -128,7 +128,7 @@ vi.mock("@/lib/logger", () => ({ logger: h.logger }));
 
 import { eq } from "drizzle-orm";
 import { POST as COMPLETE } from "@/app/api/appointments/[id]/complete/route";
-import { DELETE, PUT } from "@/app/api/appointments/[id]/route";
+import { DELETE, GET, PUT } from "@/app/api/appointments/[id]/route";
 import {
   APPOINTMENT_ERROR_CODES,
   APPOINTMENT_ERROR_STATUS,
@@ -595,6 +595,32 @@ describe("PUT — 500 i log", () => {
     expect(meta).toMatchObject({ errorName: "Error", errorCode: "57P01" });
     expect(Object.keys(meta as object).sort()).toEqual(["code", "errorCode", "errorName"]);
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
+  });
+});
+
+describe("GET — 500 i log", () => {
+  it("błąd bazy → 500, log z tymi samymi kluczami co DELETE, bez obiektu błędu i treści zapytania", async () => {
+    const makeError = () =>
+      Object.assign(new Error("Failed query: select ...\nparams: Anna,+48123456789"), { cause: { code: "40001" } });
+
+    h.selectResults = [makeError() as unknown as unknown[]];
+    const { status } = await parseResponse<Err>(
+      await GET(new Request(`http://localhost:3000/api/appointments/${APPOINTMENT}`), createRouteParams(APPOINTMENT))
+    );
+
+    expect(status).toBe(500);
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+    const getMeta = h.logger.error.mock.calls[0]![1] as object;
+    expect(getMeta).toEqual({ errorName: "Error", errorCode: "40001" });
+    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
+    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Failed query");
+
+    h.logger.error.mockClear();
+    h.selectResults = [deleteRow()];
+    h.cancelInTx.mockRejectedValue(makeError());
+    await del();
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+    expect(Object.keys(getMeta).sort()).toEqual(Object.keys(h.logger.error.mock.calls[0]![1] as object).sort());
   });
 });
 

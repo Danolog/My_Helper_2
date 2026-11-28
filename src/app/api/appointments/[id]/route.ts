@@ -190,7 +190,8 @@ export async function GET(
       data: formattedAppointment,
     });
   } catch (error) {
-    logger.error("[Appointments API] Database error", { error: error });
+    // Tylko nazwa i kod błędu: treść błędu zapytania niesie parametry.
+    logger.error("[Appointments API] Database error", { ...toErrorIdentity(error) });
     return NextResponse.json(
       { success: false, error: "Failed to fetch appointment" },
       { status: 500 }
