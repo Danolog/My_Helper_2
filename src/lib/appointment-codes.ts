@@ -15,29 +15,37 @@
 /**
  * - `appointmentNotFound` — 404: brak wizyty w salonie z sesji (albo pracownik
  *   pyta o cudzą wizytę; odpowiedź nie zdradza, że wizyta istnieje);
- * - `invalidId` — 400: identyfikator wizyty nie jest UUID (przed bazą);
+ * - `invalidId` — 400: identyfikator wizyty nie jest UUID (przed odczytem wizyty);
  * - `salonNotFound` — 404: sesja bez salonu;
- * - `appointmentCancelled` — 400: wizyta jest anulowana.
+ * - `appointmentCancelled` — 400: wizyta jest anulowana;
+ * - `invalidJson` — 400: body żądania nie jest poprawnym JSON-em;
+ * - `assignmentForbidden` — 403: pracownik zmienia pracownika, klienta albo
+ *   usługę wizyty (zmienia je tylko właściciel albo recepcja).
  */
 export const APPOINTMENT_ERROR_CODES = {
   appointmentNotFound: "APPOINTMENT_NOT_FOUND",
   invalidId: "INVALID_APPOINTMENT_ID",
   salonNotFound: "SALON_NOT_FOUND",
   appointmentCancelled: "APPOINTMENT_CANCELLED",
+  invalidJson: "INVALID_JSON",
+  assignmentForbidden: "APPOINTMENT_ASSIGNMENT_FORBIDDEN",
 } as const;
 
 export type AppointmentErrorKey = keyof typeof APPOINTMENT_ERROR_CODES;
 export type AppointmentErrorCode = (typeof APPOINTMENT_ERROR_CODES)[AppointmentErrorKey];
+export type AppointmentErrorStatus = 400 | 403 | 404;
 
 /**
  * Status HTTP każdego wspólnego kodu wizyty — jedno źródło dla tras
- * PUT/DELETE wizyty; test porównuje go ze statusem trasy zakończenia.
+ * GET/PUT/DELETE wizyty; test porównuje go ze statusem trasy zakończenia.
  */
-export const APPOINTMENT_ERROR_STATUS: Record<AppointmentErrorCode, 400 | 404> = {
+export const APPOINTMENT_ERROR_STATUS: Record<AppointmentErrorCode, AppointmentErrorStatus> = {
   APPOINTMENT_NOT_FOUND: 404,
   INVALID_APPOINTMENT_ID: 400,
   SALON_NOT_FOUND: 404,
   APPOINTMENT_CANCELLED: 400,
+  INVALID_JSON: 400,
+  APPOINTMENT_ASSIGNMENT_FORBIDDEN: 403,
 };
 
 /**
@@ -48,7 +56,7 @@ export const APPOINTMENT_ERROR_STATUS: Record<AppointmentErrorCode, 400 | 404> =
 export function appointmentError(
   key: AppointmentErrorKey,
   message: string
-): { status: 400 | 404; body: { success: false; code: AppointmentErrorCode; error: string } } {
+): { status: AppointmentErrorStatus; body: { success: false; code: AppointmentErrorCode; error: string } } {
   const code = APPOINTMENT_ERROR_CODES[key];
   return { status: APPOINTMENT_ERROR_STATUS[code], body: { success: false, code, error: message } };
 }

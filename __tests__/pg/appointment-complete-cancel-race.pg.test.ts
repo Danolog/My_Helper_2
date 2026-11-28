@@ -19,6 +19,13 @@
  * - PUT właściciela z body dialogu edycji czeka za zakończeniem: nowa notatka
  *   → 200, zapisana tylko notatka; zmieniony termin → 409, wiersz bez zmian.
  *
+ * Zakres edycji pracownika: pracownik zmienia pracownika, klienta albo usługę
+ * własnej wizyty → 403, wiersz bez zmian; ta sama wartość z dialogu → 200.
+ *
+ * Kontrola pozytywna `notifications`: właściciel odwołuje wizytę klienta
+ * z SMS-em → jeden nowy wiersz (zapytanie użyte w przypadkach „bez wpisu” widzi
+ * wiersze).
+ *
  * Kolejność wymusza obserwator: trzyma blokadę wiersza wizyty w swojej
  * transakcji, uruchamia pierwsze żądanie, czeka, aż stanie za jego blokadą,
  * uruchamia drugie, czeka, aż w łańcuchu `pg_blocking_pids` stoją dwie
@@ -36,7 +43,8 @@
  *
  * Dane: konta `it-t3-ccr-…` (właściciel i pracownik), salon, trzech
  * pracowników (jeden z kontem), klient bez telefonu, usługa, wizyty w 2097
- * z zadatkiem 50.00 i płatnością `pending`. Salon usuwany w `afterAll` (kaskada).
+ * z zadatkiem 50.00 i płatnością `pending`. Salon usuwany w `afterAll` (kaskada);
+ * konta usuwane także wtedy, gdy usunięcie salonu się nie uda.
  */
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
@@ -308,6 +316,8 @@ async function rowOf(appt: string) {
     .select({
       status: appointments.status,
       employeeId: appointments.employeeId,
+      clientId: appointments.clientId,
+      serviceId: appointments.serviceId,
       notes: appointments.notes,
       startTime: appointments.startTime,
       endTime: appointments.endTime,
@@ -379,8 +389,12 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
   afterAll(async () => {
     if (!h) return;
     try {
-      if (ids.salon) await h.db.delete(salons).where(inArray(salons.id, [ids.salon]));
-      await h.db.delete(user).where(inArray(user.id, [OWNER, EMP_USER]));
+      try {
+        if (ids.salon) await h.db.delete(salons).where(inArray(salons.id, [ids.salon]));
+      } finally {
+        // Konta niezależnie od wyniku usunięcia salonu (błąd kaskady nie zostawia kont).
+        await h.db.delete(user).where(inArray(user.id, [OWNER, EMP_USER]));
+      }
     } finally {
       await h.end();
     }
@@ -490,11 +504,14 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
 
       expect(cancelled!.status, outcomeSummary(cancelled)).toBe(404);
       expect(cancelled!.body.code).toBe(APPOINTMENT_ERROR_CODES.appointmentNotFound);
-      expect(await statusOf(appt)).toBe("completed");
+      const row = await rowOf(appt);
+      expect(row.status).toBe("completed");
+      expect(row.employeeId).toBe(ids.empOther);
       expect(await paymentStatusOf(payment)).toBe("pending");
       expect(await notificationsOfClient()).toHaveLength(0);
       expect(mocks.notifyWaitingList).not.toHaveBeenCalled();
       expect(mocks.refund).not.toHaveBeenCalled();
+      expect(mocks.error).not.toHaveBeenCalled();
     },
     30_000
   );
@@ -587,4 +604,80 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
     },
     30_000
   );
+
+  it("pracownik zmienia pracownika własnej wizyty → 403 z kodem, wiersz bez zmian", async () => {
+    const { appt, start, end } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn, clientId: ids.client });
+    ctl.userId = EMP_USER;
+
+    const res = await parseResponse<Body>(
+      await update(appt, {
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        employeeId: ids.empOther,
+        clientId: ids.client,
+        serviceId: ids.service,
+        notes: "IT notatka przy przekazaniu",
+      })
+    );
+
+    expect(res.status, outcomeSummary(res)).toBe(403);
+    expect(res.body.code).toBe(APPOINTMENT_ERROR_CODES.assignmentForbidden);
+    const row = await rowOf(appt);
+    expect(row.employeeId).toBe(ids.empOwn);
+    expect(row.clientId).toBe(ids.client);
+    expect(row.serviceId).toBe(ids.service);
+    expect(row.notes).toBeNull();
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
+
+  it("pracownik zmienia klienta albo usługę własnej wizyty → 403, wiersz bez zmian", async () => {
+    const { appt } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn, clientId: ids.client });
+    ctl.userId = EMP_USER;
+
+    const noClient = await parseResponse<Body>(await update(appt, { clientId: null }));
+    const noService = await parseResponse<Body>(await update(appt, { serviceId: null }));
+
+    expect(noClient.status, outcomeSummary(noClient)).toBe(403);
+    expect(noService.status, outcomeSummary(noService)).toBe(403);
+    const row = await rowOf(appt);
+    expect(row.clientId).toBe(ids.client);
+    expect(row.serviceId).toBe(ids.service);
+  });
+
+  it("kontrola: pracownik, body dialogu z tymi samymi wartościami i nowym terminem → 200, termin zapisany", async () => {
+    const { appt, start, end } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn, clientId: ids.client });
+    ctl.userId = EMP_USER;
+    // Termin przesunięty o 15 minut, w obrębie własnego slotu (bez kolizji z innymi wizytami testu).
+    const movedStart = new Date(start.getTime() + 900_000);
+    const movedEnd = new Date(end.getTime() + 900_000);
+
+    const res = await parseResponse<Body>(
+      await update(appt, {
+        startTime: movedStart.toISOString(),
+        endTime: movedEnd.toISOString(),
+        employeeId: ids.empOwn,
+        clientId: ids.client,
+        serviceId: ids.service,
+        notes: "IT notatka pracownika",
+      })
+    );
+
+    expect(res.status, outcomeSummary(res)).toBe(200);
+    const row = await rowOf(appt);
+    expect(row.startTime.getTime()).toBe(movedStart.getTime());
+    expect(row.notes).toBe("IT notatka pracownika");
+    expect(row.employeeId).toBe(ids.empOwn);
+  });
+
+  it("kontrola pozytywna: właściciel odwołuje wizytę klienta z SMS-em → jeden nowy wiersz notifications", async () => {
+    const { appt } = await appointmentWithPendingDeposit({ clientId: ids.client });
+    const before = (await notificationsOfClient()).length;
+
+    const res = await parseResponse<Body>(await cancelNotify(appt));
+
+    expect(res.status, outcomeSummary(res)).toBe(200);
+    expect(await statusOf(appt)).toBe("cancelled");
+    expect(await notificationsOfClient()).toHaveLength(before + 1);
+    expect(mocks.error).not.toHaveBeenCalled();
+  });
 });

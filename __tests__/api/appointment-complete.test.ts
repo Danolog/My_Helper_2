@@ -2595,6 +2595,8 @@ describe("POST /api/appointments/[id]/complete", () => {
         invalidId: "INVALID_APPOINTMENT_ID",
         salonNotFound: "SALON_NOT_FOUND",
         appointmentCancelled: "APPOINTMENT_CANCELLED",
+        invalidJson: "INVALID_JSON",
+        assignmentForbidden: "APPOINTMENT_ASSIGNMENT_FORBIDDEN",
       });
       for (const key of Object.keys(APPOINTMENT_ERROR_CODES) as Array<keyof typeof APPOINTMENT_ERROR_CODES>) {
         expect(COMPLETE_ERROR_CODES[key]).toBe(APPOINTMENT_ERROR_CODES[key]);

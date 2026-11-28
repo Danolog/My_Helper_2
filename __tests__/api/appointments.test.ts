@@ -1815,7 +1815,7 @@ describe("GET /api/appointments/[id]", () => {
 
     expect(status).toBe(400);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("Invalid appointment ID format");
+    expect(body.error).toBe("Nieprawidłowy identyfikator wizyty.");
   });
 
   it("should return 404 when appointment not found", async () => {
@@ -1828,7 +1828,7 @@ describe("GET /api/appointments/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("not found");
+    expect(body.error).toBe("Nie znaleziono wizyty. Odśwież kalendarz.");
   });
 
   it("should return 500 when database throws", async () => {
@@ -1917,7 +1917,7 @@ describe("PUT /api/appointments/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("not found");
+    expect(body.error).toBe("Nie znaleziono wizyty. Odśwież kalendarz.");
   });
 
   it("should return 409 when rescheduled time conflicts", async () => {
@@ -2102,7 +2102,7 @@ describe("PUT /api/appointments/[id]", () => {
 
     expect(status).toBe(500);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("Failed to update appointment");
+    expect(body.error).toBe("Nie udało się zapisać zmian w wizycie. Spróbuj ponownie.");
   });
 });
 
@@ -2339,7 +2339,7 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
     const { status, body } = await parseResponse(res);
 
     expect(status).toBe(500);
-    expect(body.error).toContain("Failed to update appointment");
+    expect(body.error).toBe("Nie udało się zapisać zmian w wizycie. Spróbuj ponownie.");
     expect(mockRecordDepositStatusEvent).toHaveBeenCalledTimes(1);
     expect(updateChain.returning!.mock.invocationCallOrder[0]!).toBeLessThan(
       mockRecordDepositStatusEvent.mock.invocationCallOrder[0]!
@@ -2579,7 +2579,7 @@ describe("DELETE /api/appointments/[id]", () => {
     mockDbSelect.mockReturnValue(chainMock([]));
     const { status, body } = await callDelete();
     expect(status).toBe(404);
-    expect(body.error).toContain("not found");
+    expect(body.error).toBe("Nie znaleziono wizyty. Odśwież kalendarz.");
   });
 
   it("400 gdy już anulowana (odczyt przed transakcją)", async () => {
@@ -2588,7 +2588,7 @@ describe("DELETE /api/appointments/[id]", () => {
     );
     const { status, body } = await callDelete();
     expect(status).toBe(400);
-    expect(body.error).toContain("anulowana");
+    expect(body.error).toBe("Ta wizyta jest już odwołana.");
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
@@ -2610,7 +2610,7 @@ describe("DELETE /api/appointments/[id]", () => {
     mockDbSelect.mockReturnValue(errorChain);
     const { status, body } = await callDelete();
     expect(status).toBe(500);
-    expect(body.error).toContain("Failed to cancel appointment");
+    expect(body.error).toBe("Nie udało się odwołać wizyty. Spróbuj ponownie.");
   });
 
   // #193: efekty uboczne anulacji (nazwa salonu, wpis powiadomienia) w kontekście
@@ -2692,7 +2692,7 @@ describe("P0-A tenant isolation — /api/appointments/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("Salon not found");
+    expect(body.error).toBe("Nie znaleziono salonu powiązanego z tym kontem.");
     // Hard guard: no DB read happens before the tenant is known.
     expect(mockDbSelect).not.toHaveBeenCalled();
   });
@@ -2754,7 +2754,7 @@ describe("P0-A tenant isolation — /api/appointments/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("Salon not found");
+    expect(body.error).toBe("Nie znaleziono salonu powiązanego z tym kontem.");
   });
 });
 
@@ -2816,7 +2816,7 @@ describe("Faza 3 role — /api/appointments (employee)", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("not found");
+    expect(body.error).toBe("Nie znaleziono wizyty. Odśwież kalendarz.");
   });
 });
 

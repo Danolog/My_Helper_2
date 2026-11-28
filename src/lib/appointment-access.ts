@@ -1,5 +1,6 @@
 /**
- * Warunek „wizyta wołającego” dla zapisu i odwołania wizyty w panelu salonu.
+ * Warunek „wizyta wołającego” dla odczytu (GET), zapisu i odwołania wizyty
+ * w panelu salonu.
  *
  * Właściciel i recepcja działają na każdej wizycie salonu z sesji. Każda inna
  * rola (dziś `employee`) tylko na wizycie przypisanej do własnego rekordu
@@ -9,16 +10,28 @@
  *
  * Cudza wizyta i wizyta nieistniejąca dają tę samą odpowiedź 404, więc
  * odmowa nie zdradza, że wizyta istnieje.
+ *
+ * Ta sama lista ról decyduje, kto zmienia pracownika, klienta i usługę
+ * wizyty (`hasFullAppointmentAccess`).
  */
 import { and, eq, sql, type SQL } from "drizzle-orm";
-import type { SalonContext } from "@/lib/salon-context";
+import type { SalonContext, SalonRole } from "@/lib/salon-context";
 import { appointments } from "@/lib/schema";
 
 /** Część kontekstu salonu, od której zależy warunek. */
 export type AppointmentCaller = Pick<SalonContext, "role" | "employeeId">;
 
 /** Role, które działają na każdej wizycie salonu. */
-const FULL_ACCESS_ROLES: readonly string[] = ["owner", "receptionist"];
+const FULL_ACCESS_ROLES: readonly SalonRole[] = ["owner", "receptionist"];
+
+/**
+ * Czy wołający działa na każdej wizycie salonu (właściciel, recepcja).
+ * Tylko te role zmieniają pracownika, klienta i usługę wizyty: usługa
+ * wyznacza cenę, a cena prowizję.
+ */
+export function hasFullAppointmentAccess(caller: Pick<AppointmentCaller, "role">): boolean {
+  return FULL_ACCESS_ROLES.includes(caller.role);
+}
 
 /**
  * Identyfikator pracownika, do którego wizyt ogranicza się wołający, albo
