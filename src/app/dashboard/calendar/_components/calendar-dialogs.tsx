@@ -168,6 +168,7 @@ export function CalendarDialogs({
             id: completeAppointment.id,
             employeeId: completeAppointment.employeeId,
             status: completeAppointment.status,
+            discountAmount: completeAppointment.discountAmount ?? null,
             service: completeAppointment.service ? {
               id: completeAppointment.service.id,
               name: completeAppointment.service.name,
