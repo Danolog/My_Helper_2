@@ -48,9 +48,6 @@ vi.mock("@/components/clients/client-profile-tab", () => ({
 vi.mock("@/components/clients/client-history-tab", () => ({
   ClientHistoryTab: () => <div data-testid="stub-history" />,
 }));
-vi.mock("@/components/clients/client-insights-tab", () => ({
-  ClientInsightsTab: () => <div data-testid="stub-insights" />,
-}));
 vi.mock("@/components/clients/client-loyalty-tab", () => ({
   ClientLoyaltyTab: () => <div data-testid="stub-loyalty" />,
 }));

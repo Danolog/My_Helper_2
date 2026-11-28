@@ -39,9 +39,6 @@ vi.mock("@/components/clients/client-profile-tab", () => ({
 vi.mock("@/components/clients/client-history-tab", () => ({
   ClientHistoryTab: () => <div data-testid="stub-history" />,
 }));
-vi.mock("@/components/clients/client-insights-tab", () => ({
-  ClientInsightsTab: () => <div data-testid="stub-insights" />,
-}));
 vi.mock("@/components/clients/client-loyalty-tab", () => ({
   ClientLoyaltyTab: () => <div data-testid="stub-loyalty" />,
 }));
@@ -105,7 +102,6 @@ describe("ClientProfilePage — zakładka punktów lojalnościowych", () => {
 
     expect(screen.getByTestId("tab-profile")).toBeInTheDocument();
     expect(screen.getByTestId("tab-history")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-ai-insights")).toBeInTheDocument();
   });
 
   it("lojalność zamrożona: strona nie pyta API o punkty klienta", async () => {
@@ -127,5 +123,50 @@ describe("ClientProfilePage — zakładka punktów lojalnościowych", () => {
     await waitFor(() => {
       expect(screen.getByTestId("tab-loyalty")).toBeInTheDocument();
     });
+  });
+});
+
+// Analiza klienta przez AI została usunięta bez zastępstwa: karta ma tylko
+// zakładki profilu, historii (i lojalności, gdy moduł działa).
+describe("ClientProfilePage — bez zakładki analizy AI", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("karta klienta renderuje się bez zakładki analizy AI, także przy wszystkich modułach włączonych", async () => {
+    renderPage({ ...DEFAULT_MODULES, loyalty: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("client-tabs")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("tab-ai-insights")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /AI|analiza/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("data-testid"))).toEqual([
+      "tab-profile",
+      "tab-history",
+      "tab-loyalty",
+    ]);
+  });
+
+  it("strona nie woła tras AI (ani usuniętej analizy klienta)", async () => {
+    renderPage({ ...DEFAULT_MODULES, loyalty: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("client-tabs")).toBeInTheDocument();
+    });
+
+    const { mutationFetch } = await import("@/lib/api-client");
+    const urls = [
+      ...(global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0])),
+      ...vi.mocked(mutationFetch).mock.calls.map((c) => String(c[0])),
+    ];
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.filter((u) => u.includes("/api/ai/"))).toEqual([]);
   });
 });
