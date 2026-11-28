@@ -97,6 +97,7 @@ const SNAPSHOT: Record<string, string[]> = {
   "db-system.ts:dbSystem": [],
   "deposits-cleanup.ts:cleanupStaleDepositBookings": ["src/app/api/cron/cleanup-pending-deposits/route.ts"],
   "health.ts:checkDatabase": ["src/app/api/diagnostics/route.ts"],
+  "health.ts:checkSchemaMigrations": ["src/app/api/health/route.ts"],
   "health.ts:pingDatabase": ["src/app/api/health/route.ts"],
   "notifications.ts:countPushSubscriptions": [
     "src/app/api/cron/push-reminders-24h/route.ts",

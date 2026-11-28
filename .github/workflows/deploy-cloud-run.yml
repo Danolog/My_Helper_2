@@ -131,6 +131,7 @@ jobs:
       - name: Smoke test standalone server from the image
         env:
           RUNNER_IMAGE: ${{ steps.img.outputs.runner }}
+          MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}
         run: infra/gcp/smoke-container.sh "$RUNNER_IMAGE"
 
       - uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
