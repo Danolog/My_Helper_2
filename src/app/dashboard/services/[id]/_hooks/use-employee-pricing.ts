@@ -20,10 +20,24 @@ export function useEmployeePricing({
   const [empPriceEmployeeId, setEmpPriceEmployeeId] = useState("");
   const [empPriceCustomPrice, setEmpPriceCustomPrice] = useState("");
   const [savingEmpPrice, setSavingEmpPrice] = useState(false);
+  // Cena otwarta do zmiany; null = dialog dodawania nowej ceny.
+  const [editingEmpPrice, setEditingEmpPrice] = useState<EmployeePrice | null>(
+    null,
+  );
 
   const resetEmpPriceForm = () => {
     setEmpPriceEmployeeId("");
     setEmpPriceCustomPrice("");
+    setEditingEmpPrice(null);
+  };
+
+  // Zmiana istniejącej ceny (bez wariantu): ten sam dialog i ten sam POST,
+  // który dla istniejącej pary pracownik + usługa aktualizuje wiersz.
+  const openEditEmployeePrice = (price: EmployeePrice) => {
+    setEditingEmpPrice(price);
+    setEmpPriceEmployeeId(price.employeeId);
+    setEmpPriceCustomPrice(price.customPrice);
+    setEmpPriceDialogOpen(true);
   };
 
   const handleSaveEmployeePrice = async () => {
@@ -39,11 +53,11 @@ export function useEmployeePricing({
       isNaN(Number(empPriceCustomPrice)) ||
       isNaN(parseFloat(empPriceCustomPrice))
     ) {
-      toast.error("Cena musi byc liczba");
+      toast.error("Cena musi być liczbą.");
       return;
     }
     if (parseFloat(empPriceCustomPrice) < 0) {
-      toast.error("Cena nie moze byc ujemna");
+      toast.error("Cena nie może być ujemna.");
       return;
     }
 
@@ -77,10 +91,10 @@ export function useEmployeePricing({
         setEmpPriceDialogOpen(false);
         await onSuccess();
       } else {
-        toast.error(data.error || "Nie udalo sie zapisac ceny");
+        toast.error(data.error || "Nie udało się zapisać ceny");
       }
     } catch {
-      toast.error("Blad podczas zapisywania ceny pracownika");
+      toast.error("Błąd podczas zapisywania ceny pracownika");
     } finally {
       setSavingEmpPrice(false);
     }
@@ -93,7 +107,7 @@ export function useEmployeePricing({
 
     if (
       !confirm(
-        `Czy na pewno chcesz usunac indywidualna cene dla ${empName}?`,
+        `Czy na pewno chcesz usunąć indywidualną cenę dla ${empName}?`,
       )
     ) {
       return;
@@ -108,13 +122,13 @@ export function useEmployeePricing({
       const data = await res.json();
 
       if (data.success) {
-        toast.success(`Indywidualna cena dla ${empName} usunieta`);
+        toast.success(`Indywidualna cena dla ${empName} usunięta`);
         await onSuccess();
       } else {
-        toast.error(data.error || "Nie udalo sie usunac ceny");
+        toast.error(data.error || "Nie udało się usunąć ceny");
       }
     } catch {
-      toast.error("Blad podczas usuwania ceny pracownika");
+      toast.error("Błąd podczas usuwania ceny pracownika");
     }
   };
 
@@ -126,6 +140,8 @@ export function useEmployeePricing({
     empPriceCustomPrice,
     setEmpPriceCustomPrice,
     savingEmpPrice,
+    editingEmpPrice,
+    openEditEmployeePrice,
     resetEmpPriceForm,
     handleSaveEmployeePrice,
     handleDeleteEmployeePrice,

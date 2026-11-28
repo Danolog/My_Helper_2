@@ -155,6 +155,8 @@ export default function ServiceDetailPage() {
         empPriceCustomPrice={empPricing.empPriceCustomPrice}
         setEmpPriceCustomPrice={empPricing.setEmpPriceCustomPrice}
         savingEmpPrice={empPricing.savingEmpPrice}
+        editingEmpPrice={empPricing.editingEmpPrice}
+        openEditEmployeePrice={empPricing.openEditEmployeePrice}
         resetEmpPriceForm={empPricing.resetEmpPriceForm}
         handleSaveEmployeePrice={empPricing.handleSaveEmployeePrice}
         handleDeleteEmployeePrice={empPricing.handleDeleteEmployeePrice}
