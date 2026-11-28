@@ -330,6 +330,9 @@ export default function AppointmentDetailPage() {
           onOpenChange={setEditDialogOpen}
           appointment={appointment}
           onAppointmentUpdated={fetchAppointment}
+          // Wizyta usunięta albo przepisana na innego pracownika: odczyt
+          // strony dałby 404, więc przejście do świeżego kalendarza.
+          onAppointmentGone={() => router.replace("/dashboard/calendar")}
         />
       )}
 

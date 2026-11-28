@@ -21,9 +21,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Textarea } from "@/components/ui/textarea";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
+import { APPOINTMENT_ERROR_CODES } from "@/lib/appointment-codes";
+import { COMPLETED_STATUS } from "@/lib/appointment-completion";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { notesChange } from "@/lib/appointment-notes";
 import { depositsDisabledMessage } from "@/lib/deposit-ui";
@@ -101,6 +104,36 @@ interface EditAppointmentDialogProps {
   onOpenChange: (open: boolean) => void;
   appointment: AppointmentData;
   onAppointmentUpdated: () => void;
+  /**
+   * Wizyty nie ma już w zasięgu wołającego (404 `APPOINTMENT_NOT_FOUND` z PUT
+   * albo z ponownego odczytu): okno się zamyka, a strona przechodzi do
+   * kalendarza. Bez tej funkcji okno woła `onAppointmentUpdated`.
+   */
+  onAppointmentGone?: () => void;
+}
+
+export const UPDATE_FAILED_TITLE = "Nie udało się zaktualizować wizyty";
+export const ASSIGNMENT_CHANGED_TITLE = "Wizyta zmieniła się w międzyczasie";
+export const ASSIGNMENT_CHANGED_DESCRIPTION =
+  "Wczytaliśmy aktualne dane wizyty. Sprawdź je i zapisz ponownie.";
+/** Ponowny odczyt wizyty się nie udał: własny tekst okna, nie `error` z odpowiedzi GET. */
+export const RELOAD_FAILED_DESCRIPTION =
+  "Nie udało się wczytać aktualnych danych wizyty. Odśwież stronę i spróbuj ponownie.";
+
+interface ApiResponse {
+  success?: boolean;
+  code?: unknown;
+  error?: string;
+  data?: AppointmentData;
+}
+
+/** Odpowiedź błędu (np. strona 500 z proxy) nie musi być JSON-em. */
+async function readJson(res: Response): Promise<ApiResponse | null> {
+  try {
+    return (await res.json()) as ApiResponse;
+  } catch {
+    return null;
+  }
 }
 
 export function EditAppointmentDialog({
@@ -108,8 +141,17 @@ export function EditAppointmentDialog({
   onOpenChange,
   appointment,
   onAppointmentUpdated,
+  onAppointmentGone,
 }: EditAppointmentDialogProps) {
   const { salonId } = useSalonId();
+  const role = useSalonRole();
+  // Pracownik zmienia tylko termin i notatkę; pracownika, klienta i usługę
+  // zmienia właściciel albo recepcja (serwer odpowiada na inną wartość 403).
+  const assignmentLocked = role === "employee";
+
+  // Wizyta z ponownego odczytu po 403 przypisania; null = dane z `appointment`.
+  const [reloaded, setReloaded] = useState<AppointmentData | null>(null);
+  const current = reloaded ?? appointment;
 
   // Form state
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -155,6 +197,7 @@ export function EditAppointmentDialog({
   // Populate form with appointment data when dialog opens
   useEffect(() => {
     if (open && appointment) {
+      setReloaded(null);
       setSelectedClientId(appointment.clientId || "none");
       setSelectedServiceId(appointment.serviceId || "none");
       setSelectedEmployeeId(appointment.employeeId);
@@ -292,6 +335,46 @@ export function EditAppointmentDialog({
   // Get selected client
   const selectedClient = clients.find((c) => c.id === selectedClientId);
 
+  // Wizyty nie ma (usunięta albo przepisana na innego pracownika): zamknięcie
+  // okna i odświeżenie widoku zamiast kolejnych prób zapisu.
+  const handleGone = (description: string | undefined) => {
+    toast.error(UPDATE_FAILED_TITLE, { description });
+    onOpenChange(false);
+    (onAppointmentGone ?? onAppointmentUpdated)();
+  };
+
+  // Ponowny odczyt wizyty po 403 przypisania: pracownik, klient i usługa
+  // z bazy, termin i notatka wpisane w oknie zostają, okno zostaje otwarte.
+  const reloadAssignment = async () => {
+    let data: ApiResponse | null = null;
+    try {
+      const res = await fetch(`/api/appointments/${appointment.id}`);
+      data = await readJson(res);
+    } catch {
+      data = null;
+    }
+
+    if (data?.code === APPOINTMENT_ERROR_CODES.appointmentNotFound) {
+      handleGone(data.error);
+      return;
+    }
+    if (data?.success !== true || !data.data) {
+      toast.error(UPDATE_FAILED_TITLE, { description: RELOAD_FAILED_DESCRIPTION });
+      return;
+    }
+
+    const fresh = data.data;
+    setReloaded(fresh);
+    setSelectedEmployeeId(fresh.employeeId);
+    setSelectedClientId(fresh.clientId || "none");
+    setSelectedServiceId(fresh.serviceId || "none");
+    // Listy z otwarcia okna mogą nie mieć nowego klienta albo usługi.
+    fetchClients();
+    fetchServices();
+    fetchEmployees();
+    toast.info(ASSIGNMENT_CHANGED_TITLE, { description: ASSIGNMENT_CHANGED_DESCRIPTION });
+  };
+
   // Handle form submit
   const handleSubmit = async () => {
     // Validate required fields
@@ -314,11 +397,19 @@ export function EditAppointmentDialog({
     }
 
     // Calculate start and end time
-    const { duration } = getEffectivePriceAndDuration();
-    const effectiveDuration = duration > 0 ? duration : 60; // Default to 60 min if no service
-
     const startTime = new Date(`${appointmentDate}T${appointmentTime}:00`);
-    const endTime = new Date(startTime.getTime() + effectiveDuration * 60 * 1000);
+    let durationMs: number;
+    if (current.status === COMPLETED_STATUS) {
+      // Wizyta zakończona: czas trwania z zapisanej wizyty, nie z bieżącej
+      // usługi — inaczej sama zmiana notatki po zmianie czasu trwania usługi
+      // przesuwa koniec wizyty i serwer odrzuca zapis.
+      durationMs = new Date(current.endTime).getTime() - new Date(current.startTime).getTime();
+    } else {
+      const { duration } = getEffectivePriceAndDuration();
+      const effectiveDuration = duration > 0 ? duration : 60; // Default to 60 min if no service
+      durationMs = effectiveDuration * 60 * 1000;
+    }
+    const endTime = new Date(startTime.getTime() + durationMs);
 
     setSubmitting(true);
     try {
@@ -343,7 +434,13 @@ export function EditAppointmentDialog({
       // 409 DEPOSITS_DISABLED: komunikat z API zamiast ogólnego błędu.
       const depositsDisabledError = depositsDisabledMessage(data);
 
-      if (data.success) {
+      if (data.code === APPOINTMENT_ERROR_CODES.appointmentNotFound) {
+        handleGone(data.error);
+      } else if (assignmentLocked && data.code === APPOINTMENT_ERROR_CODES.assignmentForbidden) {
+        // Pola przypisania są tylko do odczytu, więc ten kod u pracownika
+        // znaczy: okno ma nieaktualną wizytę. Wczytujemy ją ponownie.
+        await reloadAssignment();
+      } else if (data.success) {
         const notificationMsg = notifyClient && appointment.client
           ? "Klient zostanie powiadomiony o zmianie"
           : undefined;
@@ -355,7 +452,7 @@ export function EditAppointmentDialog({
       } else if (depositsDisabledError) {
         toast.error(depositsDisabledError);
       } else {
-        toast.error("Nie udalo sie zaktualizowac wizyty", {
+        toast.error(UPDATE_FAILED_TITLE, {
           description: data.error,
         });
       }
@@ -390,11 +487,13 @@ export function EditAppointmentDialog({
               value={clientSearch}
               onChange={(e) => setClientSearch(e.target.value)}
               className="mb-2"
+              disabled={assignmentLocked}
               data-testid="edit-client-search-input"
             />
             <Select
               value={selectedClientId}
               onValueChange={setSelectedClientId}
+              disabled={assignmentLocked}
             >
               <SelectTrigger data-testid="edit-client-select">
                 <SelectValue placeholder={loadingClients ? "Ladowanie klientow..." : "Wybierz klienta (opcjonalnie)"} />
@@ -436,6 +535,7 @@ export function EditAppointmentDialog({
             <Select
               value={selectedServiceId}
               onValueChange={setSelectedServiceId}
+              disabled={assignmentLocked}
             >
               <SelectTrigger data-testid="edit-service-select">
                 <SelectValue placeholder={loadingServices ? "Ladowanie uslug..." : "Wybierz usluge (opcjonalnie)"} />
@@ -458,6 +558,7 @@ export function EditAppointmentDialog({
               <Select
                 value={selectedVariantId}
                 onValueChange={setSelectedVariantId}
+                disabled={assignmentLocked}
               >
                 <SelectTrigger data-testid="edit-variant-select">
                   <SelectValue placeholder={loadingVariants ? "Ladowanie wariantow..." : "Wybierz wariant (opcjonalnie)"} />
@@ -509,6 +610,7 @@ export function EditAppointmentDialog({
                 setSelectedEmployeeId(val);
                 if (val) clearFieldError("employee");
               }}
+              disabled={assignmentLocked}
             >
               <SelectTrigger
                 data-testid="edit-employee-select"
@@ -601,7 +703,7 @@ export function EditAppointmentDialog({
           </div>
 
           {/* Notify client option */}
-          {appointment.client && (
+          {current.client && (
             <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30" data-testid="notify-client-section">
               <Checkbox
                 id="notify-client"
@@ -618,8 +720,8 @@ export function EditAppointmentDialog({
                   Powiadom klienta o zmianach
                 </label>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {appointment.client.firstName} {appointment.client.lastName}
-                  {appointment.client.phone ? ` - ${appointment.client.phone}` : ""}
+                  {current.client.firstName} {current.client.lastName}
+                  {current.client.phone ? ` - ${current.client.phone}` : ""}
                 </p>
               </div>
             </div>
