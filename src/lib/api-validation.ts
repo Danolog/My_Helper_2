@@ -1210,8 +1210,8 @@ export const subscriptionConfirmSchema = z.object({
 export const commissionRateSchema = z.object({
   employeeId: requiredString("Pracownik"),
   commissionRate: z.union([
-    z.string().refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) >= 0 && parseFloat(v) <= 100, { message: "Prowizja musi byc 0-100" }),
-    z.number().min(0).max(100, "Prowizja musi byc 0-100"),
+    z.string().refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) >= 0 && parseFloat(v) <= 100, { message: COMMISSION_PERCENTAGE_MESSAGE }),
+    z.number().min(0, COMMISSION_PERCENTAGE_MESSAGE).max(100, COMMISSION_PERCENTAGE_MESSAGE),
   ]),
 });
 

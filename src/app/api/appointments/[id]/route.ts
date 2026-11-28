@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, ne } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
+import { appointmentError, type AppointmentErrorKey } from "@/lib/appointment-codes";
 import {
   APPOINTMENT_COMPLETED_CODE,
   APPOINTMENT_COMPLETED_MESSAGE,
@@ -22,6 +23,7 @@ import { DEPOSITS_DISABLED_CODE, DEPOSITS_DISABLED_MESSAGE, isDepositEnabled } f
 import { logger } from "@/lib/logger";
 import { NO_SHOW_DEDICATED_ROUTE_CODE, NO_SHOW_STATUS } from "@/lib/no-show";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
+import { toErrorIdentity } from "@/lib/safe-error";
 import {
   AppointmentMarkedNoShowError,
   buildSalonCancellationSms,
@@ -89,18 +91,52 @@ function completedFinalResponse() {
 }
 
 /**
+ * Odpowiedź błędu wizyty ze wspólnym kodem: status HTTP z mapy
+ * `APPOINTMENT_ERROR_STATUS` (`@/lib/appointment-codes`), ten sam co w trasie
+ * zakończenia. Teksty zostają przy tej trasie.
+ */
+const APPOINTMENT_ERROR_MESSAGES: Record<AppointmentErrorKey, string> = {
+  salonNotFound: "Salon not found",
+  invalidId: "Invalid appointment ID format",
+  appointmentNotFound: "Appointment not found",
+  appointmentCancelled: "Wizyta jest juz anulowana",
+};
+
+function appointmentErrorResponse(key: AppointmentErrorKey) {
+  const { status, body } = appointmentError(key, APPOINTMENT_ERROR_MESSAGES[key]);
+  return NextResponse.json(body, { status });
+}
+
+/**
+ * Zapis nie trafił w wiersz, a ponowny odczyt w tej samej transakcji nie
+ * znalazł wizyty dla wołającego (usunięta albo przepisana na innego
+ * pracownika). Rzucany w transakcji, żeby wycofać wszystkie jej zapisy;
+ * trasa mapuje go na 404 `APPOINTMENT_NOT_FOUND`.
+ */
+class AppointmentGoneError extends Error {
+  constructor() {
+    super("Appointment not found at write");
+    this.name = "AppointmentGoneError";
+  }
+}
+
+/** Warunek „wiersz wołającego”: pracownik zapisuje tylko własną wizytę. */
+function callerRowWhere(ctx: SalonContext, id: string) {
+  const base = and(eq(appointments.id, id), eq(appointments.salonId, ctx.salonId));
+  return ctx.role === "employee" && ctx.employeeId
+    ? and(base, eq(appointments.employeeId, ctx.employeeId))
+    : base;
+}
+
+/**
  * Zapis samych notatek wizyty zakończonej. Tylko kolumna `notes` — termin,
  * pracownik, usługa, klient, zadatek i status zostają bez zmian. Status
  * wizyty zakończonej nie zmienia się już żadną trasą, więc UPDATE nie
- * potrzebuje warunku statusu.
+ * potrzebuje warunku statusu. `null` = zapis nie trafił w wiersz wołającego.
  */
-async function updateCompletedNotes(salonId: string, id: string, notes: string | null) {
-  const [row] = await forSalon(salonId).raw((tx) =>
-    tx
-      .update(appointments)
-      .set({ notes })
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .returning()
+async function updateCompletedNotes(ctx: SalonContext, id: string, notes: string | null) {
+  const [row] = await forSalon(ctx.salonId).raw((tx) =>
+    tx.update(appointments).set({ notes }).where(callerRowWhere(ctx, id)).returning()
   );
   // Tylko nazwa pola — treść notatki nie trafia do logów.
   logger.info(`[Appointments API] Updating appointment ${id}`, { fields: ["notes"] });
@@ -190,22 +226,12 @@ export async function PUT(
     if (isAuthError(authResult)) return authResult;
 
     const ctx = await getSalonContext();
-    if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
+    if (!ctx) return appointmentErrorResponse("salonNotFound");
     const salonId = ctx.salonId;
 
     const { id } = await params;
 
-    if (!isValidUuid(id)) {
-      return NextResponse.json(
-        { success: false, error: "Invalid appointment ID format" },
-        { status: 400 }
-      );
-    }
+    if (!isValidUuid(id)) return appointmentErrorResponse("invalidId");
 
     const body = await request.json();
 
@@ -241,11 +267,10 @@ export async function PUT(
     // wizyta = 404 (scoped findOne, kontekst RLS ustawiony).
     const existing = await forSalon(salonId).findOne(appointments, id);
 
+    // Brak wizyty i cudza wizyta pracownika przed sprawdzeniem statusu:
+    // 404, nie 409 — odpowiedź nie zdradza, że wizyta istnieje ani że jest zakończona.
     if (!existing || isForeignForEmployee(ctx, existing.employeeId)) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
+      return appointmentErrorResponse("appointmentNotFound");
     }
 
     // Wizyta zakończona ma ostateczny wynik: prowizja, zużycie materiałów
@@ -258,9 +283,19 @@ export async function PUT(
       if (completedAppointmentChangedFields(existing, parsed.data).length > 0) {
         return completedFinalResponse();
       }
+      if (notes === undefined) {
+        return NextResponse.json({
+          success: true,
+          data: existing,
+          message: "Appointment rescheduled successfully",
+        });
+      }
+      const saved = await updateCompletedNotes(ctx, id, notes);
+      // Wiersz zniknął (albo przepisany na innego pracownika) po odczycie.
+      if (!saved) return appointmentErrorResponse("appointmentNotFound");
       return NextResponse.json({
         success: true,
-        data: notes === undefined ? existing : await updateCompletedNotes(salonId, id, notes),
+        data: saved,
         message: "Appointment rescheduled successfully",
       });
     }
@@ -350,6 +385,16 @@ export async function PUT(
     if (depositAmount !== undefined) updateData.depositAmount = depositAmount;
     if (depositPaid !== undefined) updateData.depositPaid = depositPaid;
 
+    // Body bez żadnego pola do zapisu: nic się nie zmienia, odpowiedź z wizytą
+    // z odczytu (UPDATE bez kolumn byłby błędem zapytania i 500).
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({
+        success: true,
+        data: existing,
+        message: "Appointment rescheduled successfully",
+      });
+    }
+
     // Sprawdzenie kolizji + update w JEDNYM kontekscie RLS (raw(tx)); jawny
     // eq(salonId) zachowany jako filtr aplikacyjny (defense in depth).
     const conflict = await forSalon(salonId).raw(async (tx) => {
@@ -407,30 +452,58 @@ export async function PUT(
       // UPDATE: odczyt `existing` jest sprzed transakcji, a zakończenie mogło
       // wejść po nim (np. przeniesienie w kalendarzu równolegle z zakończeniem).
       // UPDATE czeka na blokadę wiersza i sprawdza warunek ponownie.
+      // Pracownik zapisuje tylko własną wizytę: warunek pracownika w UPDATE
+      // sprawdzany ponownie po czekaniu na blokadę (przepisanie w tej chwili).
       const changesBeyondNotes = Object.keys(updateData).some((field) => field !== "notes");
       const [updatedAppointment] = await tx
         .update(appointments)
         .set(updateData)
         .where(
           changesBeyondNotes
-            ? and(
-                eq(appointments.id, id),
-                eq(appointments.salonId, salonId),
-                ne(appointments.status, COMPLETED_STATUS)
-              )
-            : and(eq(appointments.id, id), eq(appointments.salonId, salonId))
+            ? and(callerRowWhere(ctx, id), ne(appointments.status, COMPLETED_STATUS))
+            : callerRowWhere(ctx, id)
         )
         .returning();
 
-      if (!updatedAppointment && changesBeyondNotes) {
-        // Bieżący status z tej samej transakcji (READ COMMITTED widzi
-        // zatwierdzone zakończenie). Błąd wycofuje całą transakcję.
+      if (!updatedAppointment) {
+        // Stan wiersza z tej samej transakcji: nowe zapytanie w READ COMMITTED
+        // widzi zmianę zatwierdzoną w czasie czekania na blokadę (zakończenie,
+        // usunięcie, przepisanie na innego pracownika). Błąd wycofuje całą
+        // transakcję; 200 z `data: null` nie wychodzi.
         const [current] = await tx
-          .select({ status: appointments.status })
+          .select({
+            status: appointments.status,
+            startTime: appointments.startTime,
+            endTime: appointments.endTime,
+            employeeId: appointments.employeeId,
+            clientId: appointments.clientId,
+            serviceId: appointments.serviceId,
+            depositAmount: appointments.depositAmount,
+            depositPaid: appointments.depositPaid,
+          })
           .from(appointments)
           .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
           .limit(1);
-        if (current?.status === COMPLETED_STATUS) throw new AppointmentCompletedError();
+        // Brak wizyty i cudza wizyta pracownika przed statusem: 404, nie 409.
+        if (!current || isForeignForEmployee(ctx, current.employeeId)) throw new AppointmentGoneError();
+        if (current.status !== COMPLETED_STATUS) {
+          // Wiersz jest, nie jest zakończony, a warunek UPDATE go nie objął —
+          // stan, którego trasa nie przewiduje. Wycofanie i 500 z logiem.
+          throw new Error("Appointment update matched no row");
+        }
+        // Zakończenie weszło w trakcie zapisu. Dialog edycji wysyła termin,
+        // pracownika, klienta i usługę także przy samej zmianie notatki: gdy te
+        // pola są takie jak w zakończonej wizycie, zapisuje się tylko notatka
+        // (jak przy wizycie zakończonej przed odczytem). Inaczej 409.
+        if (completedAppointmentChangedFields(current, parsed.data).length > 0) {
+          throw new AppointmentCompletedError();
+        }
+        const [saved] =
+          notes === undefined
+            ? await tx.select().from(appointments).where(callerRowWhere(ctx, id)).limit(1)
+            : await tx.update(appointments).set({ notes }).where(callerRowWhere(ctx, id)).returning();
+        if (!saved) throw new AppointmentGoneError();
+        return { conflicting: null, blocked: null, updated: saved };
       }
 
       if (
@@ -481,6 +554,10 @@ export async function PUT(
     if (error instanceof AppointmentCompletedError) {
       return completedFinalResponse();
     }
+    // Wizyta zniknęła (albo przepisana na innego pracownika) w trakcie zapisu.
+    if (error instanceof AppointmentGoneError) {
+      return appointmentErrorResponse("appointmentNotFound");
+    }
     // #171: równoległy zapis zajął termin (EXCLUDE w bazie: 23P01 albo 40P01
     // przy jego sprawdzaniu, przeniesienia „na krzyż”) — ta sama kolizja.
     if (isAppointmentSlotTaken(error)) {
@@ -489,7 +566,10 @@ export async function PUT(
         { status: 409 }
       );
     }
-    logger.error("[Appointments API] Database error", { error, code: dbErrorCode(error) });
+    // Tylko nazwa i kod błędu: treść błędu zapytania niesie parametry
+    // (notatka o kliencie, zadatek).
+    // `code` — SQLSTATE także z błędu opakowanego głębiej (#171).
+    logger.error("[Appointments API] Database error", { ...toErrorIdentity(error), code: dbErrorCode(error) });
     return NextResponse.json(
       { success: false, error: "Failed to update appointment" },
       { status: 500 }
@@ -507,15 +587,12 @@ export async function DELETE(
     if (isAuthError(authResult)) return authResult;
 
     const ctx = await getSalonContext();
-    if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
+    if (!ctx) return appointmentErrorResponse("salonNotFound");
     const salonId = ctx.salonId;
 
     const { id } = await params;
+    // Niepoprawny identyfikator dawał błąd bazy (22P02) i 500.
+    if (!isValidUuid(id)) return appointmentErrorResponse("invalidId");
     const url = new URL(request.url);
     const notifyClient = url.searchParams.get("notifyClient") === "true";
 
@@ -537,23 +614,17 @@ export async function DELETE(
         .limit(1)
     );
 
+    // Brak wizyty i cudza wizyta pracownika przed sprawdzeniem statusu:
+    // 404, nie 409 — odpowiedź nie zdradza, że wizyta istnieje ani że jest zakończona.
     const row = result[0];
     if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
+      return appointmentErrorResponse("appointmentNotFound");
     }
 
     const appointment = row.appointment;
 
     // Check if already cancelled
-    if (appointment.status === "cancelled") {
-      return NextResponse.json(
-        { success: false, error: "Wizyta jest juz anulowana" },
-        { status: 400 }
-      );
-    }
+    if (appointment.status === "cancelled") return appointmentErrorResponse("appointmentCancelled");
 
     // Wczesne sprawdzenie; po blokadzie wiersza sprawdza je ponownie
     // `cancelAppointmentInTx` (oznaczenie wstawione między odczytem a transakcją).
@@ -577,18 +648,8 @@ export async function DELETE(
     // cancelled w JEDNEJ transakcji (kontekst RLS salonu); decyzja o zwrocie
     // na stanie wizyty po blokadzie (`src/lib/salon-cancellation.ts`).
     const txResult = await forSalon(salonId).raw((tx) => cancelAppointmentInTx(tx, salonId, id));
-    if ("notFound" in txResult) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
-    }
-    if ("alreadyCancelled" in txResult) {
-      return NextResponse.json(
-        { success: false, error: "Wizyta jest juz anulowana" },
-        { status: 400 }
-      );
-    }
+    if ("notFound" in txResult) return appointmentErrorResponse("appointmentNotFound");
+    if ("alreadyCancelled" in txResult) return appointmentErrorResponse("appointmentCancelled");
     const { cancelled: cancelledAppointment, depositPaid, variant, failedPayments } = txResult;
     const depositAmount = appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0;
     const hasDeposit = depositAmount > 0;
@@ -660,7 +721,10 @@ export async function DELETE(
         );
         clientNotified = true;
       } catch (notifError) {
-        logger.error("[Appointments API] Failed to create notification", { error: notifError, appointmentId: id });
+        logger.error("[Appointments API] Failed to create notification", {
+          ...toErrorIdentity(notifError),
+          appointmentId: id,
+        });
         // Don't fail the cancellation if notification creation fails
       }
     }
@@ -686,7 +750,7 @@ export async function DELETE(
       const { notified, smsCount, pushCount, errors } = waitingListResult;
       logger.info(`[Appointments API] Waiting list notification result`, { notified, smsCount, pushCount, errors });
     } catch (waitingListError) {
-      logger.error("[Appointments API] Failed to notify waiting list", { error: waitingListError });
+      logger.error("[Appointments API] Failed to notify waiting list", { ...toErrorIdentity(waitingListError) });
       // Don't fail the cancellation if waiting list notification fails
     }
 
@@ -726,7 +790,8 @@ export async function DELETE(
     if (error instanceof AppointmentCompletedError) {
       return completedFinalResponse();
     }
-    logger.error("[Appointments API] Database error", { error: error });
+    // Tylko nazwa i kod błędu: treść błędu zapytania niesie parametry.
+    logger.error("[Appointments API] Database error", { ...toErrorIdentity(error) });
     return NextResponse.json(
       { success: false, error: "Failed to cancel appointment" },
       { status: 500 }

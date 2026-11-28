@@ -21,6 +21,7 @@ import {
   completeAppointmentSchema,
   updateServiceSchema,
   employeePriceSchema,
+  commissionRateSchema,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1176,6 +1177,29 @@ describe("completeAppointmentSchema — commissionPercentage", () => {
     const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
     expect(result.success).toBe(true);
     expect(result.data?.commissionPercentage ?? null).toBeNull();
+  });
+});
+
+describe("commissionRateSchema — stawka prowizji pracownika", () => {
+  const EMP = "22222222-2222-4222-8222-222222222222";
+  const MESSAGE = "Prowizja musi być liczbą od 0 do 100.";
+
+  it.each([["abc"], ["NaN"], ["Infinity"], ["-1"], ["100.01"], ["1000"], [-1], [-0.01], [100.01], [1000]])(
+    "%j → błąd stawki z polskim komunikatem",
+    (value) => {
+      const result = validateBody(commissionRateSchema, { employeeId: EMP, commissionRate: value });
+      expect(result).not.toBeNull();
+      expect(result!.details.commissionRate).toBe(MESSAGE);
+    }
+  );
+
+  it.each([[0], ["0"], [100], ["100"], [33.5], ["33.5"]])("%j → poprawna stawka", (value) => {
+    expect(validateBody(commissionRateSchema, { employeeId: EMP, commissionRate: value })).toBeNull();
+  });
+
+  it("schemat nie zawiera starego tekstu bez polskich znaków", () => {
+    const source = readFileSync(join(process.cwd(), "src/lib/api-validation.ts"), "utf8");
+    expect(source).not.toContain("Prowizja musi byc 0-100");
   });
 });
 
