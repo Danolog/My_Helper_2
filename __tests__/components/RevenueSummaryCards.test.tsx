@@ -179,6 +179,12 @@ describe("useRevenueData — PDF z tabelą metod płatności", () => {
       })
     );
 
+    // wiersze metod z zerem zostają, a grupa „bez zapisu” z 0 wizyt jest pominięta
+    expect(table(options, "Przychod wg metody platnosci").rows).toEqual([
+      ["Gotowka", "2", "0.00 PLN", "0.0%"],
+      ["Karta", "0", "0.00 PLN", "0.0%"],
+      ["BLIK", "0", "0.00 PLN", "0.0%"],
+    ]);
     expect(table(options, "Przychod wg metody platnosci").footerRow).toEqual(["RAZEM", "2", "0.00 PLN", "0.0%"]);
     expect(table(options, "Przychod wg uslugi").footerRow).toEqual(["RAZEM", "2", "0.00 PLN", "0.00 PLN", "0.0%"]);
     expect(table(options, "Przychod wg pracownika").footerRow).toEqual(["RAZEM", "2", "0.00 PLN", "0.00 PLN", "0.0%"]);
