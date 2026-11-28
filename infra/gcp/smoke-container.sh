@@ -16,8 +16,14 @@
 #    zmiennej AUTH_RATE_LIMIT_STORE i NIE MOŻE zawierać podanej wartości ani
 #    wartości sekretu. Sprawdzane PRZED jakimkolwiek /api/health.
 # 3. Kontrola W1: ten sam tryb Cloud Run z losową wartością i jednorazową
-#    bazą (pgvector w sieci --internal, bez portu na hoście, losowe hasło)
-#    → /api/health = 200 (sonda z wnętrza kontenera).
+#    bazą (pgvector w sieci --internal, bez portu na hoście, losowe hasło).
+#    Strażnik schematu w /api/health daje 503, gdy baza ma mniej migracji niż
+#    dziennik obrazu, więc najpierw kontrola negatywna: kontener na pustej
+#    bazie → /api/health = 503 „Service not ready” (nie „Database
+#    unavailable”). Potem obraz migratora (MIGRATOR_IMAGE, ten sam, który
+#    buduje workflow) na tej samej sieci i bazie musi zakończyć się kodem 0,
+#    a dopiero wtedy kontener kontrolny → /api/health = 200 (sondy z wnętrza
+#    kontenera).
 # 4. Bez bazy i bez K_SERVICE: kontener ma wstać, a /api/health odpowiedzieć
 #    503 (baza niedostępna) — nie paść przy starcie. Port inny niż 8080
 #    sprawdza, że serwer czyta PORT (Cloud Run go wstrzykuje). Na tym samym
@@ -36,8 +42,9 @@
 set -euo pipefail
 
 IMAGE="${1:-}"
-if [[ -z "$IMAGE" ]]; then
-  echo "usage: $0 <image>" >&2
+MIGRATOR="${MIGRATOR_IMAGE:-}"
+if [[ -z "$IMAGE" || -z "$MIGRATOR" ]]; then
+  echo "usage: MIGRATOR_IMAGE=<migrator image> $0 <image>" >&2
   exit 2
 fi
 PORT_IN=9090
@@ -47,10 +54,12 @@ name="mh-smoke-$$"
 guard_name="mh-smoke-guard-$$"
 store_name="mh-smoke-store-$$"
 ctl_name="mh-smoke-ctl-$$"
+pre_name="mh-smoke-pre-$$"
+mig_name="mh-smoke-migrate-$$"
 db_name="mh-smoke-db-$$"
 net="mh-smoke-net-$$"
 cleanup() {
-  docker rm -f "$name" "$guard_name" "$store_name" "$ctl_name" "$db_name" >/dev/null 2>&1 || true
+  docker rm -f "$name" "$guard_name" "$store_name" "$ctl_name" "$pre_name" "$mig_name" "$db_name" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -143,13 +152,58 @@ for _ in $(seq 1 "$WAIT"); do
   sleep 1
 done
 [[ "$db_ready" == 1 ]] || { echo "FAIL: W1 control: database not ready after ${WAIT}s" >&2; exit 1; }
+db_url="postgresql://smoke:${db_pw}@${db_name}:5432/smoke"
+
+# Kontrola negatywna: pusta baza (bez migracji) → 503 od strażnika schematu.
+docker run -d --name "$pre_name" --network "$net" \
+  -e K_SERVICE=myhelper \
+  -e NODE_ENV=production \
+  -e PORT=8080 \
+  -e BETTER_AUTH_SECRET="$(rand_hex 32)" \
+  -e BETTER_AUTH_URL="http://127.0.0.1:8080" \
+  -e POSTGRES_URL="$db_url" \
+  "$IMAGE" >/dev/null
+pre_out=""
+for _ in $(seq 1 "$WAIT"); do
+  if ! docker inspect -f '{{.State.Running}}' "$pre_name" 2>/dev/null | grep -q true; then
+    docker logs "$pre_name" 2>&1 | tail -30 >&2
+    echo "FAIL: schema guard: container on an unmigrated database exited during startup" >&2
+    exit 1
+  fi
+  pre_out="$(docker exec "$pre_name" node -e "fetch('http://127.0.0.1:8080/api/health').then(async r=>{let e='';try{e=(await r.json()).error||''}catch{}console.log(r.status+' '+e)}).catch(()=>console.log(0))" 2>/dev/null || true)"
+  [[ -n "$pre_out" && "$pre_out" != "0" ]] && break
+  sleep 1
+done
+if [[ "$pre_out" != "503 Service not ready" ]]; then
+  docker logs "$pre_name" 2>&1 | tail -30 >&2
+  echo "FAIL: schema guard: /api/health on an unmigrated database returned '$pre_out' (expected '503 Service not ready')" >&2
+  exit 1
+fi
+echo "ok: schema guard: unmigrated database → /api/health 503 Service not ready"
+docker rm -f "$pre_name" >/dev/null 2>&1 || true
+
+# Obraz migratora na tej samej sieci i bazie → kod 0. Migrator nie wypisuje
+# adresu bazy (infra/db/migrate.mjs), więc jego log można pokazać przy porażce.
+mig_exit=0
+docker run --name "$mig_name" --network "$net" \
+  -e POSTGRES_URL="$db_url" \
+  "$MIGRATOR" >/dev/null 2>&1 || mig_exit=$?
+if [[ "$mig_exit" != 0 ]]; then
+  docker logs "$mig_name" 2>&1 | tail -30 >&2
+  echo "FAIL: migrator: exit code [$mig_exit] on the disposable database, expected [0]" >&2
+  exit 1
+fi
+echo "ok: migrator: migrations applied to the disposable database"
+docker rm -f "$mig_name" >/dev/null 2>&1 || true
+
+# Kontener kontrolny na zmigrowanej bazie → 200.
 docker run -d --name "$ctl_name" --network "$net" \
   -e K_SERVICE=myhelper \
   -e NODE_ENV=production \
   -e PORT=8080 \
   -e BETTER_AUTH_SECRET="$(rand_hex 32)" \
   -e BETTER_AUTH_URL="http://127.0.0.1:8080" \
-  -e POSTGRES_URL="postgresql://smoke:${db_pw}@${db_name}:5432/smoke" \
+  -e POSTGRES_URL="$db_url" \
   "$IMAGE" >/dev/null
 ctl_code=""
 for _ in $(seq 1 "$WAIT"); do
@@ -167,7 +221,7 @@ if [[ "$ctl_code" != "200" ]]; then
   echo "FAIL: W1 control: /api/health with database returned '$ctl_code' (expected 200)" >&2
   exit 1
 fi
-echo "ok: W1 control: random BETTER_AUTH_SECRET in Cloud Run mode → /api/health 200 with database"
+echo "ok: W1 control: random BETTER_AUTH_SECRET in Cloud Run mode → /api/health 200 with migrated database"
 docker rm -f "$ctl_name" "$db_name" >/dev/null 2>&1 || true
 
 # --- 4. Bez bazy: serwer wstaje, /api/health 503 --------------------------

@@ -9,7 +9,9 @@
  *  - tryb limitu: kontener w trybie platformy z losowym sekretem
  *    i niedozwoloną wartością AUTH_RATE_LIMIT_STORE musi się zakończyć kodem 1,
  *    log z nazwą zmiennej, bez wartości — także PRZED pierwszym /api/health;
- *  - kontrola W1: losowa wartość + jednorazowa baza w sieci --internal → 200;
+ *  - kontrola W1: losowa wartość + jednorazowa baza w sieci --internal; przed
+ *    migracją /api/health = 503 „Service not ready” (strażnik schematu), potem
+ *    obraz migratora (MIGRATOR_IMAGE) z kodem 0, potem kontener kontrolny → 200;
  *  - bez bazy i bez K_SERVICE → 503 (dotychczasowy przypadek), a potem
  *    /_next/image → 200 i content-type image/* (sharp w obrazie standalone).
  * Mutacje: wynik w opisie PR.
@@ -32,6 +34,7 @@ const envOf = (env: string[], name: string) => env.find((e) => e.startsWith(`${n
 const W1_VALUE = SOURCE.match(new RegExp(`^w1_env=\\("${AUTH}=([^"\\s]+)"\\)$`, "m"))?.[1] ?? "";
 const STORE = "AUTH_RATE_LIMIT_STORE";
 const STORE_VALUE = SOURCE.match(/^store_value="([^"\s]+)"$/m)?.[1] ?? "";
+const MIGRATOR = "img:migrator";
 
 const DIR = mkdtempSync(join(tmpdir(), "smoke-container-"));
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
@@ -39,8 +42,9 @@ const BIN = join(DIR, "bin");
 mkdirSync(BIN);
 
 // Fałszywy docker. Kontener = pliki $FAKE_STATE/<nazwa>.{env,status,code,log,role}.
-// Rola: obraz pgvector → db; K_SERVICE + BETTER_AUTH_SECRET = wartość W1 → guard;
-// K_SERVICE + AUTH_RATE_LIMIT_STORE → store; K_SERVICE → ctl; inaczej plain.
+// Rola: obraz pgvector → db; obraz migratora → migrator; K_SERVICE + BETTER_AUTH_SECRET
+// = wartość W1 → guard; K_SERVICE + AUTH_RATE_LIMIT_STORE → store; K_SERVICE i nazwa
+// mh-smoke-pre-* → pre (kontrola negatywna przed migracją); K_SERVICE → ctl; inaczej plain.
 // FAKE_GUARD i FAKE_STORE sterują zachowaniem kontenerów guard i store.
 writeFileSync(
   join(BIN, "docker"),
@@ -66,9 +70,11 @@ case "$cmd" in
     secret=$(grep '^BETTER_AUTH_SECRET' "$S/$name.env" | cut -d= -f2-)
     store=$(grep '^AUTH_RATE_LIMIT_STORE=' "$S/$name.env" | cut -d= -f2-)
     if [ "$img" = "pgvector/pgvector:pg18" ]; then role=db
+    elif [ "$img" = "$FAKE_MIGRATOR_IMAGE" ]; then role=migrator
     elif grep -q '^K_SERVICE=' "$S/$name.env" && [ "$secret" = "$FAKE_W1_VALUE" ]; then role=guard
     elif grep -q '^K_SERVICE=' "$S/$name.env" && grep -q '^AUTH_RATE_LIMIT_STORE=' "$S/$name.env"; then role=store
-    elif grep -q '^K_SERVICE=' "$S/$name.env"; then role=ctl
+    elif grep -q '^K_SERVICE=' "$S/$name.env"; then
+      case "$name" in mh-smoke-pre-*) role=pre ;; *) role=ctl ;; esac
     else role=plain; fi
     echo "$role" > "$S/$name.role"
     echo running > "$S/$name.status"; echo 0 > "$S/$name.code"; : > "$S/$name.log"
@@ -96,6 +102,16 @@ case "$cmd" in
       esac
     fi
     if [ "$role" = ctl ] && [ -n "$FAKE_CTL_CRASH" ]; then echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; fi
+    if [ "$role" = pre ] && [ -n "$FAKE_PRE_CRASH" ]; then echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; fi
+    if [ "$role" = migrator ]; then
+      # Migrator: pierwszy plan (bez -d), kod wyjścia = kod docker run.
+      code="$FAKE_MIGRATE_EXIT"; [ -n "$code" ] || code=0
+      echo exited > "$S/$name.status"; echo "$code" > "$S/$name.code"
+      if [ "$code" = 0 ]; then echo "[migrate] done" > "$S/$name.log"; : > "$S/migrated"
+      else echo "[migrate] failed: fake migration error" > "$S/$name.log"; fi
+      cat "$S/$name.log"
+      exit "$code"
+    fi
     echo "fakeid-$name" ;;
   inspect)
     fmt="$2"; name="$3"
@@ -110,7 +126,19 @@ case "$cmd" in
     name="$1"; shift
     case "$1" in
       pg_isready) [ -z "$FAKE_DB_DOWN" ] ;;
-      node) echo "$(cat "$S/$name.role")-probe" >> "$FAKE_LOG"; echo "$FAKE_CTL_HEALTH" ;;
+      node)
+        # Stan bazy: plik $S/migrated po udanym migratorze. Bez niego strażnik
+        # schematu daje 503 „Service not ready”, z nim 200. FAKE_PRE_HEALTH
+        # i FAKE_CTL_HEALTH nadpisują odpowiedź kontenera pre / ctl.
+        role=$(cat "$S/$name.role")
+        echo "$role-probe" >> "$FAKE_LOG"
+        if [ "$role" = pre ]; then
+          if [ -n "$FAKE_PRE_HEALTH" ]; then echo "$FAKE_PRE_HEALTH"
+          elif [ -f "$S/migrated" ]; then echo "200 "
+          else echo "503 Service not ready"; fi
+        elif [ -n "$FAKE_CTL_HEALTH" ]; then echo "$FAKE_CTL_HEALTH"
+        elif [ -f "$S/migrated" ]; then echo 200
+        else echo 503; fi ;;
       id) echo 1000 ;;
     esac ;;
   network|rm) ;;
@@ -147,7 +175,8 @@ function smoke(extra: Record<string, string> = {}) {
       FAKE_LOG: log,
       FAKE_W1_VALUE: W1_VALUE,
       FAKE_W1_SHA: sha256Hex(W1_VALUE),
-      FAKE_CTL_HEALTH: "200",
+      MIGRATOR_IMAGE: MIGRATOR,
+      FAKE_MIGRATOR_IMAGE: MIGRATOR,
       FAKE_PLAIN_HEALTH: "503",
       FAKE_IMAGE: "200 image/webp",
       SMOKE_WAIT: "3",
@@ -189,9 +218,11 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     const lines = r.stdout.split("\n").filter((l) => l.startsWith("ok:"));
     expect(lines[0]).toMatch(/^ok: W1: public test BETTER_AUTH_SECRET → exit 1/);
     expect(lines[1]).toMatch(/^ok: rate-limit store: invalid AUTH_RATE_LIMIT_STORE → exit 1/);
-    expect(lines[2]).toMatch(/^ok: W1 control: .* 200/);
-    expect(lines[3]).toMatch(/^ok: \/api\/health -> 503/);
-    expect(lines[4]).toMatch(/^ok: next\/image -> 200 image\/webp/);
+    expect(lines[2]).toMatch(/^ok: schema guard: unmigrated database → \/api\/health 503 Service not ready/);
+    expect(lines[3]).toMatch(/^ok: migrator: migrations applied/);
+    expect(lines[4]).toMatch(/^ok: W1 control: .* 200 with migrated database/);
+    expect(lines[5]).toMatch(/^ok: \/api\/health -> 503/);
+    expect(lines[6]).toMatch(/^ok: next\/image -> 200 image\/webp/);
     const guardRun = r.calls.findIndex((c) => c.startsWith("run ") && c.includes("mh-smoke-guard-"));
     const guardExit = r.calls.findIndex((c) => c.startsWith("inspect -f {{.State.ExitCode}} mh-smoke-guard-"));
     const guardLogs = r.calls.findIndex((c) => c.startsWith("logs mh-smoke-guard-"));
@@ -267,7 +298,13 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(dbPw).toMatch(/^[0-9a-f]{32}$/);
     expect(envOf(ctl.env, PG_URL)).toBe(`postgresql://smoke:${dbPw}@${db.name}:5432/smoke`);
     expect(r.calls.some((c) => /^network create --internal mh-smoke-net-/.test(c))).toBe(true);
-    const runs = r.calls.filter((c) => c.startsWith("run ") && (c.includes(db.name) || c.includes(ctl.name)));
+    const pre = r.byRole("pre")!;
+    const mig = r.byRole("migrator")!;
+    expect(envOf(pre.env, PG_URL)).toBe(envOf(ctl.env, PG_URL));
+    expect(envOf(mig.env, PG_URL)).toBe(envOf(ctl.env, PG_URL));
+    const names = [db.name, ctl.name, pre.name, mig.name];
+    const runs = r.calls.filter((c) => c.startsWith("run ") && names.some((nm) => c.includes(nm)));
+    expect(runs).toHaveLength(4);
     for (const c of runs) {
       expect(c).toMatch(/--network mh-smoke-net-/);
       expect(c).not.toMatch(/ -p /);
@@ -301,6 +338,83 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(msg);
     expect(r.calls.some((c) => c.startsWith("curl "))).toBe(false);
+  });
+
+  it("strażnik schematu: kontrola negatywna → migrator → kontener kontrolny, w tej kolejności; migrator to MIGRATOR_IMAGE na pierwszym planie", () => {
+    const r = smoke();
+    expect(r.status, r.stderr).toBe(0);
+    const pre = r.byRole("pre")!;
+    const mig = r.byRole("migrator")!;
+    const ctl = r.byRole("ctl")!;
+    const at = (pred: (c: string) => boolean) => r.calls.findIndex(pred);
+    const preRun = at((c) => c.startsWith("run ") && c.includes(pre.name));
+    const preProbe = at((c) => c === "pre-probe");
+    const migRun = at((c) => c.startsWith("run ") && c.includes(mig.name));
+    const ctlRun = at((c) => c.startsWith("run ") && c.includes(ctl.name));
+    const ctlProbe = at((c) => c === "ctl-probe");
+    expect(preRun).toBeGreaterThanOrEqual(0);
+    expect(preProbe).toBeGreaterThan(preRun);
+    expect(migRun).toBeGreaterThan(preProbe);
+    expect(ctlRun).toBeGreaterThan(migRun);
+    expect(ctlProbe).toBeGreaterThan(ctlRun);
+    const migCall = r.calls[migRun]!;
+    expect(migCall.endsWith(` ${MIGRATOR}`)).toBe(true);
+    expect(migCall).not.toMatch(/(^| )-d( |$)/);
+    // Migrator dostaje tylko adres bazy — bez trybu platformy i bez sekretu aplikacji.
+    expect(mig.env.map((e) => e.split("=")[0])).toEqual([PG_URL]);
+  });
+
+  it.each([
+    ["kod 1", "1"],
+    ["kod 3", "3"],
+  ])("migrator kończy się błędem (%s) → kod 1, kontener kontrolny nie startuje, przypadek bez bazy też nie", (_l, exit) => {
+    const r = smoke({ FAKE_MIGRATE_EXIT: exit });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`FAIL: migrator: exit code [${exit}] on the disposable database, expected [0]`);
+    expect(r.stderr).toContain("[migrate] failed: fake migration error");
+    expect(r.stdout).not.toMatch(/ok: migrator/);
+    expect(r.byRole("ctl")).toBeUndefined();
+    expect(r.calls.some((c) => c === "ctl-probe")).toBe(false);
+    expect(r.calls.some((c) => c.startsWith("curl "))).toBe(false);
+  });
+
+  it.each([
+    ["200 na pustej bazie (strażnik nie działa)", { FAKE_PRE_HEALTH: "200 " }, "200 "],
+    ["503 od niedostępnej bazy, nie od strażnika", { FAKE_PRE_HEALTH: "503 Database unavailable" }, "503 Database unavailable"],
+    ["serwer nie odpowiada", { FAKE_PRE_HEALTH: "0" }, "0"],
+  ])("kontrola negatywna: %s → kod 1, migrator nie startuje", (_l, extra, out) => {
+    const r = smoke(extra);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      `FAIL: schema guard: /api/health on an unmigrated database returned '${out}' (expected '503 Service not ready')`,
+    );
+    expect(r.byRole("migrator")).toBeUndefined();
+    expect(r.byRole("ctl")).toBeUndefined();
+  });
+
+  it("kontrola negatywna: kontener pada przy starcie → kod 1, migrator nie startuje", () => {
+    const r = smoke({ FAKE_PRE_CRASH: "1" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/schema guard: container on an unmigrated database exited during startup/);
+    expect(r.byRole("migrator")).toBeUndefined();
+  });
+
+  it("workflow wdrożenia przekazuje do kroku testu dymnego ten sam obraz migratora, który buduje", () => {
+    const wf = readFileSync(join(ROOT, ".github/workflows/deploy-cloud-run.yml"), "utf8");
+    const steps = wf.split(/\n(?=      - )/);
+    const smokeStep = steps.find((s) => s.includes("infra/gcp/smoke-container.sh"))!;
+    const buildStep = steps.find((s) => s.includes("--target migrator"))!;
+    expect(smokeStep).toBeDefined();
+    expect(buildStep).toContain('-t "$MIGRATOR_IMAGE"');
+    expect(buildStep).toContain("MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}");
+    expect(smokeStep).toContain("MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}");
+  });
+
+  it("bez MIGRATOR_IMAGE → kod 2 i instrukcja użycia, żaden kontener nie startuje", () => {
+    const r = smoke({ MIGRATOR_IMAGE: "" });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/^usage: MIGRATOR_IMAGE=<migrator image> /);
+    expect(r.calls.some((c) => c.startsWith("run "))).toBe(false);
   });
 
   it("bez bazy: /api/health 200 zamiast 503 → kod 1 (dotychczasowy przypadek)", () => {
@@ -342,7 +456,15 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
   });
 
   it("sprzątanie: każdy kontener i sieć usuwane przy wyjściu (także po porażce W1 i trybu limitu)", () => {
-    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_STORE: "run" }, { FAKE_CTL_HEALTH: "503" }, { FAKE_IMAGE: "500 text/html" }]) {
+    for (const extra of [
+      {},
+      { FAKE_GUARD: "run" },
+      { FAKE_STORE: "run" },
+      { FAKE_PRE_HEALTH: "200 " },
+      { FAKE_MIGRATE_EXIT: "1" },
+      { FAKE_CTL_HEALTH: "503" },
+      { FAKE_IMAGE: "500 text/html" },
+    ]) {
       const r = smoke(extra);
       const rmCalls = r.calls.filter((c) => c.startsWith("rm -f ")).join(" ");
       for (const c of r.containers) expect(rmCalls, c.name).toContain(c.name);
