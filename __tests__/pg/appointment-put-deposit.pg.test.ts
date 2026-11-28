@@ -254,7 +254,7 @@ suite("PUT wizyty a dziennik zadatku — prawdziwy Postgres", () => {
       const res = await parseResponse(await put(appt, { depositPaid: true, notes: "it-aput notatka cofnięta" }));
 
       expect(res.status).toBe(500);
-      expect(res.body).toEqual({ success: false, error: "Failed to update appointment" });
+      expect(res.body).toEqual({ success: false, error: "Nie udało się zapisać zmian w wizycie. Spróbuj ponownie." });
       expect(ctl.recordCalls).toBe(1);
       expect(await stateOf(appt)).toMatchObject({ depositPaid: false, notes: null });
       expect(await eventsOf(appt)).toHaveLength(0);
@@ -271,7 +271,7 @@ suite("PUT wizyty a dziennik zadatku — prawdziwy Postgres", () => {
       const res = await parseResponse(await put(appt, { depositPaid: true, notes: "it-aput salon B" }));
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Appointment not found" });
+      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Nie znaleziono wizyty. Odśwież kalendarz." });
       expect(await stateOf(appt)).toMatchObject({ salonId: ids.salonA, depositPaid: false, notes: null });
       expect(ctl.recordCalls).toBe(0);
       expect(await eventsOf(appt)).toHaveLength(0);
@@ -395,7 +395,7 @@ suite("PUT wizyty a dziennik zadatku — prawdziwy Postgres", () => {
       const res = await parseResponse(await del(appt, "?notifyClient=true"));
 
       expect(res.status).toBe(404);
-      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Appointment not found" });
+      expect(res.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: "Nie znaleziono wizyty. Odśwież kalendarz." });
       expect(await statusOf(appt)).toMatchObject({ status: "scheduled", depositPaid: true });
       expect(mocks.refund).not.toHaveBeenCalled();
       expect(mocks.notifyWaitingList).not.toHaveBeenCalled();

@@ -1,11 +1,20 @@
 /**
- * PUT i DELETE /api/appointments/[id] — wspólne kody wizyty i statusy HTTP.
+ * GET, PUT i DELETE /api/appointments/[id] — wspólne kody wizyty i statusy HTTP.
  *
- * - Każda odpowiedź 4xx PUT i DELETE ze wspólnej sytuacji (zły id, brak salonu,
- *   brak wizyty, wizyta anulowana) ma `code` z `@/lib/appointment-codes`
- *   i status z mapy `APPOINTMENT_ERROR_STATUS`.
+ * - Każda odpowiedź 4xx GET, PUT i DELETE ze wspólnej sytuacji (zły id, brak
+ *   salonu, brak wizyty, wizyta anulowana, zły JSON, zmiana przypisania przez
+ *   pracownika) ma `code` z `@/lib/appointment-codes` i status z mapy
+ *   `APPOINTMENT_ERROR_STATUS`. Test deklaruje, które trasy i metody wysyłają
+ *   dany kod, i porównuje to z tym, co widzi.
  * - Dla każdego wspólnego kodu (i dla `APPOINTMENT_COMPLETED`) status w trasie
- *   zakończenia jest taki sam jak w PUT/DELETE.
+ *   zakończenia jest taki sam jak w GET/PUT/DELETE.
+ * - Pracownik w swojej wizycie zmienia termin i notatkę; pracownika, klienta
+ *   i usługę zmienia tylko właściciel albo recepcja (inna wartość → 403, ta
+ *   sama wartość przechodzi).
+ * - Teksty odpowiedzi po polsku; wizyta cudza i nieistniejąca — to samo body.
+ * - DELETE po zatwierdzeniu anulowania odpowiada zawsze 200: błąd odczytu
+ *   nazw, zwrotu, SMS-a, powiadomienia albo listy oczekujących zostawia ślad
+ *   w logu, a nie 500.
  * - DELETE ze złym identyfikatorem → 400 `INVALID_APPOINTMENT_ID` bez odczytu wizyty.
  * - Kolejność: wizyta zakończona innego salonu albo innego pracownika → 404,
  *   nie 409 (odpowiedź nie zdradza, że wizyta istnieje ani jaki ma status).
@@ -20,7 +29,9 @@
  * - Dialog edycji wysyła termin, pracownika, klienta i usługę także przy samej
  *   zmianie notatki: zakończenie wizyty między odczytem a zapisem nie blokuje
  *   samej notatki, jeśli te pola są takie jak w zakończonej wizycie.
- * - Logi błędów GET, PUT i DELETE: nazwa i kod błędu, bez obiektu błędu.
+ * - Logi błędów GET, PUT i DELETE: nazwa i kod błędu, bez obiektu błędu
+ *   (dokładny zestaw kluczy; treść przeszukiwana także w polach `Error`
+ *   niewyliczalnych, `loggedText`).
  * - Statusy według ról: 200, 400, 401, 403, 404, 409, 500.
  *
  * Atrapą jest baza (forSalon), sesja i kontekst salonu.
@@ -44,6 +55,8 @@ const h = vi.hoisted(() => ({
   updateResults: [] as unknown[][],
   update: vi.fn(),
   set: vi.fn(),
+  /** Warunek przekazany do tx.update(...).where(...). */
+  updateWhere: vi.fn(),
   updated: [] as Record<string, unknown>[],
   transactions: 0,
   /** Wartości przekazane do tx.insert(...).values(...). */
@@ -86,7 +99,10 @@ vi.mock("@/lib/server/repository", () => {
       h.set(data);
       return chain;
     };
-    chain.where = () => chain;
+    chain.where = (condition: unknown) => {
+      h.updateWhere(condition);
+      return chain;
+    };
     chain.returning = () => chain;
     chain.then = (resolve: (v: unknown) => unknown) =>
       resolve(h.updateResults.length > 0 ? h.updateResults.shift() : h.updated);
@@ -148,6 +164,42 @@ type Err = { success: false; error: string; code?: string };
 type Ok = { success: true; data: Record<string, unknown> | null; message?: string };
 
 const BAD_ID = "nie-uuid";
+
+const OTHER_CLIENT = "abababab-abab-4bab-8bab-abababababab";
+const OTHER_SERVICE = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+
+/** Teksty odpowiedzi trasy wizyty. */
+const TEXT = {
+  salonNotFound: "Nie znaleziono salonu powiązanego z tym kontem.",
+  invalidId: "Nieprawidłowy identyfikator wizyty.",
+  appointmentNotFound: "Nie znaleziono wizyty. Odśwież kalendarz.",
+  appointmentCancelled: "Ta wizyta jest już odwołana.",
+  updateFailed: "Nie udało się zapisać zmian w wizycie. Spróbuj ponownie.",
+  cancelFailed: "Nie udało się odwołać wizyty. Spróbuj ponownie.",
+  assignmentForbidden: "Pracownika, klienta i usługę wizyty zmienia właściciel albo recepcja.",
+};
+
+const SKIPPED_TRACE = "[Appointments API] anulowanie zatwierdzone, skutek pominięty";
+
+/**
+ * Wywołania loggera jako tekst, z polami `Error` niewyliczalnymi (`message`,
+ * `stack`) i przyczyną — `JSON.stringify` samego `Error` ich nie pokazuje,
+ * więc asercja „nie zawiera” na zwykłym `JSON.stringify` nie złapałaby logu
+ * z całym obiektem błędu.
+ */
+function loggedText(calls: unknown[][]): string {
+  return JSON.stringify(calls, (_key, value: unknown) =>
+    value instanceof Error
+      ? Object.fromEntries(
+          Object.getOwnPropertyNames(value).map((name) => [name, (value as unknown as Record<string, unknown>)[name]])
+        )
+      : value
+  );
+}
+
+function get(id = APPOINTMENT) {
+  return GET(new Request(`http://localhost:3000/api/appointments/${id}`), createRouteParams(id));
+}
 
 function put(body: unknown, id = APPOINTMENT) {
   return PUT(
@@ -223,8 +275,10 @@ beforeEach(() => {
 describe("appointment-codes — mapa kod → status HTTP", () => {
   it("każdy wspólny kod ma status w mapie", () => {
     for (const code of Object.values(APPOINTMENT_ERROR_CODES)) {
-      expect([400, 404]).toContain(APPOINTMENT_ERROR_STATUS[code]);
+      expect([400, 403, 404]).toContain(APPOINTMENT_ERROR_STATUS[code]);
     }
+    expect(APPOINTMENT_ERROR_STATUS.INVALID_JSON).toBe(400);
+    expect(APPOINTMENT_ERROR_STATUS.APPOINTMENT_ASSIGNMENT_FORBIDDEN).toBe(403);
     expect(Object.keys(APPOINTMENT_ERROR_STATUS).sort()).toEqual(Object.values(APPOINTMENT_ERROR_CODES).sort());
   });
 
@@ -237,39 +291,83 @@ describe("appointment-codes — mapa kod → status HTTP", () => {
   });
 });
 
-describe("ten sam kod → ten sam status w complete i w PUT/DELETE", () => {
-  type Case = { route: string; run: () => Promise<Response>; arrange: () => void };
+describe("ten sam kod → ten sam status w complete i w GET/PUT/DELETE", () => {
+  type Route = "complete POST" | "GET" | "PUT" | "DELETE";
+  type Case = { route: Route; run: () => Promise<Response>; arrange: () => void };
+
+  /**
+   * Jawna deklaracja: które trasy i metody wysyłają dany kod. Test porównuje
+   * ją z trasami, które naprawdę odpowiedziały tym kodem — usunięcie
+   * przypadku albo trasy, która przestała wysyłać kod, daje czerwień.
+   */
+  const EMITTERS: Record<AppointmentErrorKey, Route[]> = {
+    invalidId: ["complete POST", "GET", "PUT", "DELETE"],
+    salonNotFound: ["complete POST", "GET", "PUT", "DELETE"],
+    appointmentNotFound: ["complete POST", "GET", "PUT", "DELETE"],
+    appointmentCancelled: ["complete POST", "DELETE"],
+    invalidJson: ["complete POST", "PUT"],
+    assignmentForbidden: ["PUT"],
+  };
+
+  const badJson = (url: string, method: string) =>
+    new Request(url, { method, headers: { "Content-Type": "application/json" }, body: "{nie json" });
 
   /** Dla każdego wspólnego kodu: jak wywołać tę sytuację w każdej z tras. */
   const cases: Record<AppointmentErrorKey, Case[]> = {
     invalidId: [
-      { route: "complete", arrange: () => {}, run: () => complete(BAD_ID) },
+      { route: "complete POST", arrange: () => {}, run: () => complete(BAD_ID) },
+      { route: "GET", arrange: () => {}, run: () => get(BAD_ID) },
       { route: "PUT", arrange: () => {}, run: () => put({ notes: "x" }, BAD_ID) },
       { route: "DELETE", arrange: () => {}, run: () => del(BAD_ID) },
     ],
     salonNotFound: [
-      { route: "complete", arrange: () => h.salonCtx.mockResolvedValue(null), run: () => complete() },
+      { route: "complete POST", arrange: () => h.salonCtx.mockResolvedValue(null), run: () => complete() },
+      { route: "GET", arrange: () => h.salonCtx.mockResolvedValue(null), run: () => get() },
       { route: "PUT", arrange: () => h.salonCtx.mockResolvedValue(null), run: () => put({ notes: "x" }) },
       { route: "DELETE", arrange: () => h.salonCtx.mockResolvedValue(null), run: () => del() },
     ],
     appointmentNotFound: [
-      { route: "complete", arrange: () => (h.selectResults = [[]]), run: () => complete() },
+      { route: "complete POST", arrange: () => (h.selectResults = [[]]), run: () => complete() },
+      { route: "GET", arrange: () => (h.selectResults = [[]]), run: () => get() },
       { route: "PUT", arrange: () => h.findOne.mockResolvedValue(null), run: () => put({ notes: "x" }) },
       { route: "DELETE", arrange: () => (h.selectResults = [[]]), run: () => del() },
     ],
     appointmentCancelled: [
       {
-        route: "complete",
+        route: "complete POST",
         arrange: () => (h.selectResults = [[{ appointment: appt({ status: "cancelled" }), service: null }]]),
         run: () => complete(),
       },
       { route: "DELETE", arrange: () => (h.selectResults = [deleteRow({ status: "cancelled" })]), run: () => del() },
     ],
+    invalidJson: [
+      {
+        route: "complete POST",
+        arrange: () => {},
+        run: () =>
+          COMPLETE(
+            badJson(`http://localhost:3000/api/appointments/${APPOINTMENT}/complete`, "POST"),
+            createRouteParams(APPOINTMENT)
+          ),
+      },
+      {
+        route: "PUT",
+        arrange: () => {},
+        run: () => PUT(badJson(`http://localhost:3000/api/appointments/${APPOINTMENT}`, "PUT"), createRouteParams(APPOINTMENT)),
+      },
+    ],
+    assignmentForbidden: [
+      {
+        route: "PUT",
+        arrange: () => h.salonCtx.mockResolvedValue(EMPLOYEE_CTX),
+        run: () => put({ employeeId: OTHER_EMPLOYEE }),
+      },
+    ],
   };
 
   it.each(Object.keys(APPOINTMENT_ERROR_CODES) as AppointmentErrorKey[])("%s", async (key) => {
     const code = APPOINTMENT_ERROR_CODES[key];
-    const seen: Array<{ route: string; status: number; code: string | undefined }> = [];
+    const seen: Array<{ route: Route; status: number; code: string | undefined }> = [];
     for (const c of cases[key]) {
       h.selectResults = [];
       h.salonCtx.mockResolvedValue(OWNER_CTX);
@@ -278,11 +376,16 @@ describe("ten sam kod → ten sam status w complete i w PUT/DELETE", () => {
       const { status, body } = await parseResponse<Err>(await c.run());
       seen.push({ route: c.route, status, code: body.code });
     }
-    expect(seen.map((s) => s.route)).toContain("complete");
-    expect(seen.length).toBeGreaterThanOrEqual(2);
+    // Trasy, które odpowiedziały tym kodem, są dokładnie tymi z deklaracji.
+    expect(seen.filter((s) => s.code === code).map((s) => s.route)).toEqual(EMITTERS[key]);
     for (const s of seen) {
       expect(s).toEqual({ route: s.route, status: APPOINTMENT_ERROR_STATUS[code], code });
     }
+  });
+
+  it("deklaracja obejmuje każdy wspólny kod", () => {
+    expect(Object.keys(EMITTERS).sort()).toEqual(Object.keys(APPOINTMENT_ERROR_CODES).sort());
+    expect(Object.keys(cases).sort()).toEqual(Object.keys(APPOINTMENT_ERROR_CODES).sort());
   });
 
   it("APPOINTMENT_COMPLETED: 409 w complete, PUT i DELETE", async () => {
@@ -338,6 +441,53 @@ describe("PUT /api/appointments/[id] — kody 4xx", () => {
 
     expect(res.status).toBe(401);
     expect(h.findOne).not.toHaveBeenCalled();
+  });
+
+  it("zły JSON → 400 INVALID_JSON z mapy (wcześniej 500), bez odczytu wizyty i bez logu błędu", async () => {
+    const res = await PUT(
+      new Request(`http://localhost:3000/api/appointments/${APPOINTMENT}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "{nie json",
+      }),
+      createRouteParams(APPOINTMENT)
+    );
+    const { status, body } = await parseResponse<Err>(res);
+
+    expect(status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      code: "INVALID_JSON",
+      error: "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.",
+    });
+    expect(h.findOne).not.toHaveBeenCalled();
+    expect(h.logger.error).not.toHaveBeenCalled();
+  });
+
+  it("kontrola: poprawny JSON z pustym obiektem → 200", async () => {
+    const res = await PUT(
+      new Request(`http://localhost:3000/api/appointments/${APPOINTMENT}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }),
+      createRouteParams(APPOINTMENT)
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("teksty: zły identyfikator, brak salonu, brak wizyty — całe body po polsku", async () => {
+    const badId = await parseResponse<Err>(await put({ notes: "x" }, BAD_ID));
+    h.salonCtx.mockResolvedValue(null);
+    const noSalon = await parseResponse<Err>(await put({ notes: "x" }));
+    h.salonCtx.mockResolvedValue(OWNER_CTX);
+    h.findOne.mockResolvedValue(null);
+    const missing = await parseResponse<Err>(await put({ notes: "x" }));
+
+    expect(badId.body).toEqual({ success: false, code: "INVALID_APPOINTMENT_ID", error: TEXT.invalidId });
+    expect(noSalon.body).toEqual({ success: false, code: "SALON_NOT_FOUND", error: TEXT.salonNotFound });
+    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
   });
 
   it.each([
@@ -458,17 +608,96 @@ describe("PUT — zapis bez wiersza nie daje 200 z data: null", () => {
     expect(h.update).not.toHaveBeenCalled();
   });
 
-  // Body przekazuje wizytę innemu pracownikowi: sprawdzenie kolizji woła
-  // eq(employeeId, OTHER_EMPLOYEE), więc eq(employeeId, EMPLOYEE) może pochodzić
-  // tylko z warunku wiersza wołającego w UPDATE.
+  // Pracownik nie przekazuje już wizyty innemu (403), więc sprawdzenie kolizji
+  // woła eq(employeeId, EMPLOYEE) tak samo dla każdej roli. Warunek wiersza
+  // wołającego w UPDATE dokłada u pracownika jedno takie wywołanie więcej.
+  const ownEmployeeEqCalls = () =>
+    vi.mocked(eq).mock.calls.filter(([column, value]) => column === appointments.employeeId && value === EMPLOYEE)
+      .length;
+
   it("pracownik: UPDATE ma warunek własnego pracownika", async () => {
+    h.salonCtx.mockResolvedValue(OWNER_CTX);
+    expect((await put({ notes: "x" })).status).toBe(200);
+    const ownerCalls = ownEmployeeEqCalls();
+
+    vi.mocked(eq).mockClear();
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    expect((await put({ notes: "x" })).status).toBe(200);
+
+    expect(ownerCalls).toBeGreaterThan(0);
+    expect(ownEmployeeEqCalls()).toBe(ownerCalls + 1);
+  });
+
+  const NEW_SLOT = { startTime: "2026-04-01T12:00:00.000Z", endTime: "2026-04-01T13:00:00.000Z" };
+
+  it("pracownik: UPDATE terminu ma warunek własnego pracownika", async () => {
+    h.salonCtx.mockResolvedValue(OWNER_CTX);
+    expect((await put(NEW_SLOT)).status).toBe(200);
+    const ownerCalls = ownEmployeeEqCalls();
+
+    vi.mocked(eq).mockClear();
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    expect((await put(NEW_SLOT)).status).toBe(200);
+
+    expect(ownerCalls).toBeGreaterThan(0);
+    expect(ownEmployeeEqCalls()).toBe(ownerCalls + 1);
+  });
+
+  /**
+   * Wywołania `eq` złożone w warunek UPDATE: między `.set(...)` a `.where(...)`
+   * tego samego zapisu (argumenty `where` liczą się po `set`). Para: nazwa
+   * kolumny i wartość.
+   */
+  const updateWhereEqCalls = (updateIndex = 0): Array<[string, unknown]> => {
+    const after = h.set.mock.invocationCallOrder[updateIndex]!;
+    const before = h.updateWhere.mock.invocationCallOrder[updateIndex]!;
+    const eqMock = vi.mocked(eq).mock;
+    return eqMock.calls
+      .filter((_call, i) => {
+        const order = eqMock.invocationCallOrder[i]!;
+        return order > after && order < before;
+      })
+      .map(([column, value]) => [(column as unknown as { name: string }).name, value]);
+  };
+
+  it("pracownik: zapis terminu — warunek UPDATE zawiera własnego pracownika, termin w zapisie", async () => {
     h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
 
-    const res = await put({ employeeId: OTHER_EMPLOYEE });
+    const { status } = await parseResponse<Ok>(await put(NEW_SLOT));
 
-    expect(res.status).toBe(200);
-    expect(vi.mocked(eq)).toHaveBeenCalledWith(appointments.employeeId, OTHER_EMPLOYEE);
-    expect(vi.mocked(eq)).toHaveBeenCalledWith(appointments.employeeId, EMPLOYEE);
+    expect(status).toBe(200);
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(Object.keys(h.set.mock.calls[0]![0] as object).sort()).toEqual(["endTime", "startTime"]);
+    const inWhere = updateWhereEqCalls();
+    expect(inWhere).toContainEqual([appointments.employeeId.name, EMPLOYEE]);
+    expect(inWhere).toContainEqual([appointments.id.name, APPOINTMENT]);
+    expect(inWhere).toContainEqual([appointments.salonId.name, SALON]);
+  });
+
+  it("kontrola: właściciel, zapis terminu — warunek UPDATE bez pracownika", async () => {
+    h.salonCtx.mockResolvedValue(OWNER_CTX);
+
+    const { status } = await parseResponse<Ok>(await put(NEW_SLOT));
+
+    expect(status).toBe(200);
+    const inWhere = updateWhereEqCalls();
+    expect(inWhere).toContainEqual([appointments.id.name, APPOINTMENT]);
+    expect(inWhere.filter(([column]) => column === appointments.employeeId.name)).toEqual([]);
+  });
+
+  it("pracownik: zapis terminu nie trafił w wiersz, wizyta przepisana na innego → 404, jeden zapis, bez logu błędu", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    // 1) kolizje, 2) blokady czasu, 3) ponowny odczyt po UPDATE bez wiersza.
+    h.selectResults = [[], [], [appt({ employeeId: OTHER_EMPLOYEE })]];
+    h.updateResults = [[]];
+
+    const { status, body } = await parseResponse<Err>(await put(NEW_SLOT));
+
+    expect(status).toBe(404);
+    expect(body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(updateWhereEqCalls()).toContainEqual([appointments.employeeId.name, EMPLOYEE]);
+    expect(h.logger.error).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -580,6 +809,163 @@ describe("PUT — role", () => {
   });
 });
 
+describe("PUT — pracownika, klienta i usługę zmienia właściciel albo recepcja", () => {
+  const FORBIDDEN = {
+    success: false,
+    code: "APPOINTMENT_ASSIGNMENT_FORBIDDEN",
+    error: TEXT.assignmentForbidden,
+  };
+
+  /** Zmiana jednego pola przypisania względem wizyty z `appt()`. */
+  const CHANGES: Array<[string, Record<string, unknown>]> = [
+    ["pracownik", { employeeId: OTHER_EMPLOYEE }],
+    ["klient", { clientId: OTHER_CLIENT }],
+    ["klient wyczyszczony", { clientId: null }],
+    ["usługa", { serviceId: OTHER_SERVICE }],
+    ["usługa wyczyszczona", { serviceId: null }],
+  ];
+
+  it.each(CHANGES)("pracownik zmienia pole „%s” → 403 z kodem i tekstem, nic nie zapisane", async (_n, change) => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status, body } = await parseResponse<Err>(await put({ ...DIALOG_BODY, ...change }));
+
+    expect(status).toBe(403);
+    expect(body).toEqual(FORBIDDEN);
+    expect(h.update).not.toHaveBeenCalled();
+    expect(h.refs).not.toHaveBeenCalled();
+    expect(h.transactions).toBe(0);
+  });
+
+  it.each(CHANGES)("pracownik zmienia samo pole „%s” (bez reszty dialogu) → 403", async (_n, change) => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status, body } = await parseResponse<Err>(await put(change));
+
+    expect(status).toBe(403);
+    expect(body).toEqual(FORBIDDEN);
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["właściciel", OWNER_CTX],
+    ["recepcja", RECEPTION_CTX],
+  ])("%s zmienia pracownika, klienta i usługę → 200, wszystkie trzy w zapisie", async (_n, ctx) => {
+    h.salonCtx.mockResolvedValue(ctx);
+    const change = { employeeId: OTHER_EMPLOYEE, clientId: OTHER_CLIENT, serviceId: OTHER_SERVICE };
+
+    const { status } = await parseResponse<Ok>(await put({ ...DIALOG_BODY, ...change }));
+
+    expect(status).toBe(200);
+    expect(h.set).toHaveBeenCalledTimes(1);
+    expect(h.set.mock.calls[0]![0]).toMatchObject(change);
+  });
+
+  it.each([
+    ["właściciel", OWNER_CTX],
+    ["recepcja", RECEPTION_CTX],
+  ])("%s czyści klienta i usługę → 200", async (_n, ctx) => {
+    h.salonCtx.mockResolvedValue(ctx);
+
+    const { status } = await parseResponse<Ok>(await put({ clientId: null, serviceId: null }));
+
+    expect(status).toBe(200);
+    expect(h.set.mock.calls[0]![0]).toEqual({ clientId: null, serviceId: null });
+  });
+
+  it("pracownik: body dialogu z tymi samymi wartościami, nowy termin i notatka → 200, w zapisie tylko termin i notatka", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status } = await parseResponse<Ok>(
+      await put({ ...DIALOG_BODY, startTime: "2026-04-01T12:00:00.000Z", endTime: "2026-04-01T13:00:00.000Z" })
+    );
+
+    expect(status).toBe(200);
+    expect(h.set).toHaveBeenCalledTimes(1);
+    expect(Object.keys(h.set.mock.calls[0]![0] as object).sort()).toEqual(["endTime", "notes", "startTime"]);
+  });
+
+  it("pracownik: puste employeeId (trasa go nie zapisuje) nie jest zmianą → 200", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status } = await parseResponse<Ok>(await put({ employeeId: "", notes: "x" }));
+
+    expect(status).toBe(200);
+    expect(h.set.mock.calls[0]![0]).toEqual({ notes: "x" });
+  });
+
+  it("pracownik: wizyta bez klienta i usługi, body z null → 200 (null = null)", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    givenExisting({ clientId: null, serviceId: null });
+
+    const { status } = await parseResponse<Ok>(await put({ clientId: null, serviceId: null, notes: "x" }));
+
+    expect(status).toBe(200);
+    expect(h.set.mock.calls[0]![0]).toEqual({ notes: "x" });
+  });
+
+  it("pracownik: same wartości przypisania bez innych pól → 200 z wizytą, bez zapisu", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status, body } = await parseResponse<Ok>(
+      await put({ employeeId: EMPLOYEE, clientId: TEST_IDS.CLIENT_UUID, serviceId: TEST_IDS.SERVICE_UUID })
+    );
+
+    expect(status).toBe(200);
+    expect(body.data).toMatchObject({ id: APPOINTMENT });
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("pracownik: własna wizyta zakończona, inny klient → 403 (przed 409)", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    givenExisting({ status: "completed" });
+
+    const { status, body } = await parseResponse<Err>(await put({ clientId: OTHER_CLIENT }));
+
+    expect(status).toBe(403);
+    expect(body).toEqual(FORBIDDEN);
+  });
+
+  it("pracownik: cudza wizyta, zmiana pracownika → 404, nie 403 (odmowa nie zdradza wizyty)", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    givenExisting({ employeeId: OTHER_EMPLOYEE });
+
+    const { status, body } = await parseResponse<Err>(await put({ employeeId: EMPLOYEE }));
+
+    expect(status).toBe(404);
+    expect(body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
+  });
+
+  it("pracownik: przeniesienie na zajęty termin → 409 z kolizją we własnym kalendarzu, bez pytania o kalendarz innego", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    const OWN_OTHER_APPOINTMENT = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    // 1) kolizje: wizyta tego samego pracownika.
+    h.selectResults = [[{ id: OWN_OTHER_APPOINTMENT }]];
+
+    const { status, body } = await parseResponse<Err & { conflictingAppointment?: { id: string } }>(
+      await put({ ...DIALOG_BODY, startTime: "2026-04-01T12:00:00.000Z", endTime: "2026-04-01T13:00:00.000Z" })
+    );
+
+    expect(status).toBe(409);
+    expect(body.conflictingAppointment).toEqual({ id: OWN_OTHER_APPOINTMENT });
+    expect(vi.mocked(eq)).toHaveBeenCalledWith(appointments.employeeId, EMPLOYEE);
+    expect(vi.mocked(eq)).not.toHaveBeenCalledWith(appointments.employeeId, OTHER_EMPLOYEE);
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("pracownik: przeniesienie do kalendarza innego pracownika → 403 przed sprawdzeniem kolizji", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    h.selectResults = [[{ id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" }]];
+
+    const { status, body } = await parseResponse<Err>(await put({ ...DIALOG_BODY, employeeId: OTHER_EMPLOYEE }));
+
+    expect(status).toBe(403);
+    expect(body).toEqual(FORBIDDEN);
+    expect(body).not.toHaveProperty("conflictingAppointment");
+    expect(vi.mocked(eq)).not.toHaveBeenCalledWith(appointments.employeeId, OTHER_EMPLOYEE);
+  });
+});
+
 describe("PUT — 500 i log", () => {
   it("błąd bazy → 500, log z nazwą i kodem błędu, bez obiektu błędu", async () => {
     const dbError = Object.assign(new Error("Failed query: update ...\nparams: Anna,+48123456789"), {
@@ -587,14 +973,15 @@ describe("PUT — 500 i log", () => {
     });
     h.selectResults = [dbError as unknown as unknown[]];
 
-    const { status } = await parseResponse<Err>(await put({ notes: "Anna" }));
+    const { status, body } = await parseResponse<Err>(await put({ notes: "Anna" }));
 
     expect(status).toBe(500);
+    expect(body).toEqual({ success: false, error: TEXT.updateFailed });
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     const [, meta] = h.logger.error.mock.calls[0]!;
     expect(meta).toMatchObject({ errorName: "Error", errorCode: "57P01" });
     expect(Object.keys(meta as object).sort()).toEqual(["code", "errorCode", "errorName"]);
-    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
+    expect(loggedText(h.logger.error.mock.calls)).not.toContain("Anna");
   });
 });
 
@@ -612,8 +999,8 @@ describe("GET — 500 i log", () => {
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     const getMeta = h.logger.error.mock.calls[0]![1] as object;
     expect(getMeta).toEqual({ errorName: "Error", errorCode: "40001" });
-    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
-    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Failed query");
+    expect(loggedText(h.logger.error.mock.calls)).not.toContain("Anna");
+    expect(loggedText(h.logger.error.mock.calls)).not.toContain("Failed query");
 
     h.logger.error.mockClear();
     h.selectResults = [deleteRow()];
@@ -621,6 +1008,59 @@ describe("GET — 500 i log", () => {
     await del();
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     expect(Object.keys(getMeta).sort()).toEqual(Object.keys(h.logger.error.mock.calls[0]![1] as object).sort());
+  });
+});
+
+describe("GET /api/appointments/[id] — kody 4xx z mapy, polskie teksty", () => {
+  it("zły identyfikator → 400 INVALID_APPOINTMENT_ID, bez odczytu wizyty", async () => {
+    const { status, body } = await parseResponse<Err>(await get(BAD_ID));
+
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, code: "INVALID_APPOINTMENT_ID", error: TEXT.invalidId });
+    expect(h.transactions).toBe(0);
+  });
+
+  it("sesja bez salonu → 404 SALON_NOT_FOUND", async () => {
+    h.salonCtx.mockResolvedValue(null);
+
+    const { status, body } = await parseResponse<Err>(await get());
+
+    expect(status).toBe(404);
+    expect(body).toEqual({ success: false, code: "SALON_NOT_FOUND", error: TEXT.salonNotFound });
+  });
+
+  it("wizyta nieistniejąca i (dla pracownika) wizyta innego pracownika → to samo body 404", async () => {
+    h.selectResults = [[]];
+    const missing = await parseResponse<Err>(await get());
+
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    h.selectResults = [deleteRow({ employeeId: OTHER_EMPLOYEE })];
+    const foreign = await parseResponse<Err>(await get());
+
+    expect(missing.status).toBe(404);
+    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
+    expect(foreign).toEqual(missing);
+  });
+
+  it.each([
+    ["właściciel", OWNER_CTX],
+    ["recepcja", RECEPTION_CTX],
+    ["pracownik (własna wizyta)", EMPLOYEE_CTX],
+  ])("%s → 200 z wizytą", async (_n, ctx) => {
+    h.salonCtx.mockResolvedValue(ctx);
+    h.selectResults = [deleteRow()];
+
+    const { status, body } = await parseResponse<Ok>(await get());
+
+    expect(status).toBe(200);
+    expect(body.data).toMatchObject({ id: APPOINTMENT });
+  });
+
+  it("401 bez sesji — bez odczytu", async () => {
+    h.auth.mockResolvedValue(new Response(null, { status: 401 }));
+
+    expect((await get()).status).toBe(401);
+    expect(h.transactions).toBe(0);
   });
 });
 
@@ -671,7 +1111,7 @@ describe("DELETE /api/appointments/[id] — kody 4xx", () => {
     const { status, body } = await parseResponse<Err>(await del());
 
     expect(status).toBe(400);
-    expect(body).toEqual({ success: false, code: "APPOINTMENT_CANCELLED", error: "Wizyta jest juz anulowana" });
+    expect(body).toEqual({ success: false, code: "APPOINTMENT_CANCELLED", error: TEXT.appointmentCancelled });
     expect(h.cancelInTx).not.toHaveBeenCalled();
   });
 
@@ -761,12 +1201,13 @@ describe("DELETE — role, 200 i 500", () => {
       Object.assign(new Error("Failed query: update ...\nparams: Anna"), { cause: { code: "40001" } })
     );
 
-    const { status } = await parseResponse<Err>(await del());
+    const { status, body } = await parseResponse<Err>(await del());
 
     expect(status).toBe(500);
+    expect(body).toEqual({ success: false, error: TEXT.cancelFailed });
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error", errorCode: "40001" });
-    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
+    expect(loggedText(h.logger.error.mock.calls)).not.toContain("Anna");
   });
 
   it("błąd listy oczekujących → 200, log z nazwą błędu, bez obiektu błędu", async () => {
@@ -778,6 +1219,9 @@ describe("DELETE — role, 200 i 500", () => {
     expect(status).toBe(200);
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error" });
+    expect(h.logger.warn.mock.calls).toEqual([
+      [SKIPPED_TRACE, { appointmentId: APPOINTMENT, step: "waiting_list", hasDeposit: false, depositPaid: false }],
+    ]);
   });
 
   it("błąd zapisu powiadomienia (notifyClient) → 200, jeden log z nazwą błędu i id wizyty, bez parametrów", async () => {
@@ -800,7 +1244,11 @@ describe("DELETE — role, 200 i 500", () => {
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     expect(h.logger.error.mock.calls[0]![0]).toBe("[Appointments API] Failed to create notification");
     expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error", appointmentId: APPOINTMENT });
-    expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain("Anna");
+    expect(loggedText(h.logger.error.mock.calls)).not.toContain("Anna");
+    // Ślad: anulowanie zatwierdzone, wpis powiadomienia pominięty.
+    expect(h.logger.warn.mock.calls).toEqual([
+      [SKIPPED_TRACE, { appointmentId: APPOINTMENT, step: "notification", hasDeposit: false, depositPaid: false }],
+    ]);
   });
 });
 
@@ -820,7 +1268,7 @@ describe("404 wizyty cudzej = 404 wizyty nieistniejącej (całe body)", () => {
     const reassigned = await parseResponse<Err>(await put({ notes: "x" }));
 
     expect(missing.status).toBe(404);
-    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: missing.body.error });
+    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
     expect(foreign).toEqual(missing);
     expect(reassigned).toEqual(missing);
   });
@@ -838,7 +1286,7 @@ describe("404 wizyty cudzej = 404 wizyty nieistniejącej (całe body)", () => {
     const reassigned = await parseResponse<Err>(await del());
 
     expect(missing.status).toBe(404);
-    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: missing.body.error });
+    expect(missing.body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
     expect(foreign).toEqual(missing);
     expect(reassigned).toEqual(missing);
   });
@@ -1014,5 +1462,205 @@ describe("DELETE — po transakcji dane spod blokady", () => {
     expect(status).toBe(200);
     expect(h.refund).not.toHaveBeenCalled();
     expect(body.cancellationDetails.hasDeposit).toBe(false);
+  });
+});
+
+describe("DELETE — po zatwierdzeniu anulowania zawsze 200, ślad pominiętego kroku", () => {
+  const CHANGED_SERVICE = "88888888-8888-4888-8888-888888888888";
+
+  type CancelOk = Ok & {
+    cancellationDetails: { refundFailed: boolean; clientNotified: boolean; depositRefunded: boolean };
+  };
+
+  /** Wizyta z opłaconym zadatkiem; pod blokadą usługa zmieniona, więc trasa czyta jej nazwę ponownie. */
+  function arrangePaidCancel() {
+    h.cancelInTx.mockResolvedValue({
+      cancelled: appt({ status: "cancelled", serviceId: CHANGED_SERVICE, depositAmount: "40.00", depositPaid: true }),
+      depositPaid: true,
+      depositAmount: "40.00",
+      variant: "manual",
+      failedPayments: [],
+    });
+    h.refund.mockResolvedValue({ success: true, refunded: true, refundId: null, amount: 40, message: "ok" });
+    h.buildSms.mockReturnValue("tekst");
+  }
+
+  const preRead = () => [
+    {
+      appointment: appt({ depositAmount: "40.00", depositPaid: true }),
+      client: { id: TEST_IDS.CLIENT_UUID },
+      employee: { firstName: "Ta", lastName: "Sama" },
+      service: { name: "Stara usługa" },
+    },
+  ];
+
+  const delNotify = () =>
+    DELETE(
+      new Request(`http://localhost:3000/api/appointments/${APPOINTMENT}?notifyClient=true`, { method: "DELETE" }),
+      createRouteParams(APPOINTMENT)
+    );
+
+  const trace = (step: string) => [
+    SKIPPED_TRACE,
+    { appointmentId: APPOINTMENT, step, hasDeposit: true, depositPaid: true },
+  ];
+
+  it("odczyt nazw rzuca → 200; zwrot i wygaszenie sesji przed odczytem; SMS i lista z tekstem domyślnym; jeden log i ślad", async () => {
+    arrangePaidCancel();
+    const namesError = Object.assign(new Error("Failed query: select ...\nparams: Anna"), { cause: { code: "57P01" } });
+    // 1) odczyt sprzed transakcji, 2) ponowny odczyt nazwy usługi — błąd.
+    h.selectResults = [preRead(), namesError as unknown as unknown[]];
+    // Ile odczytów zostało w kolejce w chwili zwrotu i wygaszenia sesji.
+    let queuedAtRefund = -1;
+    let queuedAtExpire = -1;
+    h.refund.mockImplementation(async () => {
+      queuedAtRefund = h.selectResults.length;
+      return { success: true, refunded: true, refundId: null, amount: 40, message: "ok" };
+    });
+    h.expireSessions.mockImplementation(async () => {
+      queuedAtExpire = h.selectResults.length;
+    });
+
+    const { status, body } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.cancellationDetails).toMatchObject({ refundFailed: false, depositRefunded: true, clientNotified: true });
+    expect(h.refund).toHaveBeenCalledTimes(1);
+    // Odczyt nazw jeszcze nie wystartował, gdy szedł zwrot i wygaszenie sesji.
+    expect(queuedAtRefund).toBe(1);
+    expect(queuedAtExpire).toBe(1);
+    expect(h.buildSms).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceName: "Wizyta", salonName: "Salon", salonPhone: null })
+    );
+    expect(h.insertValues).toHaveBeenCalledTimes(1);
+    expect(h.notifyWaitingList).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceName: "Wizyta", employeeName: "Pracownik", salonName: "Salon" })
+    );
+    expect(h.logger.error.mock.calls).toEqual([
+      [
+        "[Appointments API] Failed to read names after cancellation",
+        { errorName: "Error", errorCode: "57P01", appointmentId: APPOINTMENT },
+      ],
+    ]);
+    expect(h.logger.warn.mock.calls).toEqual([trace("read_names")]);
+    expect(loggedText([...h.logger.error.mock.calls, ...h.logger.warn.mock.calls])).not.toContain("Anna");
+  });
+
+  it("odczyt nazwy salonu rzuca → 200, nazwa usługi z odczytu, salon z tekstem domyślnym", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], new Error("salon") as unknown as unknown[]];
+
+    const { status } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(h.buildSms).toHaveBeenCalledWith(expect.objectContaining({ serviceName: "Nowa usługa", salonName: "Salon" }));
+    expect(h.notifyWaitingList).toHaveBeenCalledWith(
+      expect.objectContaining({ serviceName: "Nowa usługa", employeeName: "Ta Sama", salonName: "Salon" })
+    );
+    expect(h.logger.warn.mock.calls).toEqual([trace("read_names")]);
+  });
+
+  it("zwrot rzuca → 200 z refundFailed, ślad „refund”, SMS i lista nadal wysłane", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], [{ name: "Salon A", phone: null }]];
+    h.refund.mockRejectedValue(new Error("operator płatności niedostępny"));
+
+    const { status, body } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(body.cancellationDetails).toMatchObject({ refundFailed: true, depositRefunded: false, clientNotified: true });
+    expect(h.notifyWaitingList).toHaveBeenCalledTimes(1);
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+    expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error", appointmentId: APPOINTMENT });
+    expect(h.logger.warn.mock.calls).toEqual([trace("refund")]);
+  });
+
+  it("zwrot nieudany (bez wyjątku) → 200 z refundFailed, log ręcznego zwrotu i ślad „refund”", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], [{ name: "Salon A", phone: null }]];
+    h.refund.mockResolvedValue({ success: false, refunded: false, refundId: null, amount: 0, failedAmount: 40, message: "x" });
+
+    const { status, body } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(body.cancellationDetails.refundFailed).toBe(true);
+    expect(h.logger.warn.mock.calls).toEqual([trace("refund")]);
+  });
+
+  it("wygaszenie sesji płatności rzuca → 200, zwrot wywołany, ślad „expire_checkout_sessions”", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], [{ name: "Salon A", phone: null }]];
+    h.expireSessions.mockRejectedValue(new Error("stripe"));
+
+    const { status } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(h.refund).toHaveBeenCalledTimes(1);
+    expect(h.logger.warn.mock.calls).toEqual([trace("expire_checkout_sessions")]);
+  });
+
+  it("budowa SMS-a rzuca → 200, bez wpisu powiadomienia, ślad „sms”", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], [{ name: "Salon A", phone: null }]];
+    h.buildSms.mockImplementation(() => {
+      throw new Error("sms");
+    });
+
+    const { status, body } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(body.cancellationDetails.clientNotified).toBe(false);
+    expect(h.insertValues).not.toHaveBeenCalled();
+    expect(h.logger.warn.mock.calls).toEqual([trace("sms")]);
+  });
+
+  it("każdy krok po zatwierdzeniu rzuca → nadal 200 z sukcesem, ślad każdego kroku", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), new Error("names") as unknown as unknown[]];
+    h.expireSessions.mockRejectedValue(new Error("stripe"));
+    h.refund.mockRejectedValue(new Error("refund"));
+    h.buildSms.mockImplementation(() => {
+      throw new Error("sms");
+    });
+    h.notifyWaitingList.mockRejectedValue(new Error("list"));
+
+    const { status, body } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(h.logger.warn.mock.calls).toEqual([
+      trace("expire_checkout_sessions"),
+      trace("refund"),
+      trace("read_names"),
+      trace("sms"),
+      trace("waiting_list"),
+    ]);
+  });
+
+  it("kontrola: wszystkie kroki udane → 200, bez śladu i bez logu błędu", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], [{ name: "Salon A", phone: null }]];
+
+    const { status, body } = await parseResponse<CancelOk>(await delNotify());
+
+    expect(status).toBe(200);
+    expect(body.cancellationDetails).toMatchObject({ refundFailed: false, clientNotified: true });
+    expect(h.buildSms).toHaveBeenCalledWith(expect.objectContaining({ serviceName: "Nowa usługa", salonName: "Salon A" }));
+    expect(h.logger.warn).not.toHaveBeenCalled();
+    expect(h.logger.error).not.toHaveBeenCalled();
+  });
+
+  it("kontrola: błąd przed zatwierdzeniem → 500 z tekstem odwołania, bez zwrotu i bez śladu", async () => {
+    arrangePaidCancel();
+    h.selectResults = [preRead()];
+    h.cancelInTx.mockRejectedValue(new Error("serialization"));
+
+    const { status, body } = await parseResponse<Err>(await delNotify());
+
+    expect(status).toBe(500);
+    expect(body).toEqual({ success: false, error: TEXT.cancelFailed });
+    expect(h.refund).not.toHaveBeenCalled();
+    expect(h.logger.warn).not.toHaveBeenCalled();
   });
 });

@@ -245,7 +245,7 @@ describe("PUT /api/appointments/[id] — zadatek wyłączony, kolejność odpowi
     const { status, body } = await parseResponse<Err>(await put({ depositAmount: "50.00" }));
 
     expect(status).toBe(404);
-    expect(body.error).toBe("Appointment not found");
+    expect(body.error).toBe("Nie znaleziono wizyty. Odśwież kalendarz.");
     expectNothingWritten();
   });
 
@@ -281,7 +281,7 @@ describe("PUT /api/appointments/[id] — zadatek wyłączony, kolejność odpowi
     const { status, body } = await parseResponse<Err>(await put({ depositAmount: null }));
 
     expect(status).toBe(500);
-    expect(body.error).toBe("Failed to update appointment");
+    expect(body.error).toBe("Nie udało się zapisać zmian w wizycie. Spróbuj ponownie.");
     expectNothingWritten();
   });
 

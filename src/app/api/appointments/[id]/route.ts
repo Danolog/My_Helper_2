@@ -4,6 +4,7 @@ import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
 import {
   AppointmentGoneError,
   callerAppointmentWhere,
+  hasFullAppointmentAccess,
   isForeignAppointment,
 } from "@/lib/appointment-access";
 import { appointmentError, type AppointmentErrorKey } from "@/lib/appointment-codes";
@@ -89,21 +90,67 @@ function completedFinalResponse() {
 }
 
 /**
- * Odpowiedź błędu wizyty ze wspólnym kodem: status HTTP z mapy
- * `APPOINTMENT_ERROR_STATUS` (`@/lib/appointment-codes`), ten sam co w trasie
- * zakończenia. Teksty zostają przy tej trasie.
+ * Odpowiedź błędu wizyty ze wspólnym kodem (GET, PUT, DELETE): status HTTP
+ * z mapy `APPOINTMENT_ERROR_STATUS` (`@/lib/appointment-codes`), ten sam co
+ * w trasie zakończenia. Teksty zostają przy tej trasie. Wizyta cudza
+ * i nieistniejąca mają ten sam tekst.
  */
 const APPOINTMENT_ERROR_MESSAGES: Record<AppointmentErrorKey, string> = {
-  salonNotFound: "Salon not found",
-  invalidId: "Invalid appointment ID format",
-  appointmentNotFound: "Appointment not found",
-  appointmentCancelled: "Wizyta jest juz anulowana",
+  salonNotFound: "Nie znaleziono salonu powiązanego z tym kontem.",
+  invalidId: "Nieprawidłowy identyfikator wizyty.",
+  appointmentNotFound: "Nie znaleziono wizyty. Odśwież kalendarz.",
+  appointmentCancelled: "Ta wizyta jest już odwołana.",
+  invalidJson: "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.",
+  assignmentForbidden: "Pracownika, klienta i usługę wizyty zmienia właściciel albo recepcja.",
 };
+
+/** 500 PUT: nic nie zostało zapisane. */
+const UPDATE_FAILED_MESSAGE = "Nie udało się zapisać zmian w wizycie. Spróbuj ponownie.";
+/** 500 DELETE: tylko przed zatwierdzeniem anulowania (po nim odpowiedź jest zawsze 200). */
+const CANCEL_FAILED_MESSAGE = "Nie udało się odwołać wizyty. Spróbuj ponownie.";
 
 function appointmentErrorResponse(key: AppointmentErrorKey) {
   const { status, body } = appointmentError(key, APPOINTMENT_ERROR_MESSAGES[key]);
   return NextResponse.json(body, { status });
 }
+
+/**
+ * Pola przypisania wizyty: pracownik, klient i usługa. Zmienia je tylko
+ * właściciel albo recepcja (`hasFullAppointmentAccess`) — usługa wyznacza
+ * cenę, a cena prowizję; przekazanie wizyty zmienia kalendarz i prowizję
+ * innego pracownika; zmiana klienta przepisuje rezerwację na inną osobę.
+ */
+const ASSIGNMENT_FIELDS = ["employeeId", "clientId", "serviceId"] as const;
+
+/**
+ * Pola przypisania, które body zmieniłoby względem zapisanej wizyty. Liczy się
+ * wartość, nie obecność pola: dialog edycji wysyła pracownika, klienta
+ * i usługę także przy samej zmianie terminu albo notatki. Puste `employeeId`
+ * trasa pomija przy zapisie, więc nie jest zmianą (ta sama reguła co dla
+ * wizyty zakończonej).
+ */
+function changedAssignmentFields(
+  existing: typeof appointments.$inferSelect,
+  input: Parameters<typeof completedAppointmentChangedFields>[1]
+): string[] {
+  const changed = completedAppointmentChangedFields(existing, input);
+  return changed.filter((field) => (ASSIGNMENT_FIELDS as readonly string[]).includes(field));
+}
+
+/**
+ * Stały tekst śladu w logu: anulowanie wizyty jest zatwierdzone w bazie, a krok
+ * po nim się nie wykonał. Bez kwoty i bez treści błędu.
+ */
+const CANCEL_COMMITTED_STEP_SKIPPED = "[Appointments API] anulowanie zatwierdzone, skutek pominięty";
+
+/** Kroki DELETE po zatwierdzeniu anulowania (nazwa w śladzie w logu). */
+type CancelFollowUpStep =
+  | "expire_checkout_sessions"
+  | "refund"
+  | "read_names"
+  | "sms"
+  | "notification"
+  | "waiting_list";
 
 /** Warunek „wiersz wołającego”: pracownik zapisuje tylko własną wizytę. */
 function callerRowWhere(ctx: SalonContext, id: string) {
@@ -135,22 +182,12 @@ export async function GET(
     if (isAuthError(authResult)) return authResult;
 
     const ctx = await getSalonContext();
-    if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
+    if (!ctx) return appointmentErrorResponse("salonNotFound");
     const salonId = ctx.salonId;
 
     const { id } = await params;
 
-    if (!isValidUuid(id)) {
-      return NextResponse.json(
-        { success: false, error: "Invalid appointment ID format" },
-        { status: 400 }
-      );
-    }
+    if (!isValidUuid(id)) return appointmentErrorResponse("invalidId");
 
     // Join — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
     // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
@@ -172,10 +209,7 @@ export async function GET(
 
     const row = result[0];
     if (!row || isForeignAppointment(ctx, row.appointment.employeeId)) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
+      return appointmentErrorResponse("appointmentNotFound");
     }
 
     const formattedAppointment = {
@@ -216,7 +250,13 @@ export async function PUT(
 
     if (!isValidUuid(id)) return appointmentErrorResponse("invalidId");
 
-    const body = await request.json();
+    // Body, które nie jest JSON-em: 400 z kodem, nie 500 z błędu parsowania.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return appointmentErrorResponse("invalidJson");
+    }
 
     // Server-side validation with Zod schema. Zapis czyta SPARSOWANE dane
     // (jak POST): preprocess schematu zamienia same spacje w notes na null —
@@ -254,6 +294,16 @@ export async function PUT(
     // 404, nie 409 — odpowiedź nie zdradza, że wizyta istnieje ani że jest zakończona.
     if (!existing || isForeignAppointment(ctx, existing.employeeId)) {
       return appointmentErrorResponse("appointmentNotFound");
+    }
+
+    // Pracownik w swojej wizycie zmienia termin i notatkę. Pracownika, klienta
+    // i usługę zmienia tylko właściciel albo recepcja: inna wartość od
+    // pracownika → 403, nic nie zapisane (odrzucenie, nie ciche pominięcie —
+    // panel nie pokaże sukcesu przy niezapisanej zmianie). Ta sama wartość
+    // przechodzi. Przed sprawdzeniem statusu: pracownik widzi tę wizytę.
+    const fullAccess = hasFullAppointmentAccess(ctx);
+    if (!fullAccess && changedAssignmentFields(existing, parsed.data).length > 0) {
+      return appointmentErrorResponse("assignmentForbidden");
     }
 
     // Wizyta zakończona ma ostateczny wynik: prowizja, zużycie materiałów
@@ -360,9 +410,14 @@ export async function PUT(
     const updateData: Record<string, unknown> = {};
     if (startTime) updateData.startTime = newStartTime;
     if (endTime) updateData.endTime = newEndTime;
-    if (employeeId) updateData.employeeId = employeeId;
-    if (clientId !== undefined) updateData.clientId = clientId;
-    if (serviceId !== undefined) updateData.serviceId = serviceId;
+    // Pracownik: pola przypisania są tu takie jak w odczycie (inna wartość →
+    // 403 wyżej), więc nie trafiają do zapisu — zapis pracownika nie nadpisze
+    // zmiany przypisania, którą właściciel albo recepcja zapisali po odczycie.
+    if (fullAccess) {
+      if (employeeId) updateData.employeeId = employeeId;
+      if (clientId !== undefined) updateData.clientId = clientId;
+      if (serviceId !== undefined) updateData.serviceId = serviceId;
+    }
     if (notes !== undefined) updateData.notes = notes;
     if (status) updateData.status = status;
     if (depositAmount !== undefined) updateData.depositAmount = depositAmount;
@@ -554,7 +609,7 @@ export async function PUT(
     // `code` — SQLSTATE także z błędu opakowanego głębiej (#171).
     logger.error("[Appointments API] Database error", { ...toErrorIdentity(error), code: dbErrorCode(error) });
     return NextResponse.json(
-      { success: false, error: "Failed to update appointment" },
+      { success: false, error: UPDATE_FAILED_MESSAGE },
       { status: 500 }
     );
   }
@@ -569,18 +624,25 @@ type CancelReadRow = {
 };
 
 /**
- * Klient, nazwa usługi i pracownik wizyty odwołanej — dla identyfikatorów
- * z wiersza spod blokady (`cancelled`). Gdy identyfikator jest taki jak
- * w odczycie sprzed transakcji, dane z tego odczytu; gdy się zmienił
- * (wizyta przepisana przed blokadą), ponowny odczyt w salonie z sesji.
+ * Klient do SMS-a o odwołaniu — z wiersza spod blokady (`cancelled`). Gdy
+ * identyfikator jest taki jak w odczycie sprzed transakcji, klient z tego
+ * odczytu (brak wiersza klienta = bez SMS-a). Bez zapytania.
+ */
+function cancelledClientId(before: CancelReadRow, cancelled: typeof appointments.$inferSelect): string | null {
+  return cancelled.clientId === before.appointment.clientId ? (before.client?.id ?? null) : cancelled.clientId;
+}
+
+/**
+ * Nazwa usługi i pracownik wizyty odwołanej — dla identyfikatorów z wiersza
+ * spod blokady (`cancelled`). Gdy identyfikator jest taki jak w odczycie
+ * sprzed transakcji, dane z tego odczytu; gdy się zmienił (wizyta przepisana
+ * przed blokadą), ponowny odczyt w salonie z sesji.
  */
 async function cancelledLabels(
   salonId: string,
   before: CancelReadRow,
   cancelled: typeof appointments.$inferSelect
 ) {
-  const clientId =
-    cancelled.clientId === before.appointment.clientId ? (before.client?.id ?? null) : cancelled.clientId;
   let serviceName = before.service?.name ?? null;
   let employee = before.employee
     ? { firstName: before.employee.firstName, lastName: before.employee.lastName }
@@ -614,7 +676,7 @@ async function cancelledLabels(
       }
     });
   }
-  return { clientId, serviceName, employee };
+  return { serviceName, employee };
 }
 
 // DELETE /api/appointments/[id] - Cancel an appointment with deposit rules
@@ -690,7 +752,13 @@ export async function DELETE(
     // blokady (wiersz z UPDATE), nie z odczytu sprzed transakcji.
     const depositAmount = txResult.depositAmount ? parseFloat(txResult.depositAmount) : 0;
     const hasDeposit = depositAmount > 0;
-    const labels = await cancelledLabels(salonId, row, cancelledAppointment);
+
+    // Anulowanie jest zatwierdzone w bazie. Od tego miejsca odpowiedź jest
+    // zawsze 200 z sukcesem: żaden krok poniżej nie trafia do `catch` z 500
+    // (ponowna próba dałaby „już odwołana”, a panel pokazałby porażkę).
+    // Krok, który się nie wykona, zostawia ślad w logu stałym tekstem.
+    const skipped = (step: CancelFollowUpStep) =>
+      logger.warn(CANCEL_COMMITTED_STEP_SKIPPED, { appointmentId: id, step, hasDeposit, depositPaid });
 
     // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
     const now = new Date();
@@ -699,22 +767,64 @@ export async function DELETE(
     const isMoreThan24h = hoursUntilAppointment > 24;
 
     // #70 pkt 1: otwarta sesja Checkout nie przyjmie już wpłaty (błąd = warn).
-    await expireCheckoutSessions(id, failedPayments);
+    try {
+      await expireCheckoutSessions(id, failedPayments);
+    } catch (expireError) {
+      logger.error("[Appointments API] Failed to expire checkout sessions", {
+        ...toErrorIdentity(expireError),
+        appointmentId: id,
+      });
+      skipped("expire_checkout_sessions");
+    }
 
     // RF1: odwołanie przez salon = pełny zwrot, niezależnie od reguły 24 h.
+    // Zwrot przed odczytem nazw: nazwy są potrzebne dopiero w SMS-ie.
     let refundResult: AppointmentDepositsRefund | null = null;
+    let refundThrew = false;
     if (hasDeposit && depositPaid) {
-      // Każda płatność `succeeded` osobno, od najstarszej (recenzja, #98).
-      refundResult = await refundAppointmentDeposits(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
-      if (!refundResult.success) {
+      try {
+        // Każda płatność `succeeded` osobno, od najstarszej (recenzja, #98).
+        refundResult = await refundAppointmentDeposits(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
+      } catch (refundError) {
+        refundThrew = true;
+        logger.error("[Appointments API] Deposit refund threw after salon cancellation — manual refund", {
+          ...toErrorIdentity(refundError),
+          appointmentId: id,
+        });
+      }
+      if (refundResult && !refundResult.success) {
         logger.error("[Appointments API] Deposit refund failed after salon cancellation — manual refund", {
           appointmentId: id,
           salonId,
           refundMessage: refundResult.message,
         });
       }
+      if (refundThrew || refundResult?.success === false) skipped("refund");
     }
-    const refundFailed = refundResult?.success === false;
+    const refundFailed = refundThrew || refundResult?.success === false;
+
+    // Nazwy usługi, pracownika i salonu do SMS-a i listy oczekujących. Błąd
+    // odczytu nie cofa odwołania: wartości zapasowe, jeden log, ślad.
+    let labels: Awaited<ReturnType<typeof cancelledLabels>> = { serviceName: null, employee: null };
+    let salon: { name: string | null; phone: string | null } | undefined;
+    try {
+      labels = await cancelledLabels(salonId, row, cancelledAppointment);
+      // Efekty uboczne anulacji w kontekscie RLS salonu z sesji (#193): nazwa
+      // salonu (polityka `tenant_self`) i wpis powiadomienia; jawny filtr zostaje.
+      [salon] = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ name: salons.name, phone: salons.phone })
+          .from(salons)
+          .where(eq(salons.id, salonId))
+          .limit(1)
+      );
+    } catch (namesError) {
+      logger.error("[Appointments API] Failed to read names after cancellation", {
+        ...toErrorIdentity(namesError),
+        appointmentId: id,
+      });
+      skipped("read_names");
+    }
 
     logger.info("[Appointments API] Cancelled appointment by salon", {
       appointmentId: id,
@@ -728,23 +838,15 @@ export async function DELETE(
       notifyClient,
     });
 
-    // Efekty uboczne anulacji w kontekscie RLS salonu z sesji (#193): nazwa
-    // salonu (polityka `tenant_self`) i wpis powiadomienia; jawny filtr zostaje.
-    const [salon] = await forSalon(salonId).raw((tx) =>
-      tx
-        .select({ name: salons.name, phone: salons.phone })
-        .from(salons)
-        .where(eq(salons.id, salonId))
-        .limit(1)
-    );
     const salonName = salon?.name || "Salon";
     const serviceName = labels.serviceName || "Wizyta";
 
     // RF2: JEDEN SMS (odwołanie + ewentualny zwrot), bez linku do rezerwacji.
-    const notifiedClientId = labels.clientId;
+    const notifiedClientId = cancelledClientId(row, cancelledAppointment);
     const shouldNotify = !!notifiedClientId && (notifyClient || refundResult?.refunded === true);
     let clientNotified = false;
     if (shouldNotify && notifiedClientId) {
+      let smsStep: CancelFollowUpStep = "sms";
       try {
         const message = buildSalonCancellationSms({
           salonName,
@@ -755,6 +857,7 @@ export async function DELETE(
           depositAmount,
         });
         const clientId = notifiedClientId;
+        smsStep = "notification";
         await forSalon(salonId).raw((tx) =>
           tx.insert(notifications).values({
             salonId,
@@ -770,6 +873,7 @@ export async function DELETE(
           ...toErrorIdentity(notifError),
           appointmentId: id,
         });
+        skipped(smsStep);
         // Don't fail the cancellation if notification creation fails
       }
     }
@@ -796,6 +900,7 @@ export async function DELETE(
       logger.info(`[Appointments API] Waiting list notification result`, { notified, smsCount, pushCount, errors });
     } catch (waitingListError) {
       logger.error("[Appointments API] Failed to notify waiting list", { ...toErrorIdentity(waitingListError) });
+      skipped("waiting_list");
       // Don't fail the cancellation if waiting list notification fails
     }
 
@@ -844,7 +949,7 @@ export async function DELETE(
     // Tylko nazwa i kod błędu: treść błędu zapytania niesie parametry.
     logger.error("[Appointments API] Database error", { ...toErrorIdentity(error) });
     return NextResponse.json(
-      { success: false, error: "Failed to cancel appointment" },
+      { success: false, error: CANCEL_FAILED_MESSAGE },
       { status: 500 }
     );
   }
