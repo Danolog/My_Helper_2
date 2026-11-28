@@ -51,9 +51,6 @@ vi.mock("@/components/clients/client-consents-card", () => ({
 vi.mock("@/components/clients/client-history-tab", () => ({
   ClientHistoryTab: () => null,
 }));
-vi.mock("@/components/clients/client-insights-tab", () => ({
-  ClientInsightsTab: () => null,
-}));
 vi.mock("@/components/clients/client-loyalty-tab", () => ({
   ClientLoyaltyTab: () => null,
 }));

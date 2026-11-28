@@ -5,6 +5,9 @@
  * B4: generowanie wideo (Veo) i publikacja postów social (W, S).
  * B5: fiskalizacja (F) i martwy `createRefundNotification`.
  * 2026-11-15: ogólny czat (strona /chat i trasa /api/chat, decyzja PO).
+ * 2026-11-28: kategoryzacja (/api/ai/categorize) i analiza klienta przez AI
+ * (/api/ai/clients/insights, zakładka na karcie klienta) — bez zastępstwa.
+ * Usunięta trasa nie ma pliku route.ts, więc Next.js odpowiada na nią 404.
  * Test pada, gdy ktoś przywróci którąkolwiek ścieżkę, zależność, import
  * (statyczny, `require`, dynamiczny `import()`), odwołanie do trasy, zmienną
  * środowiskową albo zluzuje nagłówki bezpieczeństwa po usuniętych dostawcach.
@@ -57,6 +60,11 @@ const REMOVED_PATHS = [
   // Ogólny czat (decyzja PO 2026-11-15) — czaty AI to asystent biznesowy i trendy
   "src/app/(site)/chat",
   "src/app/api/chat",
+  // Kategoryzacja i analiza klienta przez AI — usunięte bez zastępstwa
+  // (najszerszy zakres danych klientki; kategoryzacja bez wywołań w UI).
+  "src/app/api/ai/categorize",
+  "src/app/api/ai/clients/insights",
+  "src/components/clients/client-insights-tab.tsx",
 ];
 
 /**
@@ -117,6 +125,10 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   ["link lub trasa chroniona /chat", /(["'`]|\})\/chat(\/[^"'`]*)?["'`]/],
   // useChat bez transportu woła domyślnie /api/chat
   ["useChat z @ai-sdk/react (domyślny endpoint /api/chat)", importOf("@ai-sdk/react")],
+  // Kategoryzacja i analiza klienta przez AI
+  ["trasa /api/ai/categorize", /\/api\/ai\/categorize(\/|["'`?#]|$)/m],
+  ["trasa /api/ai/clients/insights", /\/api\/ai\/clients\/insights(\/|["'`?#]|$)/m],
+  ["usunięta zakładka analizy klienta", /client-insights-tab|ClientInsightsTab/],
   // Importy usuniętych pakietów
   ...REMOVED_PACKAGES.map((pkg): [string, RegExp] => [`import ${pkg}`, importOf(pkg)]),
 ];

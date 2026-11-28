@@ -21,7 +21,7 @@
 
 ## API Domains
 
-- **AI (Pro)**: Business (alerts, analytics, chat, recommendations, categorize, search, insights), Content (descriptions, social-post, newsletter, auto-summary), Voice (book, cancel, reschedule, tts, stt, interpret-command, twilio), Image (generate, enhance, banner, service-illustration), Video (generate, status, story, testimonial-template), Usage monitoring
+- **AI (Pro)**: Business (alerts, analytics, chat, recommendations, search), Content (descriptions, social-post, newsletter, auto-summary), Voice (book, cancel, reschedule, tts, stt, interpret-command, twilio), Image (generate, enhance, banner, service-illustration), Video (generate, status, story, testimonial-template), Usage monitoring
 - **Core CRUD**: appointments, clients, employees, services, products, salons, gallery, invoices, promotions, promo-codes, reviews, work-schedules, time-blocks, waiting-list, scheduled-posts, temporary-access
 - **Client Portal**: /api/client/appointments, reviews, waiting-list, /api/favorites/salons
 - **Finance**: deposits, subscriptions, stripe webhooks, reports (revenue, occupancy, payroll, popularity, profitability, materials, promotions, cancellations, monthly/yearly comparison)

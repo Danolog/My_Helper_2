@@ -13,8 +13,6 @@ All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` serve
 | Endpoint | Purpose |
 |----------|---------|
 | POST /api/ai/appointments/auto-summary | AI summary after appointment completion |
-| POST /api/ai/categorize | Auto-categorize services/products |
-| POST /api/ai/clients/insights | Client analysis (churn risk, trends) |
 | POST /api/ai/search | Natural language search (Cmd+K) |
 | POST /api/ai/notifications/personalize | Personalize notification messages |
 | POST /api/ai/voice/tts | ElevenLabs Text-to-Speech |
@@ -36,7 +34,6 @@ All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` serve
 - `VoiceTextarea` — Textarea with ElevenLabs mic button
 - `ReadAloudButton` — TTS playback button
 - `VoiceCommandButton` — Floating mic for voice commands
-- `ClientInsightsTab` — AI analysis tab on client profile
 - `ImageGenerator` — Social media graphics generator
 - `VideoGenerator` — Promotional video clips (Veo)
 - `StoryGenerator` — Animated Instagram Stories

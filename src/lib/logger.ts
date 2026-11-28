@@ -56,7 +56,7 @@ export const PII_LOG_KEYS: readonly string[] = [
   "pesel",
   "body",
   // Z inwentaryzacji: surowa odpowiedź modelu AI o kliencie/wizycie
-  // (personalize, categorize, insights, auto-summary).
+  // (personalize, auto-summary).
   "rawText",
   "responseText",
   // Kartoteka klienta: informacje o zdrowiu i wolny tekst preferencji.

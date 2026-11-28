@@ -9,11 +9,9 @@ import {
   AlertTriangle,
   History,
   Award,
-  Brain,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ClientHistoryTab } from "@/components/clients/client-history-tab";
-import { ClientInsightsTab } from "@/components/clients/client-insights-tab";
 import { ClientLoyaltyTab } from "@/components/clients/client-loyalty-tab";
 import { ClientNoShowCount } from "@/components/clients/client-no-show-count";
 import { ClientOnlineBookingBlock } from "@/components/clients/client-online-booking-block";
@@ -369,10 +367,6 @@ export default function ClientProfilePage() {
               Punkty lojalnosciowe
             </TabsTrigger>
           )}
-          <TabsTrigger value="ai-insights" data-testid="tab-ai-insights">
-            <Brain className="h-4 w-4 mr-1" />
-            AI Insights
-          </TabsTrigger>
         </TabsList>
 
         {/* Profile Tab */}
@@ -440,13 +434,6 @@ export default function ClientProfilePage() {
             )}
           </TabsContent>
         )}
-
-        {/* AI Insights Tab */}
-        <TabsContent value="ai-insights">
-          {activatedTabs.has("ai-insights") && (
-            <ClientInsightsTab clientId={clientId} />
-          )}
-        </TabsContent>
       </Tabs>
     </div>
   );
