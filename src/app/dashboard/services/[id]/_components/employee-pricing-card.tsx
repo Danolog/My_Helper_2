@@ -68,7 +68,7 @@ export function EmployeePricingCard({
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5 text-primary" />
           <CardTitle className="text-lg">
-            Ceny indywidualne pracownikow
+            Ceny indywidualne pracowników
           </CardTitle>
           <Badge variant="outline" data-testid="employee-prices-count">
             {employeePrices.length}

@@ -669,7 +669,7 @@ describe("POST /api/appointments/[id]/complete", () => {
         const { status, body } = await parseResponse(await completeWith(value));
 
         expect(status).toBe(400);
-        expect(JSON.stringify(body)).toContain("Prowizja musi byc liczba od 0 do 100");
+        expect(JSON.stringify(body)).toContain("Prowizja musi być liczbą od 0 do 100.");
         expect(mockDbSelect).not.toHaveBeenCalled();
         expect(mockDbInsert).not.toHaveBeenCalled();
         expect(mockDbUpdate).not.toHaveBeenCalled();
@@ -1748,13 +1748,13 @@ describe("POST /api/appointments/[id]/complete", () => {
 
     it("400: komunikaty po polsku", async () => {
       const negative = await parseResponse(await completeWith({ paidAmount: "-5", paymentMethod: "cash" }));
-      expect((negative.body as any).details.paidAmount).toBe("Kwota nie moze byc ujemna");
+      expect((negative.body as any).details.paidAmount).toBe("Kwota nie może być ujemna.");
 
       const decimals = await parseResponse(await completeWith({ paidAmount: "1.234", paymentMethod: "cash" }));
-      expect((decimals.body as any).details.paidAmount).toBe("Kwota moze miec najwyzej 2 miejsca po przecinku");
+      expect((decimals.body as any).details.paidAmount).toBe("Kwota może mieć najwyżej 2 miejsca po przecinku.");
 
       const pair = await parseResponse(await completeWith({ paidAmount: "5" }));
-      expect((pair.body as any).details.paymentMethod).toBe("Podaj metode platnosci razem z kwota");
+      expect((pair.body as any).details.paymentMethod).toBe("Podaj metodę płatności razem z kwotą.");
     });
 
     it("401: brak sesji — bez zapisu", async () => {
@@ -2373,6 +2373,54 @@ describe("POST /api/appointments/[id]/complete", () => {
         expect(status).toBe(400);
         expect((body as any).details.paymentMethod).toEqual(expect.any(String));
         expect((body as any).details.commissionPercentage).toBeUndefined();
+      });
+
+      describe("stawka pod inną nazwą albo zagnieżdżona nie wchodzi do prowizji", () => {
+        /** Surowe JSON, żeby `__proto__` był własnym kluczem body, jak z sieci. */
+        function postRaw(json: string) {
+          return completeAppointment(
+            new Request(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: json,
+            }),
+            createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+          );
+        }
+
+        const SMUGGLED = [
+          ["commission_percentage", '{"commission_percentage":100}'],
+          ["commissionRate", '{"commissionRate":100}'],
+          ["CommissionPercentage", '{"CommissionPercentage":100}'],
+          ["__proto__", '{"__proto__":{"commissionPercentage":100}}'],
+          ["constructor.prototype", '{"constructor":{"prototype":{"commissionPercentage":100}}}'],
+          ["zagnieżdżone w data", '{"data":{"commissionPercentage":100}}'],
+          ["zagnieżdżone w commission", '{"commission":{"percentage":100,"commissionPercentage":100}}'],
+        ] as const;
+
+        const cases = (["employee", "receptionist", "owner"] as const).flatMap((role) =>
+          SMUGGLED.map(([label, json]) => [role, label, json] as const)
+        );
+
+        it.each(cases)("%s, pole %s → 200, stawka z danych pracownika", async (role, _label, json) => {
+          if (role !== "owner") await asRole(role);
+          givenUpToPrice({
+            appointment: makeAppointment({ status: "scheduled" }),
+            service: makeService({ basePrice: "200.00" }),
+            commissionRate: "40.00",
+          });
+          const commissionChain = thenCommissionSaved();
+
+          const { status, body } = await parseResponse(await postRaw(json));
+
+          expect(status).toBe(200);
+          expect(body.success).toBe(true);
+          expect(commissionChain.values).toHaveBeenCalledWith(
+            expect.objectContaining({ percentage: "40.00", amount: "80.00" })
+          );
+          // Żadne body nie zmienia prototypu obiektów w procesie.
+          expect(({} as Record<string, unknown>).commissionPercentage).toBeUndefined();
+        });
       });
     });
 
