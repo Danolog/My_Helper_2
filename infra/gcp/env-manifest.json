@@ -99,6 +99,10 @@
     "GOOGLE_AI_API_KEY": {
       "class": "vercel-only"
     },
+    "GOOGLE_APPLICATION_CREDENTIALS": {
+      "class": "platform",
+      "note": "Nie ustawiać; obecność wyłącza AI (getChatModel() odmawia). Kod czyta ją tylko po to, żeby odmówić: AI loguje się kontem usługi Cloud Run, bez klucza w pliku."
+    },
     "GOOGLE_CLIENT_ID": {
       "class": "var",
       "required": false
@@ -107,6 +111,11 @@
       "class": "secret",
       "secretName": "google-client-secret",
       "required": false
+    },
+    "GOOGLE_VERTEX_PROJECT": {
+      "class": "var",
+      "required": false,
+      "note": "Projekt GCP dla Vertex AI; w workflow z vars.GCP_PROJECT_ID (bez osobnej zmiennej repo). Lokalizacja na stałe eu w kodzie (src/lib/ai/model.ts)."
     },
     "HOSTNAME": {
       "class": "platform"
@@ -139,8 +148,8 @@
       "note": "Poza Secret Manager i Cloud Run: zmienna nieprzenoszona; funkcje AI docelowo przez Vertex AI kontem serwisowym, bez klucza."
     },
     "OPENROUTER_MODEL": {
-      "class": "var",
-      "required": false
+      "class": "vercel-only",
+      "note": "Nie wdrażana na Cloud Run; czytana w kodzie do usunięcia ostatniego wywołania OpenRouter, wtedy wpis znika."
     },
     "PORT": {
       "class": "platform"

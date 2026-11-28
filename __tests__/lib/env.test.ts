@@ -43,9 +43,31 @@ describe("getServerEnv", () => {
     (process.env as Record<string, string>).NODE_ENV = "test";
 
     const env = getServerEnv();
-    expect(env.OPENROUTER_MODEL).toBe("anthropic/claude-sonnet-4");
     expect(env.GOOGLE_CLIENT_ID).toBeUndefined();
     expect(env.STRIPE_SECRET_KEY).toBeUndefined();
+  });
+
+  it("starts without GOOGLE_VERTEX_PROJECT (AI optional) and passes it through when set", () => {
+    process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
+    process.env.BETTER_AUTH_SECRET = "a".repeat(32);
+    (process.env as Record<string, string>).NODE_ENV = "test";
+    delete process.env.GOOGLE_VERTEX_PROJECT;
+
+    expect(getServerEnv().GOOGLE_VERTEX_PROJECT).toBeUndefined();
+
+    process.env.GOOGLE_VERTEX_PROJECT = "test-project";
+    expect(getServerEnv().GOOGLE_VERTEX_PROJECT).toBe("test-project");
+  });
+
+  it("has no OpenRouter variables in the schema (no default model id)", () => {
+    process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
+    process.env.BETTER_AUTH_SECRET = "a".repeat(32);
+    (process.env as Record<string, string>).NODE_ENV = "test";
+    process.env.OPENROUTER_API_KEY = "openrouter-key";
+    process.env.OPENROUTER_MODEL = "some/model";
+
+    const keys = Object.keys(getServerEnv());
+    expect(keys.filter((k) => k.startsWith("OPENROUTER"))).toEqual([]);
   });
 
   it("should accept valid NODE_ENV values", () => {
@@ -138,7 +160,7 @@ describe("checkEnv", () => {
     process.env.BETTER_AUTH_SECRET = "a".repeat(32);
     (process.env as Record<string, string>).NODE_ENV = "development";
     delete process.env.GOOGLE_CLIENT_ID;
-    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.GOOGLE_VERTEX_PROJECT;
     delete process.env.BLOB_READ_WRITE_TOKEN;
     delete process.env.STRIPE_SECRET_KEY;
 
@@ -168,7 +190,7 @@ describe("checkEnv", () => {
     (process.env as Record<string, string>).NODE_ENV = "development";
     process.env.GOOGLE_CLIENT_ID = "google-id";
     process.env.GOOGLE_CLIENT_SECRET = "google-secret";
-    process.env.OPENROUTER_API_KEY = "openrouter-key";
+    process.env.GOOGLE_VERTEX_PROJECT = "test-project";
     process.env.BLOB_READ_WRITE_TOKEN = "blob-token";
     process.env.STRIPE_SECRET_KEY = "stripe-key";
     process.env.RESEND_API_KEY = "re_test_key";
@@ -194,6 +216,26 @@ describe("checkEnv", () => {
     expect(emailWarningCalls.length).toBeGreaterThan(0);
   });
 
+  it("warns (does not throw) when GOOGLE_VERTEX_PROJECT is missing", () => {
+    process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
+    process.env.BETTER_AUTH_SECRET = "a".repeat(32);
+    (process.env as Record<string, string>).NODE_ENV = "development";
+    delete process.env.GOOGLE_VERTEX_PROJECT;
+
+    expect(() => checkEnv()).not.toThrow();
+
+    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
+    const vertexWarnings = warnCalls.filter(
+      (call: unknown[]) =>
+        typeof call[1] === "string" && call[1].includes("GOOGLE_VERTEX_PROJECT is not set")
+    );
+    expect(vertexWarnings.length).toBe(1);
+    const openRouterWarnings = warnCalls.filter(
+      (call: unknown[]) => typeof call[1] === "string" && call[1].includes("OPENROUTER")
+    );
+    expect(openRouterWarnings).toEqual([]);
+  });
+
   it("should warn about Google OAuth when only GOOGLE_CLIENT_ID is set", () => {
     process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
     process.env.BETTER_AUTH_SECRET = "a".repeat(32);
@@ -201,7 +243,7 @@ describe("checkEnv", () => {
     process.env.GOOGLE_CLIENT_ID = "google-id";
     delete process.env.GOOGLE_CLIENT_SECRET;
     // Set other optional vars to isolate the Google OAuth warning
-    process.env.OPENROUTER_API_KEY = "openrouter-key";
+    process.env.GOOGLE_VERTEX_PROJECT = "test-project";
     process.env.BLOB_READ_WRITE_TOKEN = "blob-token";
     process.env.STRIPE_SECRET_KEY = "stripe-key";
 
