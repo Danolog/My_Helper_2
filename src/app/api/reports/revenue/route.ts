@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { requireReportSalon } from "@/lib/reports/require-report-salon";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { logger } from "@/lib/logger";
+import { requireReportSalon } from "@/lib/reports/require-report-salon";
+import {
+  REVENUE_METHOD_LABELS,
+  REVENUE_METHOD_ORDER,
+  REVENUE_SOURCE_NOTE,
+  appointmentRevenueCents,
+  centsToAmount,
+  discountCents,
+  revenueShare,
+  type RevenueMethod,
+} from "@/lib/reports/revenue-amount";
 import { appointments, services, employees, clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-// GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
+// GET /api/reports/revenue - Revenue report with breakdowns by service/employee/payment method and trends
+//
+// Kwota wizyty z `appointmentRevenueCents`: wpisana przy zakończeniu, a bez
+// zapisu płatności dawny wzór (cena minus rabat). Wszystkie sumy w groszach,
+// format z dwoma miejscami dopiero na wyjściu.
 export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
@@ -71,6 +85,8 @@ export async function GET(request: Request) {
         discountAmount: appointments.discountAmount,
         depositAmount: appointments.depositAmount,
         depositPaid: appointments.depositPaid,
+        paidAmount: appointments.paidAmount,
+        paymentMethod: appointments.paymentMethod,
       })
       .from(appointments)
       .leftJoin(services, eq(appointments.serviceId, services.id))
@@ -80,9 +96,9 @@ export async function GET(request: Request) {
       .orderBy(desc(appointments.startTime))
     );
 
-    // Calculate total revenue
-    let totalRevenue = 0;
-    let totalDiscount = 0;
+    // Totals in grosze (integers)
+    let totalRevenueCents = 0;
+    let totalDiscountCents = 0;
     const totalAppointments = completedAppointments.length;
 
     // Breakdown by service
@@ -92,8 +108,7 @@ export async function GET(request: Request) {
         serviceId: string;
         serviceName: string;
         count: number;
-        revenue: number;
-        avgPrice: number;
+        revenueCents: number;
       }
     > = {};
 
@@ -104,8 +119,7 @@ export async function GET(request: Request) {
         employeeId: string;
         employeeName: string;
         count: number;
-        revenue: number;
-        avgPrice: number;
+        revenueCents: number;
       }
     > = {};
 
@@ -114,33 +128,38 @@ export async function GET(request: Request) {
       string,
       {
         date: string;
-        revenue: number;
+        revenueCents: number;
         count: number;
       }
     > = {};
 
-    for (const appt of completedAppointments) {
-      const price = parseFloat(appt.basePrice || "0");
-      const discount = parseFloat(appt.discountAmount || "0");
-      const effectivePrice = Math.max(0, price - discount);
+    // Breakdown by payment method — always all four groups, in fixed order
+    const methodBreakdown = Object.fromEntries(
+      REVENUE_METHOD_ORDER.map((method) => [method, { count: 0, revenueCents: 0 }])
+    ) as Record<RevenueMethod, { count: number; revenueCents: number }>;
 
-      totalRevenue += effectivePrice;
-      totalDiscount += discount;
+    for (const appt of completedAppointments) {
+      const { cents: effectiveCents, method } = appointmentRevenueCents(appt);
+
+      totalRevenueCents += effectiveCents;
+      totalDiscountCents += discountCents(appt.discountAmount);
+
+      methodBreakdown[method].count += 1;
+      methodBreakdown[method].revenueCents += effectiveCents;
 
       // Service breakdown
       const svcId = appt.serviceId || "unknown";
-      const svcName = appt.serviceName || "Usluga usuneta";
+      const svcName = appt.serviceName || "Usługa usunięta";
       if (!serviceBreakdown[svcId]) {
         serviceBreakdown[svcId] = {
           serviceId: svcId,
           serviceName: svcName,
           count: 0,
-          revenue: 0,
-          avgPrice: 0,
+          revenueCents: 0,
         };
       }
       serviceBreakdown[svcId].count += 1;
-      serviceBreakdown[svcId].revenue += effectivePrice;
+      serviceBreakdown[svcId].revenueCents += effectiveCents;
 
       // Employee breakdown
       const empId = appt.employeeId || "unknown";
@@ -152,12 +171,11 @@ export async function GET(request: Request) {
           employeeId: empId,
           employeeName: empName,
           count: 0,
-          revenue: 0,
-          avgPrice: 0,
+          revenueCents: 0,
         };
       }
       employeeBreakdown[empId].count += 1;
-      employeeBreakdown[empId].revenue += effectivePrice;
+      employeeBreakdown[empId].revenueCents += effectiveCents;
 
       // Daily trend
       const dayKey = appt.startTime
@@ -166,34 +184,60 @@ export async function GET(request: Request) {
       if (!dailyTrend[dayKey]) {
         dailyTrend[dayKey] = {
           date: dayKey,
-          revenue: 0,
+          revenueCents: 0,
           count: 0,
         };
       }
-      dailyTrend[dayKey].revenue += effectivePrice;
+      dailyTrend[dayKey].revenueCents += effectiveCents;
       dailyTrend[dayKey].count += 1;
     }
 
-    // Calculate averages
-    for (const svc of Object.values(serviceBreakdown)) {
-      svc.avgPrice = svc.count > 0 ? svc.revenue / svc.count : 0;
-    }
-    for (const emp of Object.values(employeeBreakdown)) {
-      emp.avgPrice = emp.count > 0 ? emp.revenue / emp.count : 0;
-    }
+    /** Average in grosze, rounded to a whole grosz (count > 0). */
+    const avgCents = (cents: number, count: number) =>
+      count > 0 ? Math.round(cents / count) : 0;
 
-    const serviceArray = Object.values(serviceBreakdown).sort(
-      (a, b) => b.revenue - a.revenue
-    );
-    const employeeArray = Object.values(employeeBreakdown).sort(
-      (a, b) => b.revenue - a.revenue
-    );
-    const trendArray = Object.values(dailyTrend).sort((a, b) =>
-      a.date.localeCompare(b.date)
-    );
+    const serviceArray = Object.values(serviceBreakdown)
+      .sort((a, b) => b.revenueCents - a.revenueCents)
+      .map((s) => ({
+        serviceId: s.serviceId,
+        serviceName: s.serviceName,
+        count: s.count,
+        revenue: centsToAmount(s.revenueCents),
+        avgPrice: centsToAmount(avgCents(s.revenueCents, s.count)),
+        share: revenueShare(s.revenueCents, totalRevenueCents),
+      }));
+    const employeeArray = Object.values(employeeBreakdown)
+      .sort((a, b) => b.revenueCents - a.revenueCents)
+      .map((e) => ({
+        employeeId: e.employeeId,
+        employeeName: e.employeeName,
+        count: e.count,
+        revenue: centsToAmount(e.revenueCents),
+        avgPrice: centsToAmount(avgCents(e.revenueCents, e.count)),
+        share: revenueShare(e.revenueCents, totalRevenueCents),
+      }));
+    const trendArray = Object.values(dailyTrend)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((t) => ({
+        date: t.date,
+        revenue: centsToAmount(t.revenueCents),
+        count: t.count,
+      }));
+    const paymentMethodArray = REVENUE_METHOD_ORDER.map((method) => ({
+      method,
+      label: REVENUE_METHOD_LABELS[method],
+      count: methodBreakdown[method].count,
+      revenue: centsToAmount(methodBreakdown[method].revenueCents),
+      share: revenueShare(methodBreakdown[method].revenueCents, totalRevenueCents),
+    }));
 
-    const avgRevenuePerAppointment =
-      totalAppointments > 0 ? totalRevenue / totalAppointments : 0;
+    const totalRevenue = centsToAmount(totalRevenueCents);
+    const totalDiscount = centsToAmount(totalDiscountCents);
+    const avgRevenuePerAppointment = centsToAmount(
+      avgCents(totalRevenueCents, totalAppointments)
+    );
+    // Share of the RAZEM row in the payment method section
+    const totalShare = revenueShare(totalRevenueCents, totalRevenueCents);
 
     // CSV export
     if (format === "csv") {
@@ -201,44 +245,50 @@ export async function GET(request: Request) {
       const BOM = "\uFEFF";
 
       // Summary section
-      csvRows.push("RAPORT PRZYCHODOW");
+      csvRows.push("RAPORT PRZYCHODÓW");
       csvRows.push(
-        `Okres,${dateFrom || "poczatek"},-,${dateTo || "koniec"}`
+        `Okres,${dateFrom || "początek"},-,${dateTo || "koniec"}`
       );
-      csvRows.push(`Calkowity przychod,${totalRevenue.toFixed(2)} PLN`);
-      csvRows.push(`Laczna liczba wizyt,${totalAppointments}`);
+      csvRows.push(`Całkowity przychód,${totalRevenue} PLN`);
+      csvRows.push(`Łączna liczba wizyt,${totalAppointments}`);
       csvRows.push(
-        `Sredni przychod na wizyte,${avgRevenuePerAppointment.toFixed(2)} PLN`
+        `Średni przychód na wizytę,${avgRevenuePerAppointment} PLN`
       );
-      csvRows.push(`Laczna kwota znizek,${totalDiscount.toFixed(2)} PLN`);
+      csvRows.push(`Łączna kwota zniżek,${totalDiscount} PLN`);
+      csvRows.push(`Źródło kwot,"${REVENUE_SOURCE_NOTE}"`);
       csvRows.push("");
 
       // Service breakdown
-      csvRows.push("PRZYCHOD WG USLUGI");
+      csvRows.push("PRZYCHÓD WG USŁUGI");
       csvRows.push(
-        "Usluga,Liczba wizyt,Przychod (PLN),Srednia cena (PLN),Udzial (%)"
+        "Usługa,Liczba wizyt,Przychód (PLN),Średnia cena (PLN),Udział (%)"
       );
       for (const svc of serviceArray) {
-        const share =
-          totalRevenue > 0 ? ((svc.revenue / totalRevenue) * 100).toFixed(1) : "0.0";
         csvRows.push(
-          `"${svc.serviceName}",${svc.count},${svc.revenue.toFixed(2)},${svc.avgPrice.toFixed(2)},${share}`
+          `"${svc.serviceName}",${svc.count},${svc.revenue},${svc.avgPrice},${svc.share}`
         );
       }
       csvRows.push("");
 
       // Employee breakdown
-      csvRows.push("PRZYCHOD WG PRACOWNIKA");
+      csvRows.push("PRZYCHÓD WG PRACOWNIKA");
       csvRows.push(
-        "Pracownik,Liczba wizyt,Przychod (PLN),Srednia cena (PLN),Udzial (%)"
+        "Pracownik,Liczba wizyt,Przychód (PLN),Średnia cena (PLN),Udział (%)"
       );
       for (const emp of employeeArray) {
-        const share =
-          totalRevenue > 0 ? ((emp.revenue / totalRevenue) * 100).toFixed(1) : "0.0";
         csvRows.push(
-          `"${emp.employeeName}",${emp.count},${emp.revenue.toFixed(2)},${emp.avgPrice.toFixed(2)},${share}`
+          `"${emp.employeeName}",${emp.count},${emp.revenue},${emp.avgPrice},${emp.share}`
         );
       }
+      csvRows.push("");
+
+      // Payment method breakdown
+      csvRows.push("PRZYCHÓD WG METODY PŁATNOŚCI");
+      csvRows.push("Metoda płatności,Liczba wizyt,Przychód (PLN),Udział (%)");
+      for (const pm of paymentMethodArray) {
+        csvRows.push(`"${pm.label}",${pm.count},${pm.revenue},${pm.share}`);
+      }
+      csvRows.push(`RAZEM,${totalAppointments},${totalRevenue},${totalShare}`);
 
       const csvContent = BOM + csvRows.join("\n");
       return new NextResponse(csvContent, {
@@ -255,62 +305,59 @@ export async function GET(request: Request) {
       const sheets = [
         {
           name: "Podsumowanie",
-          headers: ["Metryka", "Wartosc"],
+          headers: ["Metryka", "Wartość"],
           rows: [
-            ["Okres od", dateFrom || "poczatek"],
+            ["Okres od", dateFrom || "początek"],
             ["Okres do", dateTo || "koniec"],
-            ["Calkowity przychod (PLN)", totalRevenue.toFixed(2)],
-            ["Laczna liczba wizyt", totalAppointments],
-            ["Sredni przychod na wizyte (PLN)", avgRevenuePerAppointment.toFixed(2)],
-            ["Laczna kwota znizek (PLN)", totalDiscount.toFixed(2)],
+            ["Całkowity przychód (PLN)", totalRevenue],
+            ["Łączna liczba wizyt", totalAppointments],
+            ["Średni przychód na wizytę (PLN)", avgRevenuePerAppointment],
+            ["Łączna kwota zniżek (PLN)", totalDiscount],
+            ["Źródło kwot", REVENUE_SOURCE_NOTE],
           ] as (string | number)[][],
         },
         {
-          name: "Wg uslugi",
-          headers: ["Usluga", "Liczba wizyt", "Przychod (PLN)", "Srednia cena (PLN)", "Udzial (%)"],
+          name: "Wg usługi",
+          headers: ["Usługa", "Liczba wizyt", "Przychód (PLN)", "Średnia cena (PLN)", "Udział (%)"],
           rows: [
-            ...serviceArray.map((svc) => {
-              const share =
-                totalRevenue > 0
-                  ? ((svc.revenue / totalRevenue) * 100).toFixed(1)
-                  : "0.0";
-              return [
-                svc.serviceName,
-                svc.count,
-                svc.revenue.toFixed(2),
-                svc.avgPrice.toFixed(2),
-                share,
-              ];
-            }),
-            ["RAZEM", totalAppointments, totalRevenue.toFixed(2), avgRevenuePerAppointment.toFixed(2), "100.0"],
+            ...serviceArray.map((svc) => [
+              svc.serviceName,
+              svc.count,
+              svc.revenue,
+              svc.avgPrice,
+              svc.share,
+            ]),
+            ["RAZEM", totalAppointments, totalRevenue, avgRevenuePerAppointment, "100.0"],
           ] as (string | number)[][],
         },
         {
           name: "Wg pracownika",
-          headers: ["Pracownik", "Liczba wizyt", "Przychod (PLN)", "Srednia cena (PLN)", "Udzial (%)"],
+          headers: ["Pracownik", "Liczba wizyt", "Przychód (PLN)", "Średnia cena (PLN)", "Udział (%)"],
           rows: [
-            ...employeeArray.map((emp) => {
-              const share =
-                totalRevenue > 0
-                  ? ((emp.revenue / totalRevenue) * 100).toFixed(1)
-                  : "0.0";
-              return [
-                emp.employeeName,
-                emp.count,
-                emp.revenue.toFixed(2),
-                emp.avgPrice.toFixed(2),
-                share,
-              ];
-            }),
-            ["RAZEM", totalAppointments, totalRevenue.toFixed(2), avgRevenuePerAppointment.toFixed(2), "100.0"],
+            ...employeeArray.map((emp) => [
+              emp.employeeName,
+              emp.count,
+              emp.revenue,
+              emp.avgPrice,
+              emp.share,
+            ]),
+            ["RAZEM", totalAppointments, totalRevenue, avgRevenuePerAppointment, "100.0"],
+          ] as (string | number)[][],
+        },
+        {
+          name: "Wg metody płatności",
+          headers: ["Metoda płatności", "Liczba wizyt", "Przychód (PLN)", "Udział (%)"],
+          rows: [
+            ...paymentMethodArray.map((pm) => [pm.label, pm.count, pm.revenue, pm.share]),
+            ["RAZEM", totalAppointments, totalRevenue, totalShare],
           ] as (string | number)[][],
         },
         {
           name: "Trend dzienny",
-          headers: ["Data", "Przychod (PLN)", "Liczba wizyt"],
+          headers: ["Data", "Przychód (PLN)", "Liczba wizyt"],
           rows: [
-            ...trendArray.map((t) => [t.date, t.revenue.toFixed(2), t.count]),
-            ["RAZEM", totalRevenue.toFixed(2), totalAppointments],
+            ...trendArray.map((t) => [t.date, t.revenue, t.count]),
+            ["RAZEM", totalRevenue, totalAppointments],
           ] as (string | number)[][],
         },
       ];
@@ -328,33 +375,15 @@ export async function GET(request: Request) {
       success: true,
       data: {
         summary: {
-          totalRevenue: totalRevenue.toFixed(2),
+          totalRevenue,
           totalAppointments,
-          avgRevenuePerAppointment: avgRevenuePerAppointment.toFixed(2),
-          totalDiscount: totalDiscount.toFixed(2),
+          avgRevenuePerAppointment,
+          totalDiscount,
         },
-        byService: serviceArray.map((s) => ({
-          ...s,
-          revenue: s.revenue.toFixed(2),
-          avgPrice: s.avgPrice.toFixed(2),
-          share:
-            totalRevenue > 0
-              ? ((s.revenue / totalRevenue) * 100).toFixed(1)
-              : "0.0",
-        })),
-        byEmployee: employeeArray.map((e) => ({
-          ...e,
-          revenue: e.revenue.toFixed(2),
-          avgPrice: e.avgPrice.toFixed(2),
-          share:
-            totalRevenue > 0
-              ? ((e.revenue / totalRevenue) * 100).toFixed(1)
-              : "0.0",
-        })),
-        trend: trendArray.map((t) => ({
-          ...t,
-          revenue: t.revenue.toFixed(2),
-        })),
+        byService: serviceArray,
+        byEmployee: employeeArray,
+        byPaymentMethod: paymentMethodArray,
+        trend: trendArray,
         filters: {
           salonId,
           dateFrom: dateFrom || null,
