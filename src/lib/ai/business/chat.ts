@@ -275,7 +275,6 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
       tx
         .select({ count: count() })
         .from(clients)
-        .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       tx
