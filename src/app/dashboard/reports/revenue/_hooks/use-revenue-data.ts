@@ -6,7 +6,17 @@ import { toast } from "sonner";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 import { generateReportPDF } from "@/lib/pdf-export";
+import { revenueShare, type RevenueMethod } from "@/lib/reports/revenue-amount";
 import type { ReportData, RevenueActiveTab } from "../_types";
+
+// PDF uses the built-in Helvetica font without Polish letters, so the method
+// labels are transliterated here (screen and exports use REVENUE_METHOD_LABELS).
+const PDF_METHOD_LABELS: Record<RevenueMethod, string> = {
+  cash: "Gotowka",
+  card: "Karta",
+  blik: "BLIK",
+  none: "Bez zapisu platnosci",
+};
 
 export function useRevenueData() {
   const { data: _session } = useSession();
@@ -127,6 +137,13 @@ export function useRevenueData() {
   const handleExportPDF = () => {
     if (!reportData) return;
     try {
+      // One rule for every RAZEM share: "100.0" with revenue, "0.0" for a period without it
+      const totalCents = Math.round(parseFloat(reportData.summary.totalRevenue) * 100);
+      const totalShare = `${revenueShare(totalCents, totalCents)}%`;
+      // All four groups come from the API; "none" is listed only when it has appointments
+      const visibleMethods = reportData.byPaymentMethod.filter(
+        (row) => row.method !== "none" || row.count > 0,
+      );
       generateReportPDF({
         title: "Raport przychodow",
         subtitle: "Analiza przychodow salonu w wybranym okresie",
@@ -138,6 +155,22 @@ export function useRevenueData() {
           { label: "Znizki", value: `${parseFloat(reportData.summary.totalDiscount).toFixed(2)} PLN` },
         ],
         tables: [
+          {
+            title: "Przychod wg metody platnosci",
+            headers: ["Metoda platnosci", "Liczba wizyt", "Przychod", "Udzial"],
+            rows: visibleMethods.map((row) => [
+              PDF_METHOD_LABELS[row.method],
+              `${row.count}`,
+              `${parseFloat(row.revenue).toFixed(2)} PLN`,
+              `${row.share}%`,
+            ]),
+            footerRow: [
+              "RAZEM",
+              `${reportData.summary.totalAppointments}`,
+              `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+              totalShare,
+            ],
+          },
           ...(reportData.byService.length > 0
             ? [
                 {
@@ -155,7 +188,7 @@ export function useRevenueData() {
                     `${reportData.summary.totalAppointments}`,
                     `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
                     `${parseFloat(reportData.summary.avgRevenuePerAppointment).toFixed(2)} PLN`,
-                    "100%",
+                    totalShare,
                   ],
                 },
               ]
@@ -177,7 +210,7 @@ export function useRevenueData() {
                     `${reportData.summary.totalAppointments}`,
                     `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
                     `${parseFloat(reportData.summary.avgRevenuePerAppointment).toFixed(2)} PLN`,
-                    "100%",
+                    totalShare,
                   ],
                 },
               ]
