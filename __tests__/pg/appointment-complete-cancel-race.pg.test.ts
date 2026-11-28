@@ -152,7 +152,11 @@ async function appointmentWithPendingDeposit(
 
 const complete = (id: string) =>
   completeRoute.POST(
-    createMockRequest(`http://localhost/api/appointments/${id}/complete`, { method: "POST", body: {} }),
+    // Kwota i metoda płatności są wymagane przy zakończeniu wizyty.
+    createMockRequest(`http://localhost/api/appointments/${id}/complete`, {
+      method: "POST",
+      body: { paidAmount: "100.00", paymentMethod: "cash" },
+    }),
     createRouteParams(id)
   );
 
