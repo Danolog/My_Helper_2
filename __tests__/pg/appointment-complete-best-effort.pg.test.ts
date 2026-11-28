@@ -162,9 +162,13 @@ async function rowOf(appt: string) {
   return a!;
 }
 
+/** Kwota i metoda płatności są wymagane przy zakończeniu wizyty; body może je nadpisać. */
 const complete = (id: string, body: Record<string, unknown> = {}) =>
   completeRoute.POST(
-    createMockRequest(`http://localhost/api/appointments/${id}/complete`, { method: "POST", body }),
+    createMockRequest(`http://localhost/api/appointments/${id}/complete`, {
+      method: "POST",
+      body: { paidAmount: "100.00", paymentMethod: "cash", ...body },
+    }),
     createRouteParams(id)
   );
 

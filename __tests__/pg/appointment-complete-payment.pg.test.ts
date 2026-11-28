@@ -263,15 +263,17 @@ suite("płatność przy zakończeniu wizyty pod rolą aplikacji — prawdziwy Po
       expect(await rowOf(appt)).toEqual({ status: "completed", paidAmount: "0.00", paymentMethod: "cash" });
     });
 
-    it("bez kwoty i metody → 200, kolumny puste", async () => {
+    it("bez kwoty i metody → 400 PAID_AMOUNT_REQUIRED, wizyta niezakończona", async () => {
       const appt = await appointment("A");
       ctl.userId = OWNER_A;
 
-      const res = await parseResponse<CompleteBody>(await complete(appt, { notes: "it-pay bez płatności" }));
+      const res = await parseResponse<{ success: boolean; code?: string }>(
+        await complete(appt, { notes: "it-pay bez płatności" })
+      );
 
-      expect(res.status, JSON.stringify(res.body)).toBe(200);
-      expect(res.body.data.payment).toEqual({ paidAmount: null, paymentMethod: null });
-      expect(await rowOf(appt)).toEqual({ status: "completed", paidAmount: null, paymentMethod: null });
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(res.body.code).toBe("PAID_AMOUNT_REQUIRED");
+      expect(await rowOf(appt)).toEqual({ status: "scheduled", paidAmount: null, paymentMethod: null });
     });
   });
 

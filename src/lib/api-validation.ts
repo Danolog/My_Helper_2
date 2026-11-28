@@ -11,6 +11,7 @@ import {
   isValidPushAuth,
   isValidPushEndpoint,
 } from "@/lib/push-subscription";
+import { COMPLETE_MESSAGES } from "@/lib/appointment-completion";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { CLIENT_BLOCK_NOTE_MAX_LENGTH } from "@/lib/client-block";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
@@ -430,14 +431,21 @@ export const APPOINTMENT_PAYMENT_METHODS = ["cash", "card", "blik"] as const;
  */
 const PAID_AMOUNT_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
 
+/** Pole pominięte w body (undefined) albo wysłane jako null — w obu przypadkach brak wartości. */
+const isMissingInput = (input: unknown): boolean => input === undefined || input === null;
+
 /**
  * Kwota zapłacona: tekst albo liczba, wynik zawsze tekstem dla kolumny numeric.
  * Bez parseFloat — wartość nie przechodzi przez liczbę zmiennoprzecinkową.
  * Liczba z JSON zamieniana na tekst przez String(); zapis wykładniczy (1e21),
- * NaN i Infinity nie pasują do wzorca i dają 400.
+ * NaN i Infinity nie pasują do wzorca i dają 400. Brak pola i null mają własny
+ * tekst — po nim trasa rozpoznaje brak kwoty i oddaje osobny kod.
  */
 const paidAmountField = z
-  .union([z.string(), z.number()], { message: "Kwota musi być liczbą." })
+  .union([z.string(), z.number()], {
+    error: (issue) =>
+      isMissingInput(issue.input) ? COMPLETE_MESSAGES.paidAmountRequired : "Kwota musi być liczbą.",
+  })
   .transform((val) => (typeof val === "number" ? String(val) : val.trim()))
   .superRefine((val, ctx) => {
     if (val.startsWith("-")) {
@@ -479,41 +487,25 @@ const commissionPercentageField = z
 /**
  * Schema for POST /api/appointments/[id]/complete — complete an appointment.
  *
- * `paidAmount` i `paymentMethod` idą parą: oba albo żadne (null = brak).
- * Brak obu = zakończenie bez zapisu płatności (do czasu, gdy dialog zacznie
- * je wysyłać); para w bazie pilnowana przez CHECK `appointments_payment_pair`.
+ * `paidAmount` i `paymentMethod` są wymagane: wizyty nie da się zakończyć bez
+ * kwoty zapłaconej przez klienta i metody płatności (bez wartości domyślnej).
+ * Brak pola i null dają tekst z `COMPLETE_MESSAGES`, po którym trasa oddaje
+ * kod `PAID_AMOUNT_REQUIRED` albo `PAYMENT_METHOD_REQUIRED`. Para w bazie
+ * pilnowana dodatkowo przez CHECK `appointments_payment_pair`.
  */
-export const completeAppointmentSchema = z
-  .object({
-    recipe: z.string().nullable().optional(),
-    techniques: z.string().nullable().optional(),
-    notes: z.string().nullable().optional(),
-    commissionPercentage: commissionPercentageField.nullable().optional(),
-    paidAmount: paidAmountField.nullable().optional(),
-    paymentMethod: z
-      .enum(APPOINTMENT_PAYMENT_METHODS, {
-        message: "Wybierz metodę płatności: gotówka, karta albo BLIK.",
-      })
-      .nullable()
-      .optional(),
-  })
-  .superRefine((data, ctx) => {
-    const hasAmount = data.paidAmount !== undefined && data.paidAmount !== null;
-    const hasMethod = data.paymentMethod !== undefined && data.paymentMethod !== null;
-    if (hasAmount && !hasMethod) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["paymentMethod"],
-        message: "Podaj metodę płatności razem z kwotą.",
-      });
-    } else if (hasMethod && !hasAmount) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["paidAmount"],
-        message: "Podaj kwotę razem z metodą płatności.",
-      });
-    }
-  });
+export const completeAppointmentSchema = z.object({
+  recipe: z.string().nullable().optional(),
+  techniques: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  commissionPercentage: commissionPercentageField.nullable().optional(),
+  paidAmount: paidAmountField,
+  paymentMethod: z.enum(APPOINTMENT_PAYMENT_METHODS, {
+    error: (issue) =>
+      isMissingInput(issue.input)
+        ? COMPLETE_MESSAGES.paymentMethodRequired
+        : "Wybierz metodę płatności: gotówka, karta albo BLIK.",
+  }),
+});
 
 /**
  * Schema for POST /api/appointments/[id]/materials — add material to an appointment.

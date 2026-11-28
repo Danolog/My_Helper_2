@@ -230,9 +230,13 @@ function del(id = APPOINTMENT) {
   );
 }
 
+/** Zakończenie z wymaganą płatnością — kody wizyty, nie walidacja body. */
 function complete(id = APPOINTMENT) {
   return COMPLETE(
-    createMockRequest(`http://localhost:3000/api/appointments/${id}/complete`, { method: "POST", body: {} }),
+    createMockRequest(`http://localhost:3000/api/appointments/${id}/complete`, {
+      method: "POST",
+      body: { paidAmount: "100.00", paymentMethod: "cash" },
+    }),
     createRouteParams(id)
   );
 }

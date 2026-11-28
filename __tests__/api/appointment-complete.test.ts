@@ -7,13 +7,31 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  createMockRequest,
+  createMockRequest as createBaseMockRequest,
   createRouteParams,
   parseResponse,
   makeAppointment,
   makeService,
   TEST_IDS,
 } from "./helpers";
+
+/**
+ * Kwota i metoda płatności są wymagane przy zakończeniu wizyty. Scenariusze,
+ * które sprawdzają co innego niż płatność (prowizja, magazyn, statusy, role),
+ * dostają je domyślnie, gdy body nie ma żadnego z tych pól. Testy braku
+ * płatności wołają `createBaseMockRequest` — bez tej domieszki.
+ */
+const DEFAULT_PAYMENT = { paidAmount: "100.00", paymentMethod: "cash" } as const;
+
+function createMockRequest(url: string, options: Parameters<typeof createBaseMockRequest>[1] = {}) {
+  const body = options.body;
+  const isCompleteObjectBody =
+    url.endsWith("/complete") && !!body && typeof body === "object" && !Array.isArray(body);
+  if (isCompleteObjectBody && !("paidAmount" in body) && !("paymentMethod" in body)) {
+    return createBaseMockRequest(url, { ...options, body: { ...DEFAULT_PAYMENT, ...body } });
+  }
+  return createBaseMockRequest(url, options);
+}
 
 // -------------------------------------------------------
 // Mocks
@@ -1657,23 +1675,68 @@ describe("POST /api/appointments/[id]/complete", () => {
       });
     });
 
-    it("200: bez obu pól — SET tylko statusu, płatność w odpowiedzi pusta", async () => {
-      const updateChain = givenCompletableAppointment({ paidAmount: null, paymentMethod: null });
+    /** Body bez domieszki płatności z `createMockRequest` — tak, jak je wysłano. */
+    function completeWithRaw(body: unknown) {
+      return completeAppointment(
+        createBaseMockRequest(
+          `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+          { method: "POST", body }
+        ),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
 
-      const { status, body } = await parseResponse(await completeWith({ notes: "ok" }));
+    const amountRequired = {
+      code: COMPLETE_ERROR_CODES.paidAmountRequired,
+      error: "Podaj kwotę zapłaconą przez klienta.",
+      field: "paidAmount",
+    };
+    const methodRequired = {
+      code: COMPLETE_ERROR_CODES.paymentMethodRequired,
+      error: "Wybierz metodę płatności.",
+      field: "paymentMethod",
+    };
 
-      expect(status).toBe(200);
-      expect(updateChain.set).toHaveBeenCalledWith({ status: "completed" });
-      expect((body as any).data.payment).toEqual({ paidAmount: null, paymentMethod: null });
+    it.each([
+      ["bez obu pól", { notes: "ok" }, amountRequired],
+      ["body puste", {}, amountRequired],
+      ["oba pola null", { paidAmount: null, paymentMethod: null }, amountRequired],
+      ["bez kwoty", { paymentMethod: "card" }, amountRequired],
+      ["kwota null", { paidAmount: null, paymentMethod: "card" }, amountRequired],
+      ["bez metody", { paidAmount: "50" }, methodRequired],
+      ["metoda null", { paidAmount: "50", paymentMethod: null }, methodRequired],
+    ])("400: %s → kod i komunikat wskazujący pole, bez zapytań do bazy", async (_name, body, expected) => {
+      const { status, body: res } = await parseResponse(await completeWithRaw(body));
+
+      expect(status).toBe(400);
+      expect(res.success).toBe(false);
+      expect((res as any).code).toBe(expected.code);
+      expect(res.error).toBe(expected.error);
+      expect((res as any).details[expected.field]).toBe(expected.error);
+      expect(mockDbSelect).not.toHaveBeenCalled();
+      expect(mockDbInsert).not.toHaveBeenCalled();
+      expect(mockDbUpdate).not.toHaveBeenCalled();
     });
 
-    it("200: oba pola null traktowane jak brak", async () => {
-      const updateChain = givenCompletableAppointment({ paidAmount: null, paymentMethod: null });
+    it("400: nieznana metoda → wspólny kod walidacji i lista metod w polu", async () => {
+      const { status, body: res } = await parseResponse(
+        await completeWithRaw({ paidAmount: "50", paymentMethod: "transfer" })
+      );
 
-      const { status } = await parseResponse(await completeWith({ paidAmount: null, paymentMethod: null }));
+      expect(status).toBe(400);
+      expect((res as any).code).toBe(COMPLETE_ERROR_CODES.validationFailed);
+      expect(res.error).toBe(COMPLETE_MESSAGES.validationFailed);
+      expect((res as any).details.paymentMethod).toBe("Wybierz metodę płatności: gotówka, karta albo BLIK.");
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    });
 
-      expect(status).toBe(200);
-      expect(updateChain.set).toHaveBeenCalledWith({ status: "completed" });
+    it("400: zła kwota przy braku metody → oba pola w szczegółach, kod braku metody", async () => {
+      const { status, body: res } = await parseResponse(await completeWithRaw({ paidAmount: "-1" }));
+
+      expect(status).toBe(400);
+      expect((res as any).code).toBe(COMPLETE_ERROR_CODES.paymentMethodRequired);
+      expect((res as any).details.paidAmount).toBe("Kwota nie może być ujemna.");
+      expect((res as any).details.paymentMethod).toBe("Wybierz metodę płatności.");
     });
 
     it("200: kwota 0 (wizyta gratis)", async () => {
@@ -1753,8 +1816,11 @@ describe("POST /api/appointments/[id]/complete", () => {
       const decimals = await parseResponse(await completeWith({ paidAmount: "1.234", paymentMethod: "cash" }));
       expect((decimals.body as any).details.paidAmount).toBe("Kwota może mieć najwyżej 2 miejsca po przecinku.");
 
-      const pair = await parseResponse(await completeWith({ paidAmount: "5" }));
-      expect((pair.body as any).details.paymentMethod).toBe("Podaj metodę płatności razem z kwotą.");
+      const noMethod = await parseResponse(await completeWith({ paidAmount: "5" }));
+      expect((noMethod.body as any).details.paymentMethod).toBe("Wybierz metodę płatności.");
+
+      const noAmount = await parseResponse(await completeWith({ paymentMethod: "cash" }));
+      expect((noAmount.body as any).details.paidAmount).toBe("Podaj kwotę zapłaconą przez klienta.");
     });
 
     it("401: brak sesji — bez zapisu", async () => {
@@ -1872,6 +1938,161 @@ describe("POST /api/appointments/[id]/complete", () => {
       expect(logged).not.toContain("params");
       expect(logged).not.toContain("Failed query");
       errorSpy.mockRestore();
+    });
+  });
+
+  describe("odpowiedź 200 zależna od roli — prowizja i magazyn tylko dla właściciela", () => {
+    const LOW_STOCK_PRODUCT = {
+      linkId: "sp-1",
+      productId: TEST_IDS.PRODUCT_UUID,
+      defaultQuantity: "1",
+      productName: "Farba",
+      productQuantity: "3",
+      productUnit: "szt.",
+      productMinQuantity: "5",
+      productSalonId: TEST_IDS.SALON_UUID,
+    };
+
+    async function asRole(role: "owner" | "employee" | "receptionist") {
+      const { getSalonContext } = await import("@/lib/salon-context");
+      vi.mocked(getSalonContext).mockResolvedValueOnce({
+        salonId: TEST_IDS.SALON_UUID,
+        role,
+        employeeId: role === "employee" ? TEST_IDS.EMPLOYEE_UUID : null,
+        userId: `user-${role}`,
+      } as never);
+    }
+
+    /**
+     * Pełne zakończenie: prowizja pracownika, zużycie produktu poniżej minimum
+     * z alertem niskiego stanu, zabieg z materiałami. Zwraca łańcuchy zapisów,
+     * żeby sprawdzić, że baza dostaje to samo dla każdej roli.
+     */
+    function givenFullCompletion() {
+      const appointment = makeAppointment({ status: "scheduled", employeeId: TEST_IDS.EMPLOYEE_UUID });
+      const treatment = {
+        id: "treatment-1",
+        appointmentId: TEST_IDS.APPOINTMENT_UUID,
+        recipe: "Receptura",
+        materialsJson: [{ productId: TEST_IDS.PRODUCT_UUID, quantity: 1 }],
+      };
+      const commission = { id: "comm-1", employeeId: TEST_IDS.EMPLOYEE_UUID, amount: "80.00", percentage: "40.00" };
+      const updateChain = chainMock([{ ...appointment, status: "completed", paidAmount: "200.00", paymentMethod: "card" }]);
+      const commissionInsert = chainMock([commission]);
+      const materialInsert = chainMock([]);
+      const notificationInsert = chainMock([{ id: "notif-1" }]);
+
+      mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service: makeService({ basePrice: "200.00" }) }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(chainMock([treatment]));
+      mockDbUpdate.mockReturnValueOnce(updateChain);
+      mockDbSelect.mockReturnValueOnce(chainMock([{ commissionRate: "40.00" }]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(commissionInsert);
+      mockDbSelect.mockReturnValueOnce(chainMock([LOW_STOCK_PRODUCT]));
+      mockDbUpdate.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(materialInsert);
+      // Alert niskiego stanu: brak powiadomienia z ostatnich 24 h → nowe.
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValueOnce(notificationInsert);
+      mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+
+      return { updateChain, commissionInsert, materialInsert, notificationInsert };
+    }
+
+    function post() {
+      return completeAppointment(
+        createBaseMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+          method: "POST",
+          body: { paidAmount: "200", paymentMethod: "card", recipe: "Receptura" },
+        }),
+        createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+      );
+    }
+
+    it("właściciel → 200 z prowizją, zużyciem magazynu, alertem i materiałami zabiegu", async () => {
+      await asRole("owner");
+      givenFullCompletion();
+
+      const { status, body } = await parseResponse(await post());
+
+      expect(status).toBe(200);
+      const data = (body as any).data;
+      expect(data.commission).toEqual(
+        expect.objectContaining({ id: "comm-1", amount: "80.00", percentage: "40.00" })
+      );
+      expect(data.stockDeductions).toHaveLength(1);
+      expect(data.stockDeductions[0]).toEqual(
+        expect.objectContaining({
+          productId: TEST_IDS.PRODUCT_UUID,
+          newQuantity: 2,
+          lowStockAlert: expect.objectContaining({ notificationSent: true }),
+        })
+      );
+      expect(data.treatment.materialsJson).toEqual([{ productId: TEST_IDS.PRODUCT_UUID, quantity: 1 }]);
+      expect(data.payment).toEqual({ paidAmount: "200.00", paymentMethod: "card" });
+    });
+
+    it.each(["receptionist", "employee"] as const)(
+      "%s → 200 bez prowizji i magazynu; zapis w bazie jak u właściciela",
+      async (role) => {
+        await asRole(role);
+        const writes = givenFullCompletion();
+
+        const { status, body } = await parseResponse(await post());
+
+        expect(status).toBe(200);
+        expect(body.success).toBe(true);
+        const data = (body as any).data;
+        expect(data).not.toHaveProperty("commission");
+        expect(data).not.toHaveProperty("stockDeductions");
+        expect(data.treatment).not.toHaveProperty("materialsJson");
+        const serialized = JSON.stringify(body);
+        for (const leaked of ["commission", "percentage", "80.00", "40.00", "stockDeductions", "lowStockAlert", "newQuantity", "Farba"]) {
+          expect(serialized).not.toContain(leaked);
+        }
+        // Reszta odpowiedzi bez zmian.
+        expect(data.appointment.status).toBe("completed");
+        expect(data.payment).toEqual({ paidAmount: "200.00", paymentMethod: "card" });
+        expect(data.treatment).toEqual({
+          id: "treatment-1",
+          appointmentId: TEST_IDS.APPOINTMENT_UUID,
+          recipe: "Receptura",
+        });
+        expect(data).toHaveProperty("loyalty");
+        // Baza dostaje to samo co dla właściciela: płatność, prowizja, zużycie, alert.
+        expect(writes.updateChain.set).toHaveBeenCalledWith({
+          status: "completed",
+          paidAmount: "200",
+          paymentMethod: "card",
+        });
+        expect(writes.commissionInsert.values).toHaveBeenCalledWith(
+          expect.objectContaining({ amount: "80.00", percentage: "40.00" })
+        );
+        expect(writes.materialInsert.values).toHaveBeenCalledWith(
+          expect.objectContaining({ productId: TEST_IDS.PRODUCT_UUID, quantityUsed: "1" })
+        );
+        expect(writes.notificationInsert.values).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it.each(["receptionist", "employee"] as const)("%s bez płatności → 400 jak u właściciela", async (role) => {
+      await asRole(role);
+
+      const { status, body } = await parseResponse(
+        await completeAppointment(
+          createBaseMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
+            method: "POST",
+            body: { recipe: "Receptura" },
+          }),
+          createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+        )
+      );
+
+      expect(status).toBe(400);
+      expect((body as any).code).toBe(COMPLETE_ERROR_CODES.paidAmountRequired);
+      expect(mockDbUpdate).not.toHaveBeenCalled();
     });
   });
 
@@ -2363,7 +2584,7 @@ describe("POST /api/appointments/[id]/complete", () => {
         expect(mockDbSelect).not.toHaveBeenCalled();
       });
 
-      it("pracownik: pozostałe pola body nadal walidowane (para kwota–metoda)", async () => {
+      it("pracownik: pozostałe pola body nadal walidowane (metoda płatności wymagana)", async () => {
         await asRole("employee");
 
         const { status, body } = await parseResponse(
@@ -2376,13 +2597,16 @@ describe("POST /api/appointments/[id]/complete", () => {
       });
 
       describe("stawka pod inną nazwą albo zagnieżdżona nie wchodzi do prowizji", () => {
-        /** Surowe JSON, żeby `__proto__` był własnym kluczem body, jak z sieci. */
+        /**
+         * Surowe JSON, żeby `__proto__` był własnym kluczem body, jak z sieci.
+         * Na początek obiektu dochodzi wymagana płatność.
+         */
         function postRaw(json: string) {
           return completeAppointment(
             new Request(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: json,
+              body: json.replace(/^\{/, '{"paidAmount":"100.00","paymentMethod":"cash",'),
             }),
             createRouteParams(TEST_IDS.APPOINTMENT_UUID)
           );

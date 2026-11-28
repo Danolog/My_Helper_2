@@ -1152,10 +1152,13 @@ describe("invoiceSchema — kontrakt okna wystawienia dokumentu w panelu", () =>
 });
 
 describe("completeAppointmentSchema — commissionPercentage", () => {
+  // Kwota i metoda wymagane — tu sprawdzana jest sama stawka.
+  const PAYMENT = { paidAmount: "100", paymentMethod: "cash" };
+
   it.each([["abc"], ["NaN"], ["Infinity"], [""], ["  "], [Number.NaN], [-50], [-1], [-0.01], [100.01], [1000], ["1000"], [true]])(
     "%j → błąd z polskim komunikatem",
     (value) => {
-      const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
+      const result = completeAppointmentSchema.safeParse({ ...PAYMENT, commissionPercentage: value });
       expect(result.success).toBe(false);
       expect(JSON.stringify(result.error?.issues)).toContain("Prowizja musi być liczbą od 0 do 100.");
     }
@@ -1168,13 +1171,13 @@ describe("completeAppointmentSchema — commissionPercentage", () => {
     ["100", 100],
     [" 33.5 ", 33.5],
   ])("%j → liczba %d", (value, expected) => {
-    const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
+    const result = completeAppointmentSchema.safeParse({ ...PAYMENT, commissionPercentage: value });
     expect(result.success).toBe(true);
     expect(result.data?.commissionPercentage).toBe(expected);
   });
 
   it.each([[null], [undefined]])("%j → bez prowizji z body", (value) => {
-    const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
+    const result = completeAppointmentSchema.safeParse({ ...PAYMENT, commissionPercentage: value });
     expect(result.success).toBe(true);
     expect(result.data?.commissionPercentage ?? null).toBeNull();
   });
@@ -1210,8 +1213,12 @@ describe("completeAppointmentSchema — polskie komunikaty płatności", () => {
 
   it.each([
     [{ paidAmount: "10", paymentMethod: "przelew" }, "paymentMethod", "Wybierz metodę płatności: gotówka, karta albo BLIK."],
-    [{ paidAmount: "10" }, "paymentMethod", "Podaj metodę płatności razem z kwotą."],
-    [{ paymentMethod: "cash" }, "paidAmount", "Podaj kwotę razem z metodą płatności."],
+    [{ paidAmount: "10" }, "paymentMethod", "Wybierz metodę płatności."],
+    [{ paidAmount: "10", paymentMethod: null }, "paymentMethod", "Wybierz metodę płatności."],
+    [{ paymentMethod: "cash" }, "paidAmount", "Podaj kwotę zapłaconą przez klienta."],
+    [{ paidAmount: null, paymentMethod: "cash" }, "paidAmount", "Podaj kwotę zapłaconą przez klienta."],
+    [{}, "paidAmount", "Podaj kwotę zapłaconą przez klienta."],
+    [{}, "paymentMethod", "Wybierz metodę płatności."],
     [{ paidAmount: true, paymentMethod: "cash" }, "paidAmount", "Kwota musi być liczbą."],
     [{ paidAmount: "-5", paymentMethod: "cash" }, "paidAmount", "Kwota nie może być ujemna."],
     [{ paidAmount: "1.234", paymentMethod: "cash" }, "paidAmount", "Kwota może mieć najwyżej 2 miejsca po przecinku."],

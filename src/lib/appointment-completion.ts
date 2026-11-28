@@ -33,6 +33,10 @@ export const COMPLETE_ERROR_CODES = {
   ...APPOINTMENT_ERROR_CODES,
   invalidJson: "INVALID_JSON",
   validationFailed: "VALIDATION_FAILED",
+  /** 400: brak kwoty zapłaconej (pole pominięte albo null). */
+  paidAmountRequired: "PAID_AMOUNT_REQUIRED",
+  /** 400: brak metody płatności (pole pominięte albo null). */
+  paymentMethodRequired: "PAYMENT_METHOD_REQUIRED",
   servicePriceInvalid: "SERVICE_PRICE_INVALID",
   commissionRateInvalid: "COMMISSION_RATE_INVALID",
 } as const;
@@ -48,6 +52,10 @@ export const COMPLETE_MESSAGES = {
   invalidId: "Nie rozpoznano tej wizyty. Odśwież stronę i spróbuj ponownie.",
   invalidJson: "Nie udało się odczytać danych formularza. Odśwież stronę i spróbuj ponownie.",
   validationFailed: "Sprawdź dane w formularzu.",
+  /** 400 `PAID_AMOUNT_REQUIRED` — także tekst błędu pola `paidAmount` w schemacie. */
+  paidAmountRequired: "Podaj kwotę zapłaconą przez klienta.",
+  /** 400 `PAYMENT_METHOD_REQUIRED` — także tekst błędu pola `paymentMethod` w schemacie. */
+  paymentMethodRequired: "Wybierz metodę płatności.",
   appointmentNotFound:
     "Nie znaleziono tej wizyty albo nie jest już przypisana do Ciebie. Odśwież kalendarz.",
   appointmentCompleted: "Ta wizyta jest już zakończona. Odśwież widok, żeby zobaczyć zapisane dane.",

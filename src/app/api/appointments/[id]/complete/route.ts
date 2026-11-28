@@ -157,6 +157,52 @@ function bodyForRole(body: unknown, role: SalonRole): unknown {
 }
 
 /**
+ * Kod i tekst `error` dla 400 z walidacji. Brak kwoty albo metody płatności
+ * ma własny kod i tekst wskazujący pole (kwota najpierw, gdy brak obu);
+ * pozostałe błędy — wspólny kod walidacji, szczegóły pól w `details`.
+ * Brak rozpoznawany po tekście pola, który ustawia schemat tylko dla
+ * pominiętego pola albo null.
+ */
+function validationFailure(details: Record<string, string>): { code: string; error: string } {
+  if (details.paidAmount === COMPLETE_MESSAGES.paidAmountRequired) {
+    return {
+      code: COMPLETE_ERROR_CODES.paidAmountRequired,
+      error: COMPLETE_MESSAGES.paidAmountRequired,
+    };
+  }
+  if (details.paymentMethod === COMPLETE_MESSAGES.paymentMethodRequired) {
+    return {
+      code: COMPLETE_ERROR_CODES.paymentMethodRequired,
+      error: COMPLETE_MESSAGES.paymentMethodRequired,
+    };
+  }
+  return { code: COMPLETE_ERROR_CODES.validationFailed, error: COMPLETE_MESSAGES.validationFailed };
+}
+
+/**
+ * Dane odpowiedzi 200 dla roli wołającego. Właściciel dostaje całość.
+ * Recepcja i pracownik — bez prowizji (rekord z kwotą i stawką), bez
+ * zużycia magazynu z alertami niskiego stanu i bez materiałów zabiegu
+ * (`materialsJson`). Zapis w bazie jest taki sam dla wszystkich ról;
+ * zmienia się tylko to, co trafia do odpowiedzi.
+ */
+function responseDataForRole(
+  data: Record<string, unknown> & { treatment: unknown },
+  role: SalonRole
+): Record<string, unknown> {
+  if (role === "owner") return data;
+  const limited: Record<string, unknown> = { ...data };
+  delete limited.commission;
+  delete limited.stockDeductions;
+  if (data.treatment && typeof data.treatment === "object") {
+    const treatment: Record<string, unknown> = { ...(data.treatment as Record<string, unknown>) };
+    delete treatment.materialsJson;
+    limited.treatment = treatment;
+  }
+  return limited;
+}
+
+/**
  * Check if a product has low stock and create a notification if needed.
  * Prevents duplicate notifications within 24 hours.
  * Accepts a `tx` executor so it can participate in a surrounding transaction.
@@ -258,21 +304,15 @@ export async function POST(
     const parsed = parseBody(completeAppointmentSchema, bodyForRole(body, ctx.role));
     if (!parsed.ok) {
       return NextResponse.json(
-        {
-          ...parsed.error,
-          error: COMPLETE_MESSAGES.validationFailed,
-          code: COMPLETE_ERROR_CODES.validationFailed,
-        },
+        { ...parsed.error, ...validationFailure(parsed.error.details) },
         { status: 400 }
       );
     }
 
     const { recipe, techniques, notes, commissionPercentage, paidAmount, paymentMethod } =
       parsed.data;
-    // Para (oba albo żadne) sprawdzona w schemacie. Brak = bez zapisu płatności:
-    // pola nie trafiają do SET, więc istniejąca wartość kolumn zostaje.
-    const payment =
-      paidAmount != null && paymentMethod != null ? { paidAmount, paymentMethod } : {};
+    // Kwota i metoda wymagane w schemacie — zapisują się przy każdym zakończeniu.
+    const payment = { paidAmount, paymentMethod };
 
     // All mutating operations are wrapped in a single transaction so that
     // a failure at any step (e.g. stock deduction, commission insert) rolls
@@ -759,7 +799,7 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      data: result,
+      data: responseDataForRole(result, ctx.role),
       message: COMPLETE_MESSAGES.success,
     });
   } catch (error) {
