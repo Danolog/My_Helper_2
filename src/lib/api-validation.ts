@@ -437,15 +437,15 @@ const PAID_AMOUNT_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
  * NaN i Infinity nie pasują do wzorca i dają 400.
  */
 const paidAmountField = z
-  .union([z.string(), z.number()], { message: "Kwota musi byc liczba" })
+  .union([z.string(), z.number()], { message: "Kwota musi być liczbą." })
   .transform((val) => (typeof val === "number" ? String(val) : val.trim()))
   .superRefine((val, ctx) => {
     if (val.startsWith("-")) {
-      ctx.addIssue({ code: "custom", message: "Kwota nie moze byc ujemna" });
+      ctx.addIssue({ code: "custom", message: "Kwota nie może być ujemna." });
       return;
     }
     if (/^\d+\.\d{3,}$/.test(val)) {
-      ctx.addIssue({ code: "custom", message: "Kwota moze miec najwyzej 2 miejsca po przecinku" });
+      ctx.addIssue({ code: "custom", message: "Kwota może mieć najwyżej 2 miejsca po przecinku." });
       return;
     }
     if (!PAID_AMOUNT_PATTERN.test(val)) {
@@ -463,7 +463,7 @@ const paidAmountField = z
  * (zapis z 200), wartość ponad 100 przepełniała kolumnę (500), a ujemna
  * zapisywała się z 200.
  */
-const COMMISSION_PERCENTAGE_MESSAGE = "Prowizja musi byc liczba od 0 do 100";
+const COMMISSION_PERCENTAGE_MESSAGE = "Prowizja musi być liczbą od 0 do 100.";
 const commissionPercentageField = z
   .union([z.string(), z.number()], { message: COMMISSION_PERCENTAGE_MESSAGE })
   .transform((val, ctx) => {
@@ -492,7 +492,7 @@ export const completeAppointmentSchema = z
     paidAmount: paidAmountField.nullable().optional(),
     paymentMethod: z
       .enum(APPOINTMENT_PAYMENT_METHODS, {
-        message: "Metoda platnosci musi byc jedna z: gotowka, karta, BLIK",
+        message: "Wybierz metodę płatności: gotówka, karta albo BLIK.",
       })
       .nullable()
       .optional(),
@@ -504,13 +504,13 @@ export const completeAppointmentSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["paymentMethod"],
-        message: "Podaj metode platnosci razem z kwota",
+        message: "Podaj metodę płatności razem z kwotą.",
       });
     } else if (hasMethod && !hasAmount) {
       ctx.addIssue({
         code: "custom",
         path: ["paidAmount"],
-        message: "Podaj kwote razem z metoda platnosci",
+        message: "Podaj kwotę razem z metodą płatności.",
       });
     }
   });
@@ -574,7 +574,9 @@ export const updateEmployeeSchema = z.object({
 export const updateServiceSchema = z.object({
   name: z.string().min(1, "Nazwa jest wymagana").optional(),
   description: z.string().nullable().optional(),
-  basePrice: z.union([z.string(), z.number()]).optional(),
+  // Ten sam priceField co przy tworzeniu: bez ceny ujemnej, 'NaN', 'Infinity'
+  // i ponad zakres numeric(10,2). Wcześniej każdy tekst przechodził do zapisu.
+  basePrice: priceField("Cena").optional(),
   baseDuration: z.union([z.string(), z.number()]).optional(),
   isActive: z.boolean().optional(),
   categoryId: z.string().nullable().optional(),
@@ -921,10 +923,9 @@ export const employeeAssignmentSchema = z.object({
 export const employeePriceSchema = z.object({
   employeeId: requiredString("Pracownik"),
   variantId: z.string().nullable().optional(),
-  customPrice: z.union([
-    z.string().refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) >= 0, { message: "Cena musi byc nieujemna" }),
-    z.number().nonnegative("Cena musi byc nieujemna"),
-  ]),
+  // Liczba skończona, nieujemna, w zakresie numeric(10,2) — jak cena usługi.
+  // Wcześniej parseFloat przepuszczał 'Infinity' (i tekst w rodzaju „12abc”).
+  customPrice: priceField("Cena"),
 });
 
 export const serviceProductLinkSchema = z.object({

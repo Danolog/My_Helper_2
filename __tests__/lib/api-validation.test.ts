@@ -19,6 +19,8 @@ import {
   loyaltyRedeemSchema,
   invoiceSchema,
   completeAppointmentSchema,
+  updateServiceSchema,
+  employeePriceSchema,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1154,7 +1156,7 @@ describe("completeAppointmentSchema — commissionPercentage", () => {
     (value) => {
       const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
       expect(result.success).toBe(false);
-      expect(JSON.stringify(result.error?.issues)).toContain("Prowizja musi byc liczba od 0 do 100");
+      expect(JSON.stringify(result.error?.issues)).toContain("Prowizja musi być liczbą od 0 do 100.");
     }
   );
 
@@ -1174,5 +1176,78 @@ describe("completeAppointmentSchema — commissionPercentage", () => {
     const result = completeAppointmentSchema.safeParse({ commissionPercentage: value });
     expect(result.success).toBe(true);
     expect(result.data?.commissionPercentage ?? null).toBeNull();
+  });
+});
+
+describe("completeAppointmentSchema — polskie komunikaty płatności", () => {
+  function details(body: Record<string, unknown>) {
+    return validateBody(completeAppointmentSchema, body)?.details ?? {};
+  }
+
+  it.each([
+    [{ paidAmount: "10", paymentMethod: "przelew" }, "paymentMethod", "Wybierz metodę płatności: gotówka, karta albo BLIK."],
+    [{ paidAmount: "10" }, "paymentMethod", "Podaj metodę płatności razem z kwotą."],
+    [{ paymentMethod: "cash" }, "paidAmount", "Podaj kwotę razem z metodą płatności."],
+    [{ paidAmount: true, paymentMethod: "cash" }, "paidAmount", "Kwota musi być liczbą."],
+    [{ paidAmount: "-5", paymentMethod: "cash" }, "paidAmount", "Kwota nie może być ujemna."],
+    [{ paidAmount: "1.234", paymentMethod: "cash" }, "paidAmount", "Kwota może mieć najwyżej 2 miejsca po przecinku."],
+    [{ commissionPercentage: 101 }, "commissionPercentage", "Prowizja musi być liczbą od 0 do 100."],
+  ])("%j → %s: %s", (body, field, message) => {
+    expect(details(body)[field]).toBe(message);
+  });
+});
+
+describe("updateServiceSchema — basePrice jak przy tworzeniu usługi", () => {
+  it.each([[-1], ["-1"], [-0.01], ["NaN"], ["Infinity"], ["-Infinity"], [Number.NaN], ["abc"], [""], [null], [true], [100000000], ["100000000"]])(
+    "basePrice %j → błąd",
+    (value) => {
+      const result = validateBody(updateServiceSchema, { basePrice: value });
+      expect(result).not.toBeNull();
+      expect(result!.details.basePrice).toEqual(expect.any(String));
+    }
+  );
+
+  it("cena ujemna → ten sam komunikat co przy tworzeniu", () => {
+    const update = validateBody(updateServiceSchema, { basePrice: -1 });
+    const create = validateBody(createServiceSchema, {
+      salonId: "s",
+      name: "n",
+      basePrice: -1,
+      baseDuration: 30,
+    });
+    expect(update!.details.basePrice).toBe(create!.details.basePrice);
+  });
+
+  it.each([[0], ["0"], [150], ["150.50"], [99999999.99]])("basePrice %j → poprawne", (value) => {
+    expect(validateBody(updateServiceSchema, { basePrice: value })).toBeNull();
+  });
+
+  it("bez basePrice → poprawne (aktualizacja częściowa)", () => {
+    expect(validateBody(updateServiceSchema, { name: "Strzyżenie" })).toBeNull();
+  });
+});
+
+describe("employeePriceSchema — customPrice", () => {
+  const base = { employeeId: "emp-1" };
+
+  it.each([["Infinity"], ["-Infinity"], ["NaN"], [Number.NaN], [-1], ["-1"], ["-0.01"], ["abc"], [""], [null], [true], [100000000]])(
+    "customPrice %j → błąd",
+    (value) => {
+      const result = validateBody(employeePriceSchema, { ...base, customPrice: value });
+      expect(result).not.toBeNull();
+      expect(result!.details.customPrice).toEqual(expect.any(String));
+    }
+  );
+
+  it("bez customPrice → błąd", () => {
+    expect(validateBody(employeePriceSchema, base)!.details.customPrice).toEqual(expect.any(String));
+  });
+
+  it.each([[0], ["0"], [120], ["120.50"], [" 80 "]])("customPrice %j → poprawne", (value) => {
+    expect(validateBody(employeePriceSchema, { ...base, customPrice: value })).toBeNull();
+  });
+
+  it("parse zwraca liczbę, nie tekst z body", () => {
+    expect(employeePriceSchema.parse({ ...base, customPrice: " 80.5 " }).customPrice).toBe(80.5);
   });
 });

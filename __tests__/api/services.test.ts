@@ -463,6 +463,34 @@ describe("PUT /api/services/[id]", () => {
     expect((body as any).data.depositPercentage).toBe(30);
   });
 
+  it.each([[-100], ["-100"], ["NaN"], ["Infinity"], ["abc"], [""], [null], [100000000]])(
+    "basePrice %j → 400 bez zapisu",
+    async (basePrice) => {
+      const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`, {
+        method: "PUT",
+        body: { basePrice },
+      });
+      const response = await updateService(request, createRouteParams(TEST_IDS.SERVICE_UUID));
+      const { status, body } = await parseResponse(response);
+
+      expect(status).toBe(400);
+      expect(body.success).toBe(false);
+      expect((body as any).details.basePrice).toEqual(expect.any(String));
+      expect(mockDbUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([[0], ["0"], ["149.99"]])("basePrice %j → 200", async (basePrice) => {
+    mockDbUpdate.mockReturnValue(chainMock([makeService({ basePrice: "0.00" })]));
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`, {
+      method: "PUT",
+      body: { basePrice },
+    });
+    const response = await updateService(request, createRouteParams(TEST_IDS.SERVICE_UUID));
+
+    expect(response.status).toBe(200);
+  });
+
   it("should return 500 when database throws on update", async () => {
     const errorChain: Record<string, unknown> = {};
     const methods = ["update", "set", "where", "returning"];

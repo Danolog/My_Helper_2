@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, employeePriceSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { getSalonContext } from "@/lib/salon-context";
 import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
@@ -10,6 +11,34 @@ import { forSalon } from "@/lib/server/repository";
 async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
   const service = await forSalon(salonId).findOne(services, serviceId);
   return !!service;
+}
+
+const OWNER_ONLY_CODE = "EMPLOYEE_PRICE_OWNER_ONLY";
+const OWNER_ONLY_MESSAGE = "Ceny indywidualne pracowników może zmieniać tylko właściciel salonu.";
+
+/**
+ * Salon z sesji dla zapisu i usunięcia ceny indywidualnej. Cena pracownika
+ * zmienia jego prowizję, a wynagrodzenie ustala właściciel, więc pracownik
+ * i recepcja dostają 403 z kodem — przed walidacją body i odczytem bazy.
+ */
+async function requireOwnerSalonId(): Promise<
+  { salonId: string; response?: undefined } | { salonId?: undefined; response: NextResponse }
+> {
+  const ctx = await getSalonContext();
+  if (!ctx) {
+    return {
+      response: NextResponse.json({ success: false, error: "Salon not found" }, { status: 404 }),
+    };
+  }
+  if (ctx.role !== "owner") {
+    return {
+      response: NextResponse.json(
+        { success: false, code: OWNER_ONLY_CODE, error: OWNER_ONLY_MESSAGE },
+        { status: 403 }
+      ),
+    };
+  }
+  return { salonId: ctx.salonId };
 }
 
 // GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
@@ -73,22 +102,19 @@ export const POST = withApiHandler(
     errorMessage: "Failed to save employee price",
   },
   async ({ request, params }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
+    const owner = await requireOwnerSalonId();
+    if (owner.response) return owner.response;
+    const salonId = owner.salonId;
 
     const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
-    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu i roli) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(employeePriceSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
     }
-    const { employeeId, variantId, customPrice } = body;
+    // Sparsowane dane, nie surowe body: cena zapisuje się jako liczba ze schematu.
+    const { employeeId, variantId, customPrice } = employeePriceSchema.parse(body);
 
     if (!(await serviceBelongsToSalon(serviceId, salonId))) {
       return NextResponse.json(
@@ -180,13 +206,9 @@ export const DELETE = withApiHandler(
     errorMessage: "Failed to delete employee price",
   },
   async ({ request, params }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
+    const owner = await requireOwnerSalonId();
+    if (owner.response) return owner.response;
+    const salonId = owner.salonId;
 
     const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const { searchParams } = new URL(request.url);
