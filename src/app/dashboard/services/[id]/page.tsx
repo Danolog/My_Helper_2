@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { Lock } from "lucide-react";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 import { EmployeeAssignmentCard } from "./_components/employee-assignment-card";
@@ -20,7 +21,18 @@ import { useVariantForm } from "./_hooks/use-variant-form";
 
 const EditServiceDialog = dynamic(() => import("./_components/edit-service-dialog").then((m) => m.EditServiceDialog));
 
+// Tak jak lista usług: szczegóły (ceny, przypisania, produkty) tylko dla
+// właściciela. Hooki danych żyją w komponencie wewnętrznym, więc przy odmowie
+// strona nie wysyła żadnego zapytania do API.
 export default function ServiceDetailPage() {
+  return (
+    <RoleGate allow={["owner"]}>
+      <ServiceDetailPageInner />
+    </RoleGate>
+  );
+}
+
+function ServiceDetailPageInner() {
   const params = useParams();
   const serviceId = params.id as string;
   const { data: session, isPending } = useSession();
@@ -87,7 +99,7 @@ export default function ServiceDetailPage() {
           <Lock className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
           <h1 className="text-2xl font-bold mb-2">Wymagane logowanie</h1>
           <p className="text-muted-foreground mb-6">
-            Musisz sie zalogowac, aby zarzadzac uslugami
+            Musisz się zalogować, aby zarządzać usługami
           </p>
         </div>
       </div>
@@ -98,7 +110,7 @@ export default function ServiceDetailPage() {
   if (!service) {
     return (
       <div className="container mx-auto px-4 py-12 text-center">
-        <p className="text-muted-foreground">Nie znaleziono uslugi</p>
+        <p className="text-muted-foreground">Nie znaleziono usługi</p>
       </div>
     );
   }
