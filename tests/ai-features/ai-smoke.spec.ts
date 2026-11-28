@@ -23,7 +23,7 @@ test.describe('AI Features Smoke Tests', () => {
     ).toBeVisible({ timeout: 10000 });
   });
 
-  // ── Clients page (AI Insights tab lives on individual client pages) ────
+  // ── Clients page (zakładki analizy AI na karcie klienta już nie ma) ────
 
   test('should load clients page', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/dashboard/clients');

@@ -154,7 +154,9 @@ describe("ClientProfilePage — bez zakładki analizy AI", () => {
     ]);
   });
 
-  it("strona nie woła tras AI (ani usuniętej analizy klienta)", async () => {
+  // Sprawdza samą stronę: zakładki potomne są tu atrapami, więc odwołania do
+  // usuniętych tras w ich kodzie łapie test removed-features (cały src).
+  it("sama strona nie woła tras AI (ani usuniętej analizy klienta)", async () => {
     renderPage({ ...DEFAULT_MODULES, loyalty: true });
 
     await waitFor(() => {

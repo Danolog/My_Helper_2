@@ -77,7 +77,7 @@ export async function GET(req: Request) {
       startDate: startDate.toISOString(),
       usage,
       totalMediaCost: totalCost.toFixed(2),
-      note: "Koszty obejmuja media (obrazy, wideo, banery) oraz tekst AI (podsumowania, wyszukiwanie, kategoryzacja itp.). Szacunek tekstu: ~$0.002/zapytanie.",
+      note: "Koszty obejmuja media (obrazy, wideo, banery) oraz tekst AI (podsumowania, wyszukiwanie, opisy itp.). Szacunek tekstu: ~$0.002/zapytanie.",
     });
   } catch (error) {
     logger.error("[AI Usage] Error fetching usage stats", { error });

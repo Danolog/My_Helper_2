@@ -246,6 +246,7 @@ describe("frozenModuleForApiPath", () => {
     "/api/appointments/book-packagex",
     "/api/ai/image/generatex",
     "/api/ai/content/service-description",
+    // Trasy analizy klienta już nie ma; test sprawdza tylko mapowanie w proxy.
     "/api/ai/clients/insights",
     "/api/invoicesx",
     "/api/subscription-plans",
