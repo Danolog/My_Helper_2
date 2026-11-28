@@ -70,6 +70,8 @@ interface AppointmentData {
   clientId: string | null;
   employeeId: string;
   serviceId: string | null;
+  /** Wariant zapisany w wizycie (trasa GET zwraca cały wiersz wizyty). */
+  variantId?: string | null;
   startTime: string;
   endTime: string;
   status: string;
@@ -120,8 +122,27 @@ export const RELOAD_FAILED_DESCRIPTION =
   "Nie udało się wczytać aktualnych danych wizyty. Odśwież stronę i spróbuj ponownie.";
 export const UPDATED_TITLE = "Wizyta została zaktualizowana";
 export const UPDATE_NETWORK_ERROR = "Błąd podczas aktualizacji wizyty";
+/** Zapis mógł dojść do serwera mimo błędu: rada, jak sprawdzić wynik. */
+export const UPDATE_NETWORK_ERROR_DESCRIPTION =
+  "Sprawdź połączenie z internetem i odśwież stronę, żeby zobaczyć, czy zmiany się zapisały.";
+export const TERM_LOCKED_HINT =
+  "Wizyta jest zakończona, więc jej termin się nie zmienia. Możesz zapisać notatkę.";
 export const NO_CLIENT_LABEL = "Bez klienta";
 export const NO_SERVICE_LABEL = "Bez usługi";
+
+/** Czy dwa obiekty wizyty mają te same zapisane wartości, które okno edytuje albo wysyła. */
+function sameSavedState(a: AppointmentData, b: AppointmentData): boolean {
+  return (
+    a.clientId === b.clientId &&
+    a.serviceId === b.serviceId &&
+    (a.variantId ?? null) === (b.variantId ?? null) &&
+    a.employeeId === b.employeeId &&
+    a.startTime === b.startTime &&
+    a.endTime === b.endTime &&
+    a.status === b.status &&
+    a.notes === b.notes
+  );
+}
 
 /** Lokalna data (RRRR-MM-DD) i godzina (GG:MM) chwili zapisanej w wizycie. */
 function localDateAndTime(iso: string): { date: string; time: string } {
@@ -179,8 +200,8 @@ export function EditAppointmentDialog({
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [selectedVariantId, setSelectedVariantId] = useState("");
-  // Wariant wybrany w oknie na nowo (także „Wariant podstawowy”). Okno nie
-  // zna zapisanego wariantu, więc bez tego wyboru czas trwania zostaje z wizyty.
+  // Wariant wybrany w oknie na nowo (także „Wariant podstawowy”). Bez tego
+  // wyboru czas trwania zostaje z wizyty, a cena liczy się z zapisanego wariantu.
   const [variantChosen, setVariantChosen] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
@@ -189,6 +210,12 @@ export function EditAppointmentDialog({
 
   // Wizyta, dla której formularz jest wypełniony (null = okno zamknięte).
   const populatedFor = useRef<string | null>(null);
+  // Obiekt wizyty, z którego pochodzą wartości formularza. Pole równe
+  // wartości z tego obiektu użytkownik nie zmienił.
+  const loaded = useRef<AppointmentData | null>(null);
+  // Ostatni obiekt wizyty od strony: jego zmiana po ponownym odczycie okna
+  // znaczy, że strona wczytała wizytę jeszcze raz.
+  const lastProp = useRef<AppointmentData | null>(null);
   // Trwający ponowny odczyt wizyty; przerywany przy zamknięciu okna.
   const reloadAbort = useRef<AbortController | null>(null);
 
@@ -224,28 +251,83 @@ export function EditAppointmentDialog({
   };
 
   // Formularz wypełnia się przy otwarciu okna albo przy innej wizycie.
-  // Nowy obiekt tej samej wizyty przy otwartym oknie (np. synchronizacja kart)
-  // nie nadpisuje wpisanego terminu i notatki.
+  // Nowy obiekt tej samej wizyty przy otwartym oknie (synchronizacja kart,
+  // powrót do karty, ponowny odczyt po 403) nie nadpisuje tego, co użytkownik
+  // zmienił: pola niezmienione przechodzą na nowe wartości.
   useEffect(() => {
     if (!open) {
       populatedFor.current = null;
+      loaded.current = null;
+      lastProp.current = null;
       return;
     }
-    if (populatedFor.current === appointment.id) return;
-    populatedFor.current = appointment.id;
+    const propChanged = lastProp.current !== null && !sameSavedState(lastProp.current, appointment);
+    lastProp.current = appointment;
 
-    setReloaded(null);
-    setSelectedClientId(appointment.clientId || "none");
-    setSelectedServiceId(appointment.serviceId || "none");
-    setSelectedEmployeeId(appointment.employeeId);
-    setVariantChosen(false);
-    setNotes(appointment.notes || "");
-    setFieldErrors({});
+    if (populatedFor.current !== appointment.id) {
+      populatedFor.current = appointment.id;
+      loaded.current = appointment;
 
-    const { date, time } = localDateAndTime(appointment.startTime);
-    setAppointmentDate(date);
-    setAppointmentTime(time);
-  }, [open, appointment]);
+      setReloaded(null);
+      setSelectedClientId(appointment.clientId || "none");
+      setSelectedServiceId(appointment.serviceId || "none");
+      setSelectedEmployeeId(appointment.employeeId);
+      setSelectedVariantId("");
+      setVariantChosen(false);
+      setNotes(appointment.notes || "");
+      setFieldErrors({});
+
+      const { date, time } = localDateAndTime(appointment.startTime);
+      setAppointmentDate(date);
+      setAppointmentTime(time);
+      return;
+    }
+
+    // Strona wczytała wizytę po ponownym odczycie okna: jej obiekt jest nowszy.
+    if (propChanged && reloaded) {
+      setReloaded(null);
+      return;
+    }
+
+    const base = loaded.current;
+    if (!base || sameSavedState(base, current)) return;
+    loaded.current = current;
+
+    // Termin (data i godzina razem): wpisany zostaje, niezmieniony idzie za
+    // nową wizytą. Wizyta zakończona pokazuje zapisany termin, który zapis wyśle.
+    const baseTerm = localDateAndTime(base.startTime);
+    const termChanged = appointmentDate !== baseTerm.date || appointmentTime !== baseTerm.time;
+    if (current.status === COMPLETED_STATUS || !termChanged) {
+      const { date, time } = localDateAndTime(current.startTime);
+      setAppointmentDate(date);
+      setAppointmentTime(time);
+    }
+    if (Object.keys(notesChange(notes, base.notes)).length === 0) {
+      setNotes(current.notes || "");
+    }
+    if (selectedClientId === (base.clientId || "none")) {
+      setSelectedClientId(current.clientId || "none");
+    }
+    // Wybrany wariant to też decyzja o usłudze: usługa zostaje.
+    if (!variantChosen && selectedServiceId === (base.serviceId || "none")) {
+      setSelectedServiceId(current.serviceId || "none");
+    }
+    if (selectedEmployeeId === base.employeeId) {
+      setSelectedEmployeeId(current.employeeId);
+    }
+  }, [
+    open,
+    appointment,
+    reloaded,
+    current,
+    appointmentDate,
+    appointmentTime,
+    notes,
+    selectedClientId,
+    selectedServiceId,
+    selectedEmployeeId,
+    variantChosen,
+  ]);
 
   // Zamknięcie okna (także przez stronę) i odmontowanie przerywają ponowny odczyt.
   useEffect(() => {
@@ -339,7 +421,7 @@ export function EditAppointmentDialog({
   }, [selectedServiceId]);
 
   // Calculate effective price and duration
-  const getEffectivePriceAndDuration = () => {
+  const getEffectivePriceAndDuration = (variantId: string | null = selectedVariantId) => {
     // Usługa nieaktywna nie ma pozycji na liście (activeOnly): dane z wizyty.
     const service =
       allServices.find((s) => s.id === selectedServiceId) ??
@@ -349,8 +431,8 @@ export function EditAppointmentDialog({
     let price = parseFloat(service.basePrice);
     let duration = service.baseDuration;
 
-    if (selectedVariantId && selectedVariantId !== "none") {
-      const variant = variants.find((v) => v.id === selectedVariantId);
+    if (variantId && variantId !== "none") {
+      const variant = variants.find((v) => v.id === variantId);
       if (variant) {
         price += parseFloat(variant.priceModifier || "0");
         duration += variant.durationModifier || 0;
@@ -411,7 +493,8 @@ export function EditAppointmentDialog({
   };
 
   // Ponowny odczyt wizyty po 403 przypisania: pracownik, klient i usługa
-  // z bazy, termin i notatka wpisane w oknie zostają, okno zostaje otwarte.
+  // z bazy, termin i notatka wpisane w oknie zostają (efekt wypełniania
+  // przenosi pola niezmienione na odczytaną wizytę), okno zostaje otwarte.
   const reloadAssignment = async () => {
     reloadAbort.current?.abort();
     const controller = new AbortController();
@@ -437,17 +520,7 @@ export function EditAppointmentDialog({
       return;
     }
 
-    const fresh = data.data;
-    setReloaded(fresh);
-    setSelectedEmployeeId(fresh.employeeId);
-    setSelectedClientId(fresh.clientId || "none");
-    setSelectedServiceId(fresh.serviceId || "none");
-    if (fresh.status === COMPLETED_STATUS) {
-      // Termin wizyty zakończonej się nie zmienia: okno pokazuje zapisany.
-      const { date, time } = localDateAndTime(fresh.startTime);
-      setAppointmentDate(date);
-      setAppointmentTime(time);
-    }
+    setReloaded(data.data);
     // Listy z otwarcia okna mogą nie mieć nowego klienta albo usługi.
     fetchClients();
     fetchServices();
@@ -468,7 +541,7 @@ export function EditAppointmentDialog({
       if (!appointmentDate) {
         errors.date = "Wybierz datę wizyty z kalendarza";
       } else if (appointmentDate < todayStr) {
-        errors.date = "Data nie może być z przeszłości. Wybierz dzisiejszą lub przyszłą datę";
+        errors.date = "Data nie może być z przeszłości. Wybierz dzisiejszą lub przyszłą datę.";
       }
       if (!appointmentTime) {
         errors.time = "Wybierz godzinę rozpoczęcia wizyty";
@@ -510,8 +583,10 @@ export function EditAppointmentDialog({
         clientId: clientIdForSave,
         serviceId: serviceIdForSave,
         // Tylko zmienione notatki (#90): wizyta z notatkami ponad limit
-        // sprzed #71 da się przesunąć bez 400 za nietknięte pole.
-        ...notesChange(notes, appointment.notes),
+        // sprzed #71 da się przesunąć bez 400 za nietknięte pole. Porównanie
+        // z wizytą, z której pochodzi formularz: niezmieniona notatka nie
+        // cofa notatki zapisanej w międzyczasie przez inną osobę.
+        ...notesChange(notes, current.notes),
       };
 
       const res = await mutationFetch(`/api/appointments/${appointment.id}`, {
@@ -542,13 +617,19 @@ export function EditAppointmentDialog({
         });
       }
     } catch {
-      toast.error(UPDATE_NETWORK_ERROR);
+      toast.error(UPDATE_NETWORK_ERROR, { description: UPDATE_NETWORK_ERROR_DESCRIPTION });
     } finally {
       setSubmitting(false);
     }
   };
 
-  const { price, duration: serviceDuration } = getEffectivePriceAndDuration();
+  // Czas trwania z zapisu: cena z zapisanym wariantem wizyty, żeby czas i cena
+  // dotyczyły tej samej wizyty. Zapisanego wariantu nie ma na liście (lista
+  // się nie wczytała): podsumowanie nie pokazuje ceny zamiast błędnej.
+  const savedVariantId = keepSavedDuration ? current.variantId ?? null : null;
+  const priceUnknown = !!savedVariantId && !variants.some((v) => v.id === savedVariantId);
+  const { price } = getEffectivePriceAndDuration(keepSavedDuration ? savedVariantId : selectedVariantId);
+  const { duration: serviceDuration } = getEffectivePriceAndDuration();
   // Podsumowanie pokazuje czas trwania, z którym okno zapisze wizytę.
   const duration = keepSavedDuration
     ? Math.round(savedDurationMs(current) / 60000)
@@ -581,7 +662,7 @@ export function EditAppointmentDialog({
             ) : (
               <>
                 <Input
-                  placeholder="Szukaj klienta (imię, nazwisko, telefon, email)..."
+                  placeholder="Szukaj klienta (imię, nazwisko, telefon, e-mail)..."
                   value={clientSearch}
                   onChange={(e) => setClientSearch(e.target.value)}
                   className="mb-2"
@@ -685,11 +766,13 @@ export function EditAppointmentDialog({
           {/* Price & duration summary */}
           {selectedServiceId && selectedServiceId !== "none" && (
             <div className="p-3 rounded-lg bg-muted/50 border text-sm" data-testid="edit-price-duration-summary">
+              {!priceUnknown && (
+                <div className="flex justify-between mb-1" data-testid="edit-price-row">
+                  <span className="text-muted-foreground">Cena:</span>
+                  <span className="font-medium">{price.toFixed(2)} PLN</span>
+                </div>
+              )}
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Cena:</span>
-                <span className="font-medium">{price.toFixed(2)} PLN</span>
-              </div>
-              <div className="flex justify-between mt-1">
                 <span className="text-muted-foreground">Czas trwania:</span>
                 <span className="font-medium">
                   {duration >= 60 ? `${Math.floor(duration / 60)}h ` : ""}{duration % 60 > 0 ? `${duration % 60} min` : duration >= 60 ? "" : "0 min"}
@@ -702,7 +785,8 @@ export function EditAppointmentDialog({
           <div>
             <Label className="flex items-center gap-1.5 mb-1.5">
               <User className="h-3.5 w-3.5" />
-              Pracownik *
+              {/* Gwiazdka „wymagane” tylko przy polu do wypełnienia. */}
+              {assignmentLocked ? "Pracownik" : "Pracownik *"}
             </Label>
             {assignmentLocked ? (
               <p className="text-sm font-medium" data-testid="edit-employee-readonly">
@@ -750,7 +834,7 @@ export function EditAppointmentDialog({
           <div>
             <Label className="flex items-center gap-1.5 mb-1.5">
               <Clock className="h-3.5 w-3.5" />
-              Data i godzina *
+              {termLocked ? "Data i godzina" : "Data i godzina *"}
             </Label>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -759,6 +843,7 @@ export function EditAppointmentDialog({
                   value={appointmentDate}
                   min={todayStr}
                   disabled={termLocked}
+                  aria-describedby={termLocked ? "edit-term-locked-hint" : undefined}
                   onChange={(e) => {
                     setAppointmentDate(e.target.value);
                     if (e.target.value) clearFieldError("date");
@@ -783,6 +868,7 @@ export function EditAppointmentDialog({
                   }}
                   step="900"
                   disabled={termLocked}
+                  aria-describedby={termLocked ? "edit-term-locked-hint" : undefined}
                   aria-invalid={!!fieldErrors.time}
                   className={fieldErrors.time ? "border-destructive" : ""}
                   data-testid="edit-appointment-time-input"
@@ -794,6 +880,15 @@ export function EditAppointmentDialog({
                 )}
               </div>
             </div>
+            {termLocked && (
+              <p
+                id="edit-term-locked-hint"
+                className="text-sm text-muted-foreground mt-1"
+                data-testid="edit-term-locked-hint"
+              >
+                {TERM_LOCKED_HINT}
+              </p>
+            )}
           </div>
 
           {/* Notes */}

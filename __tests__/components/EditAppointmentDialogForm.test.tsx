@@ -110,6 +110,7 @@ const NOT_FOUND_404 = { success: false, code: "APPOINTMENT_NOT_FOUND", error: "N
 let appointmentGet: () => Promise<Response>;
 let servicesList: unknown[] = [];
 let variantsList: unknown[] = [];
+let employeesList: unknown[] = [];
 
 type Props = Parameters<typeof EditAppointmentDialog>[0];
 
@@ -175,11 +176,13 @@ beforeEach(() => {
   salon.id = null;
   servicesList = [];
   variantsList = [];
+  employeesList = [];
   appointmentGet = async () => jsonResponse(200, { success: true, data: FRESH });
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url: string) => {
     if (url === "/api/appointments/appt-1") return appointmentGet();
     if (url.startsWith("/api/services?")) return jsonResponse(200, { success: true, data: servicesList });
+    if (url.startsWith("/api/employees?")) return jsonResponse(200, { success: true, data: employeesList });
     if (url.endsWith("/variants")) return jsonResponse(200, { success: true, data: variantsList });
     return jsonResponse(200, { success: true, data: [] });
   });
@@ -472,7 +475,7 @@ describe("wizyta zakończona: termin z zapisu", () => {
     fireEvent.change(await screen.findByTestId("edit-appointment-date-input"), { target: { value: "2000-01-01" } });
     fireEvent.click(screen.getByTestId("save-edit-btn"));
     expect(await screen.findByTestId("error-edit-date")).toHaveTextContent(
-      /^Data nie może być z przeszłości\. Wybierz dzisiejszą lub przyszłą datę$/
+      /^Data nie może być z przeszłości\. Wybierz dzisiejszą lub przyszłą datę\.$/
     );
     expect(mutationFetch).not.toHaveBeenCalled();
   });
@@ -643,7 +646,7 @@ describe("napisy okna z polskimi znakami", () => {
     expect(screen.getByText("Notatki wewnętrzne")).toBeInTheDocument();
     expect(screen.getByTestId("edit-client-search-input")).toHaveAttribute(
       "placeholder",
-      "Szukaj klienta (imię, nazwisko, telefon, email)..."
+      "Szukaj klienta (imię, nazwisko, telefon, e-mail)..."
     );
     expect(screen.getByTestId("edit-appointment-notes-input")).toHaveAttribute(
       "placeholder",
@@ -661,13 +664,380 @@ describe("napisy okna z polskimi znakami", () => {
     expect(await screen.findByText("Wariant usługi")).toBeInTheDocument();
   });
 
-  it("brak sieci przy zapisie: „Błąd podczas aktualizacji wizyty”", async () => {
+  it("brak sieci przy zapisie: tytuł i rada, co zrobić", async () => {
     mutationFetch.mockImplementation(async () => {
       throw new TypeError("Failed to fetch");
     });
+    const h = renderDialog("owner");
+    await moveTime();
+    await save();
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Błąd podczas aktualizacji wizyty", {
+        description: "Sprawdź połączenie z internetem i odśwież stronę, żeby zobaczyć, czy zmiany się zapisały.",
+      })
+    );
+    expect(h.onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("odpowiedź zapisu bez JSON-a: ten sam toast z radą", async () => {
+    mutationFetch.mockImplementation(async () => new Response("<html>błąd</html>", { status: 502 }));
     renderDialog("owner");
     await moveTime();
     await save();
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Błąd podczas aktualizacji wizyty"));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Błąd podczas aktualizacji wizyty", {
+        description: "Sprawdź połączenie z internetem i odśwież stronę, żeby zobaczyć, czy zmiany się zapisały.",
+      })
+    );
+  });
+
+  it("gwiazdka „wymagane” tylko przy polach do wypełnienia", async () => {
+    const view = renderDialog("owner");
+    expect(await screen.findByText("Pracownik *")).toBeInTheDocument();
+    expect(screen.getByText("Data i godzina *")).toBeInTheDocument();
+    view.unmount();
+    renderDialog("employee", { appointment: appointment({ status: "completed" }) });
+    expect(await screen.findByText("Pracownik")).toBeInTheDocument();
+    expect(screen.getByText("Data i godzina")).toBeInTheDocument();
+    expect(screen.queryByText("Pracownik *")).toBeNull();
+    expect(screen.queryByText("Data i godzina *")).toBeNull();
+  });
+
+  it("pracownik, wizyta niezakończona: termin z gwiazdką, pracownik bez", async () => {
+    renderDialog("employee");
+    expect(await screen.findByText("Pracownik")).toBeInTheDocument();
+    expect(screen.getByText("Data i godzina *")).toBeInTheDocument();
+  });
+});
+
+describe("wyjaśnienie przy terminie wizyty zakończonej", () => {
+  it("wizyta zakończona: napis przy wyłączonych polach, powiązany z polami", async () => {
+    renderDialog("owner", { appointment: appointment({ status: "completed" }) });
+    const hint = await screen.findByTestId("edit-term-locked-hint");
+    expect(hint).toHaveTextContent(/^Wizyta jest zakończona, więc jej termin się nie zmienia\. Możesz zapisać notatkę\.$/);
+    expect(screen.getByTestId("edit-appointment-date-input")).toHaveAttribute("aria-describedby", hint.id);
+    expect(screen.getByTestId("edit-appointment-time-input")).toHaveAttribute("aria-describedby", hint.id);
+  });
+
+  it("wizyta niezakończona: bez napisu i bez opisu pól", async () => {
+    renderDialog("owner");
+    await screen.findByTestId("edit-appointment-time-input");
+    expect(screen.queryByTestId("edit-term-locked-hint")).toBeNull();
+    expect(screen.getByTestId("edit-appointment-time-input")).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("ponowny odczyt zwraca wizytę zakończoną: napis się pojawia", async () => {
+    mutationFetch.mockImplementation(async () => jsonResponse(403, ASSIGNMENT_403));
+    appointmentGet = async () => jsonResponse(200, { success: true, data: { ...FRESH, status: "completed" } });
+    renderDialog("employee");
+    await moveTime();
+    await save();
+    expect(await screen.findByTestId("edit-term-locked-hint")).toBeInTheDocument();
+  });
+});
+
+describe("ponowne otwarcie okna: wybór wariantu od nowa", () => {
+  it("wariant wybrany, „Anuluj”, ponowne otwarcie: brak wyboru, cena bazowa", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    const h = renderDialog("owner");
+    await screen.findByTestId("edit-variant-select");
+    pick("edit-variant-select", "var-1");
+    await waitFor(() => expect(screen.getByTestId("edit-price-row")).toHaveTextContent("120.00 PLN"));
+    h.rerender({ open: false });
+    h.rerender({ open: true });
+    await waitFor(() => expect(screen.getByTestId("edit-variant-select")).toHaveAttribute("data-value", ""));
+    expect(screen.getByTestId("edit-price-row")).toHaveTextContent("100.00 PLN");
+    expect(screen.getByTestId("edit-price-duration-summary")).toHaveTextContent("1h 30 min");
+  });
+
+  it("po ponownym otwarciu zapis z zapisanym czasem trwania, nie z wariantu", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    const h = renderDialog("receptionist");
+    await screen.findByTestId("edit-variant-select");
+    pick("edit-variant-select", "var-1");
+    h.rerender({ open: false });
+    h.rerender({ open: true });
+    await moveTime();
+    await save();
+    expect(bodyOf(0).endTime).toBe(new Date(MOVED.getTime() + 90 * MIN).toISOString());
+  });
+});
+
+describe("podsumowanie: cena z zapisanym wariantem przy czasie z zapisu", () => {
+  it("wizyta z wariantem: cena z dopłatą wariantu i zapisany czas", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    renderDialog("owner", { appointment: appointment({ variantId: "var-1" }) });
+    await waitFor(() => expect(screen.getByTestId("edit-price-row")).toHaveTextContent("120.00 PLN"));
+    expect(screen.getByTestId("edit-price-duration-summary")).toHaveTextContent("1h 30 min");
+  });
+
+  it("pracownik, wizyta z wariantem: cena z dopłatą wariantu", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    renderDialog("employee", { appointment: appointment({ variantId: "var-1" }) });
+    await waitFor(() => expect(screen.getByTestId("edit-price-row")).toHaveTextContent("120.00 PLN"));
+  });
+
+  it("lista wariantów się nie wczytała: bez ceny, czas trwania zostaje", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/variants")) throw new TypeError("Failed to fetch");
+      if (url.startsWith("/api/services?")) return jsonResponse(200, { success: true, data: servicesList });
+      return jsonResponse(200, { success: true, data: [] });
+    });
+    renderDialog("owner", { appointment: appointment({ variantId: "var-1" }) });
+    await waitFor(() => expect(screen.getByTestId("edit-price-duration-summary")).toHaveTextContent("1h 30 min"));
+    expect(screen.queryByTestId("edit-price-row")).toBeNull();
+    expect(screen.queryByText("Cena:")).toBeNull();
+  });
+
+  it("wizyta bez wariantu: cena bazowa", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    renderDialog("owner", { appointment: appointment({ variantId: null }) });
+    await waitFor(() => expect(screen.getByTestId("edit-price-row")).toHaveTextContent("100.00 PLN"));
+  });
+
+  it("„Wariant podstawowy” wybrany w oknie: cena bez dopłaty zapisanego wariantu", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    renderDialog("owner", { appointment: appointment({ variantId: "var-1" }) });
+    await waitFor(() => expect(screen.getByTestId("edit-price-row")).toHaveTextContent("120.00 PLN"));
+    pick("edit-variant-select", "none");
+    await waitFor(() => expect(screen.getByTestId("edit-price-row")).toHaveTextContent("100.00 PLN"));
+    expect(screen.getByTestId("edit-price-duration-summary")).toHaveTextContent("1h");
+    expect(screen.getByTestId("edit-price-duration-summary")).not.toHaveTextContent("30 min");
+  });
+});
+
+describe("nowy obiekt tej samej wizyty przy otwartym oknie: zmiany innej osoby zostają", () => {
+  const ROLES: SalonRole[] = ["employee", "owner", "receptionist"];
+
+  /** Wizyta po zmianie przez inną osobę: inny klient, usługa, pracownik, czas 45 min i notatka. */
+  const CHANGED = appointment({
+    clientId: "client-2",
+    serviceId: "svc-2",
+    employeeId: "emp-2",
+    endTime: new Date(future.getTime() + 45 * MIN).toISOString(),
+    notes: "Notatka recepcji",
+    client: { id: "client-2", firstName: "Jan", lastName: "Wiśniewski", phone: null, email: "jan@example.invalid", allergies: null },
+    service: { id: "svc-2", name: "Koloryzacja", basePrice: "200.00", baseDuration: 120 },
+    employee: { id: "emp-2", firstName: "Ola", lastName: "Zielińska", color: null },
+  });
+
+  it.each(ROLES)("%s: inna osoba dopisała notatkę, okno przesuwa godzinę: notatka zostaje", async (role) => {
+    const h = renderDialog(role);
+    await moveTime();
+    h.rerender({ appointment: appointment({ notes: "Notatka recepcji" }) });
+    await waitFor(() => expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Notatka recepcji"));
+    await save();
+    expect(bodyOf(0)).not.toHaveProperty("notes");
+    expect(bodyOf(0).startTime).toBe(MOVED.toISOString());
+  });
+
+  it.each(ROLES)("%s: notatka wpisana w oknie zostaje mimo notatki innej osoby", async (role) => {
+    const h = renderDialog(role);
+    fireEvent.change(await screen.findByTestId("edit-appointment-notes-input"), { target: { value: "Moja" } });
+    h.rerender({ appointment: appointment({ notes: "Notatka recepcji" }) });
+    expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Moja");
+    await save();
+    expect(bodyOf(0).notes).toBe("Moja");
+  });
+
+  it.each(ROLES)(
+    "%s: klient, usługa i pracownik zmienione gdzie indziej: zapis z nowych, koniec z czasu nowej wizyty",
+    async (role) => {
+      const h = renderDialog(role);
+      await moveTime();
+      h.rerender({ appointment: CHANGED });
+      await save();
+      const body = bodyOf(0);
+      expect(body.clientId).toBe("client-2");
+      expect(body.serviceId).toBe("svc-2");
+      expect(body.employeeId).toBe("emp-2");
+      expect(body).not.toHaveProperty("notes");
+      expect(body.startTime).toBe(MOVED.toISOString());
+      expect(body.endTime).toBe(new Date(MOVED.getTime() + 45 * MIN).toISOString());
+    }
+  );
+
+  it.each<SalonRole>(["owner", "receptionist"])("%s: listy przechodzą na nowe wartości", async (role) => {
+    const h = renderDialog(role);
+    await screen.findByTestId("edit-service-select");
+    h.rerender({ appointment: CHANGED });
+    await waitFor(() => expect(screen.getByTestId("edit-service-select")).toHaveAttribute("data-value", "svc-2"));
+    expect(screen.getByTestId("edit-client-select")).toHaveAttribute("data-value", "client-2");
+    expect(screen.getByTestId("edit-employee-select")).toHaveAttribute("data-value", "emp-2");
+  });
+
+  it.each(ROLES)("%s: wizyta zakończona przy otwartym oknie: pola pokazują zapisany termin, zapis go wysyła", async (role) => {
+    const start = new Date(future);
+    start.setHours(9, 0, 30, 0);
+    const end = new Date(start.getTime() + 50 * MIN);
+    const h = renderDialog(role);
+    await moveTime();
+    h.rerender({ appointment: appointment({ status: "completed", startTime: start.toISOString(), endTime: end.toISOString() }) });
+    await waitFor(() => expect(screen.getByTestId("edit-appointment-time-input")).toHaveValue("09:00"));
+    expect(screen.getByTestId("edit-appointment-time-input")).toBeDisabled();
+    expect(screen.getByTestId("edit-term-locked-hint")).toBeInTheDocument();
+    await save();
+    expect(bodyOf(0).startTime).toBe(start.toISOString());
+    expect(bodyOf(0).endTime).toBe(end.toISOString());
+  });
+
+  it("termin niezmieniony w oknie idzie za nową wizytą", async () => {
+    const moved = new Date(future);
+    moved.setHours(14, 0, 0, 0);
+    const h = renderDialog("receptionist");
+    fireEvent.change(await screen.findByTestId("edit-appointment-notes-input"), { target: { value: "Moja" } });
+    h.rerender({
+      appointment: appointment({ startTime: moved.toISOString(), endTime: new Date(moved.getTime() + 90 * MIN).toISOString() }),
+    });
+    await waitFor(() => expect(screen.getByTestId("edit-appointment-time-input")).toHaveValue("14:00"));
+    await save();
+    expect(bodyOf(0).startTime).toBe(moved.toISOString());
+    expect(bodyOf(0).notes).toBe("Moja");
+  });
+
+  it("termin zmieniony w oknie zostaje, koniec z zapisanego czasu nowej wizyty", async () => {
+    const other = new Date(future.getTime() + 24 * 3600 * 1000);
+    const h = renderDialog("employee");
+    await moveTime();
+    h.rerender({
+      appointment: appointment({ startTime: other.toISOString(), endTime: new Date(other.getTime() + 30 * MIN).toISOString() }),
+    });
+    await save();
+    expect(bodyOf(0).startTime).toBe(MOVED.toISOString());
+    expect(bodyOf(0).endTime).toBe(new Date(MOVED.getTime() + 30 * MIN).toISOString());
+  });
+
+  it("właściciel zmienił klienta i usługę w oknie: jego wybór zostaje, reszta idzie za nową wizytą", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60, SERVICE_120];
+    const h = renderDialog("owner");
+    await screen.findByText(/Koloryzacja - 200.00 PLN/);
+    pick("edit-client-select", "none");
+    pick("edit-service-select", "svc-2");
+    await moveTime();
+    h.rerender({ appointment: { ...CHANGED, clientId: "client-3", serviceId: "svc-3" } });
+    await waitFor(() => expect(screen.getByTestId("edit-employee-select")).toHaveAttribute("data-value", "emp-2"));
+    expect(screen.getByTestId("edit-service-select")).toHaveAttribute("data-value", "svc-2");
+    expect(screen.getByTestId("edit-client-select")).toHaveAttribute("data-value", "none");
+    await save();
+    const body = bodyOf(0);
+    expect(body.clientId).toBeNull();
+    expect(body.serviceId).toBe("svc-2");
+    expect(body.employeeId).toBe("emp-2");
+    expect(body.endTime).toBe(new Date(MOVED.getTime() + 120 * MIN).toISOString());
+  });
+
+  it("właściciel zmienił pracownika w oknie: jego wybór zostaje", async () => {
+    salon.id = "salon-a";
+    employeesList = [
+      { id: "emp-1", firstName: "Anna", lastName: "Nowak", color: null, isActive: true },
+      { id: "emp-3", firstName: "Iga", lastName: "Mazur", color: null, isActive: true },
+    ];
+    const h = renderDialog("owner");
+    await screen.findByText(/Iga Mazur/);
+    pick("edit-employee-select", "emp-3");
+    h.rerender({ appointment: CHANGED });
+    await waitFor(() => expect(screen.getByTestId("edit-service-select")).toHaveAttribute("data-value", "svc-2"));
+    await save();
+    expect(bodyOf(0).employeeId).toBe("emp-3");
+  });
+
+  it("recepcja wybrała wariant w oknie: usługa zostaje mimo zmiany gdzie indziej", async () => {
+    salon.id = "salon-a";
+    servicesList = [SERVICE_60];
+    variantsList = [VARIANT_15];
+    const h = renderDialog("receptionist");
+    await screen.findByTestId("edit-variant-select");
+    pick("edit-variant-select", "var-1");
+    await moveTime();
+    h.rerender({ appointment: CHANGED });
+    await waitFor(() => expect(screen.getByTestId("edit-employee-select")).toHaveAttribute("data-value", "emp-2"));
+    await save();
+    expect(bodyOf(0).serviceId).toBe("svc-1");
+    expect(bodyOf(0).endTime).toBe(new Date(MOVED.getTime() + 75 * MIN).toISOString());
+  });
+
+  it("nowy obiekt z tymi samymi danymi: formularz bez zmian", async () => {
+    const h = renderDialog("owner");
+    await moveTime();
+    fireEvent.change(screen.getByTestId("edit-appointment-notes-input"), { target: { value: "Wpisana" } });
+    h.rerender({ appointment: appointment() });
+    expect(screen.getByTestId("edit-appointment-time-input")).toHaveValue("12:15");
+    expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Wpisana");
+  });
+
+  it("zapis po nowym obiekcie kończy się błędem: okno zostaje, ponowny zapis dalej bez starej notatki", async () => {
+    mutationFetch
+      .mockResolvedValueOnce(jsonResponse(409, { success: false, error: "Termin zajęty" }))
+      .mockResolvedValueOnce(jsonResponse(200, { success: true }));
+    const h = renderDialog("employee");
+    await moveTime();
+    h.rerender({ appointment: appointment({ notes: "Notatka recepcji" }) });
+    await save();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(h.onOpenChange).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("save-edit-btn")).not.toBeDisabled());
+    await save(2);
+    expect(bodyOf(0)).not.toHaveProperty("notes");
+    expect(bodyOf(1)).not.toHaveProperty("notes");
+  });
+
+  it("ponowny odczyt z notatką innej osoby: drugi zapis bez notatki", async () => {
+    mutationFetch
+      .mockResolvedValueOnce(jsonResponse(403, ASSIGNMENT_403))
+      .mockResolvedValueOnce(jsonResponse(200, { success: true }));
+    appointmentGet = async () => jsonResponse(200, { success: true, data: { ...FRESH, notes: "Notatka recepcji" } });
+    renderDialog("employee");
+    await moveTime();
+    await save();
+    await waitFor(() => expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Notatka recepcji"));
+    await waitFor(() => expect(screen.getByTestId("save-edit-btn")).not.toBeDisabled());
+    await save(2);
+    expect(bodyOf(1)).not.toHaveProperty("notes");
+    expect(bodyOf(1).startTime).toBe(MOVED.toISOString());
+  });
+
+  it("po ponownym odczycie strona podaje nowszy obiekt: okno przechodzi na niego", async () => {
+    mutationFetch
+      .mockResolvedValueOnce(jsonResponse(403, ASSIGNMENT_403))
+      .mockResolvedValueOnce(jsonResponse(200, { success: true }));
+    const h = renderDialog("employee");
+    await moveTime();
+    await save();
+    await waitFor(() => expect(toast.info).toHaveBeenCalled());
+    h.rerender({ appointment: { ...FRESH, notes: "Notatka recepcji" } });
+    await waitFor(() => expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Notatka recepcji"));
+    expect(screen.getByTestId("edit-appointment-time-input")).toHaveValue("12:15");
+    await waitFor(() => expect(screen.getByTestId("save-edit-btn")).not.toBeDisabled());
+    await save(2);
+    expect(bodyOf(1)).not.toHaveProperty("notes");
+    expect(bodyOf(1).serviceId).toBe("svc-2");
+  });
+
+  it("po ponownym odczycie strona podaje nowszy obiekt, „Anuluj”: bez drugiego odświeżenia strony", async () => {
+    mutationFetch.mockImplementation(async () => jsonResponse(403, ASSIGNMENT_403));
+    const h = renderDialog("employee");
+    await moveTime();
+    await save();
+    await waitFor(() => expect(toast.info).toHaveBeenCalled());
+    h.rerender({ appointment: { ...FRESH, notes: "Notatka recepcji" } });
+    await waitFor(() => expect(screen.getByTestId("edit-appointment-notes-input")).toHaveValue("Notatka recepcji"));
+    fireEvent.click(screen.getByTestId("cancel-edit-btn"));
+    expect(h.onAppointmentUpdated).not.toHaveBeenCalled();
+    expect(h.onOpenChange).toHaveBeenCalledWith(false);
   });
 });
