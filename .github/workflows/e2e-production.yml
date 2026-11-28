@@ -1,13 +1,8 @@
 name: Production E2E
 
 on:
-  # Vercel — zostaje do C4 (brief C §3).
-  deployment_status:
   # Cloud Run — wywoływany z deploy-cloud-run.yml po promocji nowej wersji;
-  # testy idą WYŁĄCZNIE na inputs.base_url (URL Cloud Run), nigdy na sekretny
-  # URL Vercela. (Wywołany workflow widzi github.event_name wywołującego,
-  # dlatego tryb rozróżnia tylko deployment_status vs reszta i nie ma tu
-  # osobnego workflow_dispatch.)
+  # testy idą WYŁĄCZNIE na inputs.base_url (adres taga Cloud Run).
   workflow_call:
     inputs:
       base_url:
@@ -18,15 +13,10 @@ on:
 jobs:
   e2e-production:
     name: Production Health Checks
-    # deployment_status: tylko udane wdrożenie środowiska Production (Vercel
-    # ustawia environment "Production" / "Preview"). Wcześniej warunek sprawdzał
-    # sam stan, więc job biegł też po każdym Preview, celując i tak w URL
-    # produkcji z sekretu. workflow_call: zawsze.
-    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
     runs-on: ubuntu-24.04 # Playwright 1.58.2 nie obsługuje Ubuntu 26 (ubuntu-latest)
     timeout-minutes: 5
     env:
-      BASE_URL: ${{ github.event_name == 'deployment_status' && secrets.BETTER_AUTH_BASE_URL_PROD || inputs.base_url }}
+      BASE_URL: ${{ inputs.base_url }}
       CI: true
     steps:
       # Allowlista (#121 h): wyłącznie URL taga NASZEJ usługi Cloud Run —
@@ -34,12 +24,11 @@ jobs:
       # (deterministyczny format: tag, usługa, numer projektu, region; tag jak
       # REVISION_TAG w run-deploy.sh). Odrzucone: pusty, http, vercel.app,
       # cudze *.run.app, adres bez taga, ścieżka, userinfo, port.
-      - name: Cloud Run mode must target our tagged Cloud Run URL
-        if: github.event_name != 'deployment_status'
+      - name: Base URL must be our tagged Cloud Run URL
         run: |
           if [[ -z "$BASE_URL" || "$BASE_URL" != https://* || "$BASE_URL" == *vercel.app* ]] \
             || ! [[ "$BASE_URL" =~ ^https://[a-z][a-z0-9-]{0,45}---myhelper-843777043748\.europe-central2\.run\.app/?$ ]]; then
-            echo "::error::workflow_call needs the tagged URL of our Cloud Run service (got empty, non-https, Vercel or other host)"
+            echo "::error::base_url must be the tagged URL of our Cloud Run service (got empty, non-https, Vercel or other host)"
             exit 1
           fi
 
