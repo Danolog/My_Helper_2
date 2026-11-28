@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 
     // Build conditions - only completed appointments generate revenue
     const conditions: ReturnType<typeof eq>[] = [
-      eq(appointments.status, "completed"),
+      eq(appointments.salonId, salonId),
     ];
 
     if (dateFrom) {
