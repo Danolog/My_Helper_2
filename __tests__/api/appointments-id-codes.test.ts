@@ -55,6 +55,8 @@ const h = vi.hoisted(() => ({
   updateResults: [] as unknown[][],
   update: vi.fn(),
   set: vi.fn(),
+  /** Warunek przekazany do tx.update(...).where(...). */
+  updateWhere: vi.fn(),
   updated: [] as Record<string, unknown>[],
   transactions: 0,
   /** Wartości przekazane do tx.insert(...).values(...). */
@@ -97,7 +99,10 @@ vi.mock("@/lib/server/repository", () => {
       h.set(data);
       return chain;
     };
-    chain.where = () => chain;
+    chain.where = (condition: unknown) => {
+      h.updateWhere(condition);
+      return chain;
+    };
     chain.returning = () => chain;
     chain.then = (resolve: (v: unknown) => unknown) =>
       resolve(h.updateResults.length > 0 ? h.updateResults.shift() : h.updated);
@@ -623,6 +628,78 @@ describe("PUT — zapis bez wiersza nie daje 200 z data: null", () => {
     expect(ownEmployeeEqCalls()).toBe(ownerCalls + 1);
   });
 
+  const NEW_SLOT = { startTime: "2026-04-01T12:00:00.000Z", endTime: "2026-04-01T13:00:00.000Z" };
+
+  it("pracownik: UPDATE terminu ma warunek własnego pracownika", async () => {
+    h.salonCtx.mockResolvedValue(OWNER_CTX);
+    expect((await put(NEW_SLOT)).status).toBe(200);
+    const ownerCalls = ownEmployeeEqCalls();
+
+    vi.mocked(eq).mockClear();
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    expect((await put(NEW_SLOT)).status).toBe(200);
+
+    expect(ownerCalls).toBeGreaterThan(0);
+    expect(ownEmployeeEqCalls()).toBe(ownerCalls + 1);
+  });
+
+  /**
+   * Wywołania `eq` złożone w warunek UPDATE: między `.set(...)` a `.where(...)`
+   * tego samego zapisu (argumenty `where` liczą się po `set`). Para: nazwa
+   * kolumny i wartość.
+   */
+  const updateWhereEqCalls = (updateIndex = 0): Array<[string, unknown]> => {
+    const after = h.set.mock.invocationCallOrder[updateIndex]!;
+    const before = h.updateWhere.mock.invocationCallOrder[updateIndex]!;
+    const eqMock = vi.mocked(eq).mock;
+    return eqMock.calls
+      .filter((_call, i) => {
+        const order = eqMock.invocationCallOrder[i]!;
+        return order > after && order < before;
+      })
+      .map(([column, value]) => [(column as { name: string }).name, value]);
+  };
+
+  it("pracownik: zapis terminu — warunek UPDATE zawiera własnego pracownika, termin w zapisie", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+
+    const { status } = await parseResponse<Ok>(await put(NEW_SLOT));
+
+    expect(status).toBe(200);
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(Object.keys(h.set.mock.calls[0]![0] as object).sort()).toEqual(["endTime", "startTime"]);
+    const inWhere = updateWhereEqCalls();
+    expect(inWhere).toContainEqual([appointments.employeeId.name, EMPLOYEE]);
+    expect(inWhere).toContainEqual([appointments.id.name, APPOINTMENT]);
+    expect(inWhere).toContainEqual([appointments.salonId.name, SALON]);
+  });
+
+  it("kontrola: właściciel, zapis terminu — warunek UPDATE bez pracownika", async () => {
+    h.salonCtx.mockResolvedValue(OWNER_CTX);
+
+    const { status } = await parseResponse<Ok>(await put(NEW_SLOT));
+
+    expect(status).toBe(200);
+    const inWhere = updateWhereEqCalls();
+    expect(inWhere).toContainEqual([appointments.id.name, APPOINTMENT]);
+    expect(inWhere.filter(([column]) => column === appointments.employeeId.name)).toEqual([]);
+  });
+
+  it("pracownik: zapis terminu nie trafił w wiersz, wizyta przepisana na innego → 404, jeden zapis, bez logu błędu", async () => {
+    h.salonCtx.mockResolvedValue(EMPLOYEE_CTX);
+    // 1) kolizje, 2) blokady czasu, 3) ponowny odczyt po UPDATE bez wiersza.
+    h.selectResults = [[], [], [appt({ employeeId: OTHER_EMPLOYEE })]];
+    h.updateResults = [[]];
+
+    const { status, body } = await parseResponse<Err>(await put(NEW_SLOT));
+
+    expect(status).toBe(404);
+    expect(body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(updateWhereEqCalls()).toContainEqual([appointments.employeeId.name, EMPLOYEE]);
+    expect(h.logger.error).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["właściciel", OWNER_CTX],
     ["recepcja", RECEPTION_CTX],
@@ -856,7 +933,7 @@ describe("PUT — pracownika, klienta i usługę zmienia właściciel albo recep
     const { status, body } = await parseResponse<Err>(await put({ employeeId: EMPLOYEE }));
 
     expect(status).toBe(404);
-    expect(body.code).toBe("APPOINTMENT_NOT_FOUND");
+    expect(body).toEqual({ success: false, code: "APPOINTMENT_NOT_FOUND", error: TEXT.appointmentNotFound });
   });
 
   it("pracownik: przeniesienie na zajęty termin → 409 z kolizją we własnym kalendarzu, bez pytania o kalendarz innego", async () => {

@@ -16,11 +16,14 @@
  *   i zwrotu; przepisana i zakończona → 404, nie 409;
  * - pracownik zapisuje notatkę własnej wizyty → 200; wizyty przepisanej → 404,
  *   notatka bez zmian;
+ * - pracownik przesuwa termin wizyty przepisanej → 404, termin i pracownik
+ *   bez zmian, bez logu błędu;
  * - PUT właściciela z body dialogu edycji czeka za zakończeniem: nowa notatka
  *   → 200, zapisana tylko notatka; zmieniony termin → 409, wiersz bez zmian.
  *
  * Zakres edycji pracownika: pracownik zmienia pracownika, klienta albo usługę
- * własnej wizyty → 403, wiersz bez zmian; ta sama wartość z dialogu → 200.
+ * własnej wizyty (wyczyszczenie albo inny klient salonu) → 403 z kodem,
+ * wiersz bez zmian; ta sama wartość z dialogu → 200.
  *
  * Kontrola pozytywna `notifications`: właściciel odwołuje wizytę klienta
  * z SMS-em → jeden nowy wiersz (zapytanie użyte w przypadkach „bez wpisu” widzi
@@ -42,7 +45,7 @@
  * testową, kontekst salonu i `forSalon` prawdziwe.
  *
  * Dane: konta `it-t3-ccr-…` (właściciel i pracownik), salon, trzech
- * pracowników (jeden z kontem), klient bez telefonu, usługa, wizyty w 2097
+ * pracowników (jeden z kontem), dwóch klientów bez telefonu, usługa, wizyty w 2097
  * z zadatkiem 50.00 i płatnością `pending`. Salon usuwany w `afterAll` (kaskada);
  * konta usuwane także wtedy, gdy usunięcie salonu się nie uda.
  */
@@ -113,7 +116,7 @@ const RUN = randomUUID().slice(0, 8);
 const OWNER = `it-t3-ccr-o-${RUN}`;
 const EMP_USER = `it-t3-ccr-e-${RUN}`;
 
-const ids = { salon: "", emp: "", service: "", empOwn: "", empOther: "", client: "" };
+const ids = { salon: "", emp: "", service: "", empOwn: "", empOther: "", client: "", clientOther: "" };
 let slot = 0;
 
 type Body = { success: boolean; code?: string; error?: string; data?: Record<string, unknown> };
@@ -379,6 +382,11 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
       .values({ salonId: ids.salon, firstName: "IT", lastName: "Klient ccr" })
       .returning({ id: clients.id });
     ids.client = c!.id;
+    const [c2] = await db
+      .insert(clients)
+      .values({ salonId: ids.salon, firstName: "IT", lastName: "Inny klient ccr" })
+      .returning({ id: clients.id });
+    ids.clientOther = c2!.id;
     const [sv] = await db
       .insert(services)
       .values({ salonId: ids.salon, name: "IT ccr usługa", basePrice: "150.00", baseDuration: 30 })
@@ -548,6 +556,35 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
   );
 
   it(
+    "pracownik przesuwa termin wizyty przepisanej pod blokadą → 404, termin i pracownik bez zmian, bez logu błędu",
+    async () => {
+      const { appt, start, end } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn });
+      ctl.userId = EMP_USER;
+      // Termin przesunięty o 15 minut, w obrębie własnego slotu (bez kolizji z innymi wizytami testu).
+      const moved = {
+        startTime: new Date(start.getTime() + 900_000).toISOString(),
+        endTime: new Date(end.getTime() + 900_000).toISOString(),
+      };
+
+      const [saved] = await inLockOrder(
+        appt,
+        [async () => parseResponse<Body>(await update(appt, moved))],
+        reassignUnderLock(appt)
+      );
+
+      expect(saved!.status, outcomeSummary(saved)).toBe(404);
+      expect(saved!.body.code).toBe(APPOINTMENT_ERROR_CODES.appointmentNotFound);
+      const row = await rowOf(appt);
+      expect(row.startTime.getTime()).toBe(start.getTime());
+      expect(row.endTime.getTime()).toBe(end.getTime());
+      expect(row.employeeId).toBe(ids.empOther);
+      expect(row.status).toBe("scheduled");
+      expect(mocks.error).not.toHaveBeenCalled();
+    },
+    30_000
+  );
+
+  it(
     "PUT z body dialogu edycji czeka za zakończeniem: nowa notatka → 200, zapisana tylko notatka",
     async () => {
       const { appt, start, end } = await appointmentWithPendingDeposit();
@@ -630,18 +667,26 @@ suite("zakończenie kontra anulowanie wizyty — obie kolejności, prawdziwy Pos
     expect(mocks.error).not.toHaveBeenCalled();
   });
 
-  it("pracownik zmienia klienta albo usługę własnej wizyty → 403, wiersz bez zmian", async () => {
+  it("pracownik zmienia klienta albo usługę własnej wizyty → 403 z kodem, wiersz bez zmian", async () => {
     const { appt } = await appointmentWithPendingDeposit({ employeeId: ids.empOwn, clientId: ids.client });
     ctl.userId = EMP_USER;
 
-    const noClient = await parseResponse<Body>(await update(appt, { clientId: null }));
+    const noClient = await parseResponse<Body>(await update(appt, { clientId: null, notes: "IT notatka bez klienta" }));
     const noService = await parseResponse<Body>(await update(appt, { serviceId: null }));
+    const otherClient = await parseResponse<Body>(
+      await update(appt, { clientId: ids.clientOther, notes: "IT notatka z innym klientem" })
+    );
 
-    expect(noClient.status, outcomeSummary(noClient)).toBe(403);
-    expect(noService.status, outcomeSummary(noService)).toBe(403);
+    for (const res of [noClient, noService, otherClient]) {
+      expect(res.status, outcomeSummary(res)).toBe(403);
+      expect(res.body.code).toBe(APPOINTMENT_ERROR_CODES.assignmentForbidden);
+    }
     const row = await rowOf(appt);
     expect(row.clientId).toBe(ids.client);
     expect(row.serviceId).toBe(ids.service);
+    expect(row.employeeId).toBe(ids.empOwn);
+    expect(row.notes).toBeNull();
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it("kontrola: pracownik, body dialogu z tymi samymi wartościami i nowym terminem → 200, termin zapisany", async () => {
