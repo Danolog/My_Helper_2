@@ -110,6 +110,15 @@ describe("useFinanceData — zapis stawki prowizji", () => {
     expect(toastError).toHaveBeenCalledWith("Nie udało się zapisać. Sprawdź wpisane wartości.");
   });
 
+  it("404 z error: pokazuje dosłownie komunikat serwera, jak przed zmianą", async () => {
+    mockMutationFetch.mockResolvedValueOnce(
+      jsonResponse({ success: false, error: "Employee not found" }, 404),
+    );
+    await saveRate("50");
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenCalledWith("Employee not found");
+  });
+
   it("błąd sieci: polski tekst połączenia", async () => {
     mockMutationFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const result = await saveRate("50");

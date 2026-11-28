@@ -39,7 +39,7 @@ export default function FinancePage() {
 
   if (isPending) {
     return (
-      <div className="flex justify-center items-center h-64">Loading...</div>
+      <div className="flex justify-center items-center h-64">Ładowanie…</div>
     );
   }
 
