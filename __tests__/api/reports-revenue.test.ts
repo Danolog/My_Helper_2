@@ -225,6 +225,23 @@ describe("GET /api/reports/revenue — kwota zapisana i metody płatności", () 
     expect(data.byPaymentMethod[1]).toMatchObject({ revenue: "0.01", share: "6.3" });
   });
 
+  it("średnia zaokrąglana do pełnego grosza w górę od połowy: 0.03 / 2 = 0.02", async () => {
+    // 3 gr na 2 wizyty to 1.5 gr; zaokrąglenie daje 2 gr, obcięcie dałoby 1 gr
+    const data = await report([
+      appt({ paidAmount: "0.01", paymentMethod: "cash" }),
+      appt({ paidAmount: "0.02", paymentMethod: "card" }),
+    ]);
+
+    expect(data.summary.totalRevenue).toBe("0.03");
+    expect(data.summary.avgRevenuePerAppointment).toBe("0.02");
+    expect(data.byService).toEqual([
+      expect.objectContaining({ serviceId: "svc-1", count: 2, revenue: "0.03", avgPrice: "0.02" }),
+    ]);
+    expect(data.byEmployee).toEqual([
+      expect.objectContaining({ employeeId: "emp-1", count: 2, revenue: "0.03", avgPrice: "0.02" }),
+    ]);
+  });
+
   it("CSV: sekcja metod płatności, cztery etykiety i wiersz źródła w cudzysłowie", async () => {
     m.asOwnerOf(SALON_A);
     m.txRows.push([
@@ -302,6 +319,46 @@ describe("GET /api/reports/revenue — kwota zapisana i metody płatności", () 
       ["BLIK", 1, "25.00", "33.3"],
       ["Bez zapisu płatności", 0, "0.00", "0.0"],
       ["RAZEM", 2, "75.00", "100.0"],
+    ]);
+  });
+
+  it("CSV bez wizyt: sekcja metod z zerami i wiersz RAZEM z udziałem 0.0", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([]);
+
+    const res = await call("csv");
+    expect(res.status).toBe(200);
+    const lines = (await res.text()).split("\n");
+
+    const section = lines.indexOf("PRZYCHÓD WG METODY PŁATNOŚCI");
+    expect(section).toBeGreaterThan(-1);
+    expect(lines.slice(section + 2, section + 7)).toEqual([
+      '"Gotówka",0,0.00,0.0',
+      '"Karta",0,0.00,0.0',
+      '"BLIK",0,0.00,0.0',
+      '"Bez zapisu płatności",0,0.00,0.0',
+      "RAZEM,0,0.00,0.0",
+    ]);
+  });
+
+  it("XLSX bez wizyt: arkusz metod z zerami i wiersz RAZEM z udziałem 0.0", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([]);
+
+    const res = await call("xlsx");
+    expect(res.status).toBe(200);
+    const sheets = excel.createExcelWorkbook.mock.calls[0]![0] as {
+      name: string;
+      rows: (string | number)[][];
+    }[];
+    const methods = sheets.find((s) => s.name === "Wg metody płatności");
+
+    expect(methods?.rows).toEqual([
+      ["Gotówka", 0, "0.00", "0.0"],
+      ["Karta", 0, "0.00", "0.0"],
+      ["BLIK", 0, "0.00", "0.0"],
+      ["Bez zapisu płatności", 0, "0.00", "0.0"],
+      ["RAZEM", 0, "0.00", "0.0"],
     ]);
   });
 
