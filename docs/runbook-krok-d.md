@@ -1580,6 +1580,34 @@ bez danych osobowych. Inne odczyty blokuje hook sesji, a reguła obowiązuje tak
 tam, gdzie hook by ich nie złapał. Tę regułę opisuje umowa powierzenia (§ 9
 ust. 1 i załącznik B pkt 10), więc jej zmiana wymaga zmiany umowy.
 
+**Ślad odwołania wizyty z pominiętym krokiem.** Gdy odwołanie wizyty przez
+salon jest już zatwierdzone w bazie, a krok po nim się nie wykona, trasa
+zapisuje ostrzeżenie o stałej treści „[Appointments API] anulowanie
+zatwierdzone, skutek pominięty: krok”. Kroków jest sześć:
+`expire_checkout_sessions` (wygaszenie otwartej sesji płatności), `refund`
+(zwrot zadatku), `read_names` (odczyt nazw usługi, pracownika i salonu; SMS
+i lista oczekujących biorą tekst domyślny), `sms` (budowa treści SMS-a),
+`notification` (zapis SMS-a do wysyłki) i `waiting_list` (powiadomienie listy
+oczekujących). Odczyt `logs:read --message` pokazuje czas, poziom i tę treść,
+więc wiadomo, który krok i kiedy. Treść nie ma żadnych danych: identyfikator
+wizyty jest w osobnym polu wpisu `appointmentId`, którego odczyt nie pokazuje,
+a ścieżka w odczycie ma identyfikator zastąpiony `:id`. Ponowne odwołanie tej
+wizyty odpowiada „już odwołana” i żadnego kroku nie powtarza.
+
+Drogę od śladu do wizyty przechodzi tylko właściciel, we własnym terminalu.
+Bierze czas śladu z odczytu i czyta z surowego wpisu wyłącznie czas i pole
+`appointmentId` (projekt wpisany dosłownie, jak wyżej):
+
+```bash
+gcloud --project=<projekt> logging read 'resource.type="cloud_run_revision" AND jsonPayload.message:"anulowanie zatwierdzone, skutek pominięty"' --freshness=2d --format='value(timestamp,jsonPayload.appointmentId)'
+```
+
+Wizytę o tym identyfikatorze sprawdza blokiem połączenia z sekcji 9a,
+z `-c default_transaction_read_only=on` dopisanym do `PGOPTIONS` (jak
+w okresie przejściowym z sekcji 9) i z wpisem w rejestrze (wyżej). Rola
+z sekcji 9b tabeli wizyt nie czyta. Identyfikator wizyty nie trafia do rozmowy; do rozmowy właściciel przekazuje
+tylko nazwę kroku, czas i liczbę wpisów.
+
 ## 10. Dane Neon → Cloud SQL: bez kopii
 
 Obowiązujący wariant (decyzja COO z 22.11): baza na starcie **pusta**, schemat tylko z migracji, bez kopii danych z Neona.

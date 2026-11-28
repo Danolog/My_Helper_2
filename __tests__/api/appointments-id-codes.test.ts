@@ -14,7 +14,8 @@
  * - Teksty odpowiedzi po polsku; wizyta cudza i nieistniejąca — to samo body.
  * - DELETE po zatwierdzeniu anulowania odpowiada zawsze 200: błąd odczytu
  *   nazw, zwrotu, SMS-a, powiadomienia albo listy oczekujących zostawia ślad
- *   w logu, a nie 500.
+ *   w logu, a nie 500. Ślad ma stały tekst z nazwą kroku (sześć tekstów,
+ *   dosłownie), bo odczyt logów produkcji pokazuje komunikat, a nie pola wpisu.
  * - DELETE ze złym identyfikatorem → 400 `INVALID_APPOINTMENT_ID` bez odczytu wizyty.
  * - Kolejność: wizyta zakończona innego salonu albo innego pracownika → 404,
  *   nie 409 (odpowiedź nie zdradza, że wizyta istnieje ani jaki ma status).
@@ -154,6 +155,7 @@ import {
 import { AppointmentGoneError } from "@/lib/appointment-access";
 import { APPOINTMENT_COMPLETED_CODE, AppointmentCompletedError } from "@/lib/appointment-completion";
 import { appointments } from "@/lib/schema";
+import { toSafeEntry } from "../../scripts/logs/mask";
 
 const AUTH = { session: { id: "s-1" }, user: { id: "u-owner" } };
 const OWNER_CTX = { salonId: SALON, userId: "u-owner", role: "owner", employeeId: null };
@@ -179,7 +181,20 @@ const TEXT = {
   assignmentForbidden: "Pracownika, klienta i usługę wizyty zmienia właściciel albo recepcja.",
 };
 
-const SKIPPED_TRACE = "[Appointments API] anulowanie zatwierdzone, skutek pominięty";
+/**
+ * Teksty śladu „anulowanie zatwierdzone, skutek pominięty” — po jednym na krok
+ * DELETE po zatwierdzeniu, dosłownie. Nazwa kroku jest w tekście, bo odczyt
+ * logów produkcji pokazuje komunikat, a nie pola wpisu.
+ */
+const SKIPPED_TRACE = {
+  expire_checkout_sessions: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: expire_checkout_sessions",
+  refund: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: refund",
+  read_names: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: read_names",
+  sms: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: sms",
+  notification: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: notification",
+  waiting_list: "[Appointments API] anulowanie zatwierdzone, skutek pominięty: waiting_list",
+} as const;
+type SkippedStep = keyof typeof SKIPPED_TRACE;
 
 /**
  * Wywołania loggera jako tekst, z polami `Error` niewyliczalnymi (`message`,
@@ -1220,7 +1235,7 @@ describe("DELETE — role, 200 i 500", () => {
     expect(h.logger.error).toHaveBeenCalledTimes(1);
     expect(h.logger.error.mock.calls[0]![1]).toEqual({ errorName: "Error" });
     expect(h.logger.warn.mock.calls).toEqual([
-      [SKIPPED_TRACE, { appointmentId: APPOINTMENT, step: "waiting_list", hasDeposit: false, depositPaid: false }],
+      [SKIPPED_TRACE.waiting_list, { appointmentId: APPOINTMENT, step: "waiting_list", hasDeposit: false, depositPaid: false }],
     ]);
   });
 
@@ -1247,7 +1262,7 @@ describe("DELETE — role, 200 i 500", () => {
     expect(loggedText(h.logger.error.mock.calls)).not.toContain("Anna");
     // Ślad: anulowanie zatwierdzone, wpis powiadomienia pominięty.
     expect(h.logger.warn.mock.calls).toEqual([
-      [SKIPPED_TRACE, { appointmentId: APPOINTMENT, step: "notification", hasDeposit: false, depositPaid: false }],
+      [SKIPPED_TRACE.notification, { appointmentId: APPOINTMENT, step: "notification", hasDeposit: false, depositPaid: false }],
     ]);
   });
 });
@@ -1500,8 +1515,8 @@ describe("DELETE — po zatwierdzeniu anulowania zawsze 200, ślad pominiętego 
       createRouteParams(APPOINTMENT)
     );
 
-  const trace = (step: string) => [
-    SKIPPED_TRACE,
+  const trace = (step: SkippedStep) => [
+    SKIPPED_TRACE[step],
     { appointmentId: APPOINTMENT, step, hasDeposit: true, depositPaid: true },
   ];
 
@@ -1636,6 +1651,57 @@ describe("DELETE — po zatwierdzeniu anulowania zawsze 200, ślad pominiętego 
       trace("sms"),
       trace("waiting_list"),
     ]);
+  });
+
+  it("ślad: sześć kroków, każdy z własnym stałym tekstem, czytelnym z odczytu logów, bez danych w tekście", async () => {
+    // 1) Kroki rzucają po kolei: wygaszenie sesji, zwrot, odczyt nazw, SMS, lista.
+    arrangePaidCancel();
+    h.selectResults = [preRead(), new Error("names") as unknown as unknown[]];
+    h.expireSessions.mockRejectedValue(new Error("stripe"));
+    h.refund.mockRejectedValue(new Error("refund"));
+    h.buildSms.mockImplementation(() => {
+      throw new Error("sms");
+    });
+    h.notifyWaitingList.mockRejectedValue(new Error("list"));
+    expect((await delNotify()).status).toBe(200);
+    const emitted = h.logger.warn.mock.calls.map((call) => call[0]);
+
+    // 2) Wpis powiadomienia rzuca (SMS zbudowany) — jedyny krok, którego (1) nie obejmuje.
+    vi.clearAllMocks();
+    arrangePaidCancel();
+    h.selectResults = [preRead(), [{ name: "Nowa usługa" }], [{ name: "Salon A", phone: null }]];
+    h.expireSessions.mockResolvedValue(undefined);
+    h.notifyWaitingList.mockResolvedValue({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+    h.insertError = new Error("insert");
+    expect((await delNotify()).status).toBe(200);
+    emitted.push(...h.logger.warn.mock.calls.map((call) => call[0]));
+
+    expect(emitted).toEqual([
+      "[Appointments API] anulowanie zatwierdzone, skutek pominięty: expire_checkout_sessions",
+      "[Appointments API] anulowanie zatwierdzone, skutek pominięty: refund",
+      "[Appointments API] anulowanie zatwierdzone, skutek pominięty: read_names",
+      "[Appointments API] anulowanie zatwierdzone, skutek pominięty: sms",
+      "[Appointments API] anulowanie zatwierdzone, skutek pominięty: waiting_list",
+      "[Appointments API] anulowanie zatwierdzone, skutek pominięty: notification",
+    ]);
+    expect(Object.keys(SKIPPED_TRACE)).toHaveLength(6);
+    expect(new Set(emitted)).toEqual(new Set(Object.values(SKIPPED_TRACE)));
+
+    // Odczyt logów produkcji (biała lista pól, `--message`) pokazuje tekst bez
+    // zmian, a nie pokazuje pól wpisu ani identyfikatora wizyty.
+    for (const text of emitted) {
+      const shown = toSafeEntry(
+        {
+          timestamp: "2026-11-28T10:00:00.000Z",
+          severity: "WARNING",
+          jsonPayload: { message: text, appointmentId: APPOINTMENT, step: "x", hasDeposit: true, depositPaid: true },
+        },
+        { message: true }
+      );
+      expect(shown?.message).toEqual(text);
+      expect(loggedText([[shown]])).not.toContain(APPOINTMENT);
+      expect(text).not.toContain(APPOINTMENT);
+    }
   });
 
   it("kontrola: wszystkie kroki udane → 200, bez śladu i bez logu błędu", async () => {
