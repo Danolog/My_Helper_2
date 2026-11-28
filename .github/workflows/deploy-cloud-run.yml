@@ -16,8 +16,8 @@
 # decyzją właściciela, nie tym workflow. Wymaganych recenzentów środowiska ustawia
 # właściciel repo w ustawieniach repo (krok D). Nazwa środowiska jest TYLKO w jednej
 # linii `environment:` niżej (+ stała w G-C6) — celowo inna niż „Production"
-# Vercela (nazwy środowisk GitHuba nie rozróżniają wielkości liter, a
-# e2e-production.yml reaguje na deployment_status środowiska Production).
+# Vercela (nazwy środowisk GitHuba nie rozróżniają wielkości liter; wspólna
+# nazwa łączyłaby reguły ochrony i historię wdrożeń obu hostingów).
 name: Deploy to Cloud Run
 
 on:
