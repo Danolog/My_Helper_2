@@ -657,7 +657,7 @@ describe("PUT — zapis bez wiersza nie daje 200 z data: null", () => {
         const order = eqMock.invocationCallOrder[i]!;
         return order > after && order < before;
       })
-      .map(([column, value]) => [(column as { name: string }).name, value]);
+      .map(([column, value]) => [(column as unknown as { name: string }).name, value]);
   };
 
   it("pracownik: zapis terminu — warunek UPDATE zawiera własnego pracownika, termin w zapisie", async () => {
